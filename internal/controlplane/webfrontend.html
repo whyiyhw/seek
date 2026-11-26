@@ -136,14 +136,14 @@
      flat). args/results are NOT on the /events wire (§2.5 —
      tool_end.result can be huge), so live rows stay folded
      one-liners. The expandable 参数/结果摘要 lives in the sessions
-     browser: appendMsgTree pairs each assistant tool_calls[] row with
+     browser: histTurn (W6-3) pairs each assistant tool_calls[] row with
      its tool-role result by tool_call_id (ids match — both are
      deepseek.ToolCall.ID), renders summaries capped at 4000 chars in
      a scrollable pre, and 复制全文 copies the full string held in a
      JS closure (clipboard API on secure contexts, execCommand
      fallback for tailnet plain-http, which is NOT a secure context).
      Tool-role messages keep their standalone bubbles (the W4.4
-     one-.smsg-per-message render contract stays untouched — zero
+     per-message render blocks stay legible — zero
      regression); the tree registers their content by tool_call_id so
      the expand panel and the row's size tag read it.
      Per-message degradation: tree render throws → legacy
@@ -244,6 +244,8 @@
     --seek-link:  #679efe;   /* 链接=品牌蓝（与 --seek-brand 同值） */
     --seek-rec:   #8f4a4a;   /* 录音中按钮底 */
     --seek-rec-fg:#f0d7b8;
+    --seek-user-bubble:#1f2a44;  /* 用户气泡（W6-3 §2 暗列：品牌蓝低饱和，
+                                    对主底 #151517 ≥4.5:1）*/
     /* 成本数字专用色（c_jf3grt）：$ 与命中率/健康度是两套语义，早先
        共用 --seek-ok 绿——同屏一张卡里「花了多少钱」和「缓存命中多好」
        同色，读起来像同一种好坏。选信息蓝：与 ok/warn/err 三色语义不撞，
@@ -287,6 +289,7 @@
     --seek-link:  #2f5fc4;   /* 链接蓝压深一档（品牌 #4176e6 在白底 4.2:1） */
     --seek-rec:   #b3261e;
     --seek-rec-fg:#ffffff;
+    --seek-user-bubble:#edf3fe;  /* 用户气泡（§2 亮列实测） */
     /* 同暗色：成本走信息蓝，压 soft 5.8:1（行内码底同档）——与 ok 绿分流 */
     --seek-usd:   #1f5ba8;
     --seek-code-bg:#f9fafb;
@@ -351,19 +354,33 @@
   #ctx.crit { color: var(--seek-err); }
   #ctx.crit .bar i { background: var(--seek-err); }
   #list { flex: 1; overflow-y: auto; padding: 14px; }
-  .msg { max-width: 86%; margin: 4px 0; padding: 8px 12px; border-radius: 22px;
-         white-space: pre-wrap; word-break: break-word; }
+  /* 对话流四形态（W6-3，notes §0④/§1）：转录内容列=宽 100% 上限 768、
+     居中；用户=右侧气泡（token 底，附件缩略图在气泡上方）、助手=无框
+     markdown、工具=单行 .tcall、系统=灰行 .msg.hint。实时与历史同一套
+     类名（两套渲染器在本卡收敛）。 */
+  #list, #sess-msgs { display: flex; flex-direction: column; align-items: center;
+                      padding: 16px 32px; }
+  #list > *, #sess-msgs > * { width: 100%; max-width: 768px; }
+  .msg { position: relative; margin: 2px 0; max-width: 100%; }
+  .msg.user { align-self: flex-end; display: flex; flex-direction: column;
+              align-items: flex-end; max-width: 80%; }
+  .msg.user .bub { background: var(--seek-user-bubble); border-radius: 22px;
+                   padding: 10px 16px; white-space: pre-wrap; word-break: break-word; }
+  .msg.user .thumbs { justify-content: flex-end; margin: 0 0 4px; }
+  .msg.seek { padding: 2px 0; }
+  .msg.hint { color: var(--seek-fg-dim); font-size: 13px; line-height: 20px;
+              padding: 2px 0; }
   /* pre 的横滚/配色四个正文容器同款。c_k3pnlw（markdown 卡）把选择器从 .msg 扩到
-     .sbody——会话正文的 markdown 产物挂在 .smsg > .sbody 下，.sbody 这条即覆盖；
-     c_lqtt2m 在更早基点上补的 .smsg 命中面与之重复，且特异性 (0,1,1) 会盖掉调用树
-     .tpre（(0,1,0)，元素同在 .smsg 内）的 pre-wrap/max-height，故合并取窄的那条。 */
+     .txt——会话正文的 markdown 产物挂在 .msg.seek > .txt 下（W6-3 起实时/
+     历史同一套类名）；.tpre 的 pre-wrap/max-height 在自己的规则里，不与此处
+     相互覆盖。 */
   /* 代码/等宽场景（W6-1）：只 pre/code/kbd 与显式 .mono（路径/hash/token
      数字列）走 --seek-mono，UI 文本一律无衬线。代码 12/19（§2 档位）。 */
-  .msg pre, .sbody pre, #ag-last pre, #mem-content pre, .apcard pre {
+  .msg pre, #ag-last pre, #mem-content pre, .apcard pre {
              background: var(--seek-code-bg); border: 1px solid var(--seek-line); border-radius: 8px;
              padding: 8px 10px; margin: 6px 0; overflow-x: auto;
              white-space: pre; font-family: var(--seek-mono); font-size: 12px; line-height: 19px; }
-  .msg code, .sbody code, #ag-last code, #mem-content code, kbd {
+  .msg code, #ag-last code, #mem-content code, kbd {
              background: var(--seek-code-inline); border-radius: 8px; padding: 0 4px;
              font-family: var(--seek-mono); font-size: 12px; }
   .mono { font-family: var(--seek-mono); font-variant-numeric: tabular-nums; }
@@ -374,10 +391,10 @@
      列表收边距、outside 钉死悬挂缩进（UA 默认即如此——显式写出防
      漂移）；链接配色与主题同谱。四个正文容器（聊天气泡/会话正文/
      子代理末读/记忆正文）共用一套。 */
-  .msg p, .sbody p, #ag-last p, #mem-content p { margin: 6px 0; }
-  .msg p:first-child, .sbody p:first-child, #ag-last p:first-child, #mem-content p:first-child,
-  .msg p:last-child, .sbody p:last-child, #ag-last p:last-child, #mem-content p:last-child { margin: 0; }
-  .msg blockquote, .sbody blockquote, #ag-last blockquote, #mem-content blockquote {
+  .msg p, #ag-last p, #mem-content p { margin: 6px 0; }
+  .msg p:first-child, #ag-last p:first-child, #mem-content p:first-child,
+  .msg p:last-child, #ag-last p:last-child, #mem-content p:last-child { margin: 0; }
+  .msg blockquote, #ag-last blockquote, #mem-content blockquote {
     margin: 6px 0; padding: 2px 0 2px 12px;
     border-left: 3px solid var(--seek-line-focus); color: var(--seek-fg-soft); }
   .md-tbl { max-width: 100%; overflow-x: auto; margin: 6px 0; }
@@ -387,48 +404,57 @@
   .md-tbl th { border-bottom-color: var(--seek-line-focus); color: var(--seek-fg-soft); font-weight: 600; }
   /* 标题阶梯（W6-1，§2）：h1 21/30、h2 19/28、h3 18/26、h4+ 14/24，
      全部 700——em 相对值在 14px 基准上落不到整数档，故写死 px。 */
-  .msg h1, .sbody h1, #ag-last h1, #mem-content h1 {
+  .msg h1, #ag-last h1, #mem-content h1 {
     font-size: 21px; line-height: 30px; font-weight: 700; margin: 10px 0 4px; }
-  .msg h2, .sbody h2, #ag-last h2, #mem-content h2 {
+  .msg h2, #ag-last h2, #mem-content h2 {
     font-size: 19px; line-height: 28px; font-weight: 700; margin: 10px 0 4px; }
-  .msg h3, .sbody h3, #ag-last h3, #mem-content h3 {
+  .msg h3, #ag-last h3, #mem-content h3 {
     font-size: 18px; line-height: 26px; font-weight: 700; margin: 8px 0 4px; }
-  .msg h4, .sbody h4, #ag-last h4, #mem-content h4,
-  .msg h5, .sbody h5, #ag-last h5, #mem-content h5,
-  .msg h6, .sbody h6, #ag-last h6, #mem-content h6 {
+  .msg h4, #ag-last h4, #mem-content h4,
+  .msg h5, #ag-last h5, #mem-content h5,
+  .msg h6, #ag-last h6, #mem-content h6 {
     font-size: 14px; line-height: 24px; font-weight: 700; margin: 8px 0 4px; }
-  .msg ul, .sbody ul, #ag-last ul, #mem-content ul,
-  .msg ol, .sbody ol, #ag-last ol, #mem-content ol { margin: 4px 0; padding-left: 1.6em;
+  .msg ul, #ag-last ul, #mem-content ul,
+  .msg ol, #ag-last ol, #mem-content ol { margin: 4px 0; padding-left: 1.6em;
     list-style-position: outside; }
-  .msg a, .sbody a, #ag-last a, #mem-content a { color: var(--seek-link); }
+  .msg a, #ag-last a, #mem-content a { color: var(--seek-link); }
   .you { margin-left: auto; background: var(--seek-accent); }
   .seek { background: var(--seek-soft); }
   .hint { color: var(--seek-fg-dim); font-style: italic; }
 
   /* ---- 流式气泡 + 工具行折叠（W2.1）---- */
+  /* 轮末悬停 meta（W6-3 ⑥）：复制（+实时轮的收口时间）。绝对定位在轮
+     右上，不占流；悬停/聚焦才现身——阅读时不添噪。 */
+  .turn-meta { display: none; position: absolute; right: 0; top: -16px;
+               gap: 8px; color: var(--seek-fg-dim); font-size: 13px; }
+  .msg:hover > .turn-meta, .msg:focus-within > .turn-meta { display: flex; }
+  .turn-meta .tcopy { padding: 0 8px; font-size: 12px; }
   .msg.streaming > .txt:last-child::after {
     content: '▍'; color: var(--seek-fg-dim); animation: caret 1s steps(1) infinite;
   }
   @keyframes caret { 50% { opacity: 0; } }
-  .trow { display: flex; align-items: center; gap: 4px; min-width: 0;
-          color: var(--seek-fg-soft); font-size: 13px; line-height: 20px; padding: 1px 0; }
-  .trow .tt { min-width: 0; word-break: break-word; }
-  .trow.bad { color: var(--seek-warn); }
-  .trow.bad .ic { color: var(--seek-err); }
-  /* ---- 会话浏览器调用树（c_ux7lvk，dsh 对齐）----
-     行=名称+参数摘要+结果规模；点行展开 .tdetail 看参数/结果摘要（超长
-     截断进限高滚动 pre，「复制全文」从 JS 闭包取整串——DOM 只装摘要）。 */
-  .ttree { display: flex; flex-direction: column; gap: 4px; margin: 6px 0 2px; }
-  .tnode { display: flex; align-items: baseline; gap: 8px; width: 100%;
-           text-align: left; background: var(--seek-panel); border: 1px solid var(--seek-line);
-           border-radius: 8px; padding: 4px 10px; font: inherit;
-           font-size: 13px; color: var(--seek-fg-soft); cursor: pointer; }
-  .tnode:hover { border-color: var(--seek-line-focus); }
-  .tnode .nm { flex: none; display: inline-flex; align-items: center; gap: 3px;
-               color: var(--seek-warn); }
-  .tnode .sm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
-               white-space: nowrap; }
-  .tnode .rs { flex: none; color: var(--seek-fg-dim); white-space: nowrap; }
+  /* ---- 工具调用单行（W6-3 ④，c_ux7lvk 调用树收敛为 dsh 形）----
+     实时与历史同一套 .tcall：16px 状态图标 + 名（13/500 次级）+ 摘要
+     （13 三级，单行省略）+ 结果规模（已知时）；失败=6px 红点 + 红字。
+     历史行是 button（可点开 .tdetail 看参数/结果，超长截断进限高滚动
+     pre，「复制全文」从 JS 闭包取整串——DOM 只装摘要）；实时行是 div
+     （流上没有参数/结果可展开，只有状态与耗时）。 */
+  .tcall { display: flex; align-items: center; gap: 6px; min-width: 0; width: 100%;
+           color: var(--seek-fg-soft); font: inherit; font-size: 13px;
+           line-height: 20px; padding: 2px 0; text-align: left; cursor: default; }
+  button.tcall { cursor: pointer; border: 0; background: none;
+                 border-radius: 8px; padding: 2px 8px; }
+  button.tcall:hover { background: var(--seek-hover); }
+  .tcall .nm { flex: none; font-weight: 500; min-width: 0; word-break: break-word; }
+  .tcall .sm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+               white-space: nowrap; color: var(--seek-fg-dim); }
+  .tcall .rs, .tcall .dur { flex: none; color: var(--seek-fg-dim);
+                            white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .tcall.bad .nm, .tcall.bad .sm { color: var(--seek-err); }
+  .tcall .dot { width: 6px; height: 6px; border-radius: 999px; flex: none;
+                background: var(--seek-err); }
+  .tcall .ic { color: var(--seek-fg-soft); }
+  .tcall.bad .ic { color: var(--seek-err); }
   .tdetail { background: var(--seek-inset); border: 1px solid var(--seek-line); border-radius: 8px;
              padding: 8px 10px; }
   .tlabel { display: flex; align-items: baseline; gap: 8px; font-size: 12px;
@@ -440,7 +466,7 @@
           font-family: var(--seek-mono); font-size: 12px; line-height: 19px;
           color: var(--seek-fg-soft); }
   /* 中断收口标注（c_5m3fm6）：保留的半截气泡尾部一行灰字，流状态可见地终止 */
-  .msg .cut { color: var(--seek-fg-soft); font-size: 12px; padding-top: 2px; }
+  .msg .cut { color: var(--seek-fg-dim); font-size: 13px; padding-top: 2px; }
   /* 输入区底对齐（c_7lsngm）：按钮跟到多行输入的底边；position:relative
      是候选弹层的定位父级——贴表单上沿、宽度跟表单（窄屏自然满宽）。 */
   form { position: relative; display: flex; gap: 8px; align-items: flex-end;
@@ -526,7 +552,7 @@
         fill: none; stroke: currentColor; stroke-width: 2;
         stroke-linecap: round; stroke-linejoin: round; }
   /* 流式工具行里的 12px 小图标（loader/check/x 前缀）随行字号缩一档 */
-  .trow .ic, .stool .ic, .tnode .ic { width: 12px; height: 12px; }
+  .tcall .ic { width: 16px; height: 16px; }
   /* 输入区图标钮（附件/麦克风，c_25d2ey）：36×36 与输入框 min-height
      对齐，同 soft 底/6px 圆角/16px 图标——不再一个深底一个浅底的
      「圆角方块」。按住说话（voice V2）：user-select 关掉防长按选中
@@ -788,17 +814,6 @@
   #sess-meta { flex: 1; min-width: 0; color: var(--seek-fg-dim); white-space: nowrap;
                overflow: hidden; text-overflow: ellipsis; }
   #sess-msgs { flex: 1; overflow-y: auto; padding: 14px; }
-  .smsg { margin: 6px 0; padding: 8px 12px; border-radius: 22px;
-          background: var(--seek-soft); white-space: pre-wrap; word-break: break-word; }
-  .smsg.user { background: var(--seek-accent); }
-  .smsg.user .swho { color: var(--seek-fg); }   /* 同 .cur：accent 底不压 dim */
-  .smsg.tool { background: var(--seek-panel); color: var(--seek-fg-soft); }
-  .smsg.tool pre { background: var(--seek-inset); }
-  .swho { font-size: 12px; color: var(--seek-fg-dim); margin-bottom: 4px; }
-  .stool { display: flex; align-items: center; gap: 4px; min-width: 0;
-           word-break: break-word; color: var(--seek-warn); }
-  /* 工具结果限高：单条大输出不把整页 paint 撑爆（分页外的第二道界） */
-  .smsg.tool .sbody { max-height: 260px; overflow-y: auto; }
   #sess-foot { padding: 8px 14px; text-align: center; border-top: 1px solid var(--seek-line);
                color: var(--seek-fg-dim); }
   #sess-foot button { width: 100%; }
@@ -1027,7 +1042,7 @@
                           border-right: 0; border-bottom: 1px solid var(--seek-line); }
     /* 气泡放宽一档：单栏下代码块（pre 本就 overflow-x:auto，markdown
        卡同容器）多一截横向空间 */
-    .msg { max-width: 94%; }
+    .msg.user { max-width: 94%; }
     /* 设置面板：label 上 value 下堆叠，value 满宽按 ellipsis 折——路径
        /hash 不再硬裁或碎行（全文悬停 title 可见，见 setRow） */
     .set-row { flex-direction: column; gap: 1px; padding: 5px 0; }
@@ -1438,22 +1453,37 @@ function renderBody(el, text) {
   else el.textContent = text;
 }
 
+// 对话流四形态的实时半边（W6-3）：you=右侧气泡（附件缩略图在气泡上方）、
+// seek=无框、hint=灰行。类名与历史渲染同一套（histTurn）。
 function addMsg(who, text, atts) {
   dropChatEmpty();                   // 第一条消息落地：空态让位（c_jf3grt）
   const el = document.createElement('div');
-  el.className = 'msg ' + who;
-  if (atts && atts.length) {
-    el.appendChild(thumbsFor(atts));   // 附件缩略图（W5 c_56yrcj）：图片在上，正文在下
-    if (text) {
-      const b = document.createElement('div');
-      renderBody(b, text);             // 纯 DOM 构建：无 HTML 注入面
-      el.appendChild(b);
-    }
+  el.className = 'msg ' + (who === 'you' ? 'user' : who);
+  if (who === 'you') {
+    if (atts && atts.length) el.appendChild(thumbsFor(atts));   // 缩略图在气泡上方（W5 c_56yrcj 的图序不变）
+    const bub = document.createElement('div');
+    bub.className = 'bub';
+    if (text) renderBody(bub, text);  // 纯 DOM 构建：无 HTML 注入面
+    el.appendChild(bub);
   } else {
-    renderBody(el, text);              // 纯 DOM 构建：无 HTML 注入面
+    renderBody(el, text);             // 纯 DOM 构建：无 HTML 注入面
   }
   list.appendChild(el);
   list.scrollTop = list.scrollHeight;  // 流式追加：贴底滚动
+}
+
+// 轮末悬停 meta（W6-3 ⑥）：复制全文 + 收口时间（实时轮知道时间；历史
+// wire 里没有逐条时间戳，只有复制）。绝对定位在轮右上，悬停才现身。
+function turnMeta(text, when) {
+  const m = document.createElement('span');
+  m.className = 'turn-meta';
+  m.appendChild(copyBtn(text));
+  if (when) {
+    const t = document.createElement('span');
+    t.textContent = when;
+    m.appendChild(t);
+  }
+  return m;
 }
 
 // ---- 附件（W5 c_56yrcj）----
@@ -1873,12 +1903,14 @@ function trowPaint(n, now) {
   let dur = '';
   if (n.t0) {
     const ms = (end ? n.t1 : (now || performance.now())) - n.t0;
-    if (ms >= 0) dur = ' · ' + fmtDur(ms);
+    if (ms >= 0) dur = '· ' + fmtDur(ms);
   }
   // 状态前缀走 sprite 图标（c_25d2ey）：在途 loader / 成功 check / 失败 x，
-  // 结构在行创建时装好（iconEl + .tt span），这里只换 href 与文本。
+  // 结构在行创建时装好（iconEl + .nm + .dur），这里只换 href 与文本。
+  // 失败态 = 红 x 图标 + 红字（.tcall.bad），与 dsh 的红点红字同语义。
   swapIcon(n.el, end ? (n.ok ? 'check' : 'x') : 'loader');
-  n.el.querySelector('.tt').textContent = n.name + (end ? '' : ' …') + dur;
+  n.el.querySelector('.nm').textContent = n.name + (end ? '' : ' …');
+  n.el.querySelector('.dur').textContent = dur;
   n.el.classList.toggle('bad', end && !n.ok);
 }
 
@@ -1890,11 +1922,13 @@ function toolTreeRow(d) {
     let depth = 0;   // 在途数=区间包含深度（页头注释口径）
     for (const t of r.tools.values()) if (t.phase !== 'end') depth++;
     const el = document.createElement('div');
-    el.className = 'trow';
+    el.className = 'tcall';
     if (depth > 0) el.style.marginLeft = depth * 16 + 'px';   // CSSOM：数值宽度
-    const tt = document.createElement('span');
-    tt.className = 'tt';
-    el.replaceChildren(iconEl('loader'), tt);
+    const nm = document.createElement('span');
+    nm.className = 'nm';
+    const dur = document.createElement('span');
+    dur.className = 'dur';
+    el.replaceChildren(iconEl('loader'), nm, dur);
     appendPinned(r.el, el);
     n = { el, name: d.name, phase: '', ok: true, t0: 0, t1: 0 };
     r.tools.set(d.id, n);
@@ -1936,17 +1970,19 @@ function toolPlainRow(d) {
   let n = r.tools.get(d.id);
   if (!n) {
     const el = document.createElement('div');
-    el.className = 'trow';
-    const tt = document.createElement('span');
-    tt.className = 'tt';
-    el.replaceChildren(iconEl('loader'), tt);
+    el.className = 'tcall';
+    const nm = document.createElement('span');
+    nm.className = 'nm';
+    const dur = document.createElement('span');
+    dur.className = 'dur';
+    el.replaceChildren(iconEl('loader'), nm, dur);
     appendPinned(r.el, el);
     n = { el, name: d.name, phase: '', ok: true, t0: 0, t1: 0 };
     r.tools.set(d.id, n);
   }
   const end = d.phase === 'end';
   swapIcon(n.el, end ? (d.ok === true ? 'check' : 'x') : 'loader');
-  n.el.querySelector('.tt').textContent = d.name + (end ? '' : ' …');
+  n.el.querySelector('.nm').textContent = d.name + (end ? '' : ' …');
   n.el.classList.toggle('bad', end && d.ok !== true);   // omitempty：失败帧无 ok 键
 }
 
@@ -2098,6 +2134,7 @@ function listen() {
         r.el.appendChild(cut);
       } else if (m.text) {
         renderBody(r.el, m.text);
+        r.el.appendChild(turnMeta(m.text, new Date().toTimeString().slice(0, 5)));
       } else {
         r.el.remove();
       }
@@ -3368,6 +3405,7 @@ sideSearch.addEventListener('input', () => { shownSessions = SESS_PAGE; renderSe
 // ——「同时只亮一个面」的口径从四面板闸沿用到这里。
 async function openSession(sid) {
   sel = { sid, next: '', done: false, busy: false };
+  histMi = 0;
   treeRows.clear();      // 调用树登记表随会话同生命周期（c_ux7lvk）
   treeResults.clear();
   closePanes();
@@ -3445,16 +3483,20 @@ async function loadMsgs() {
     const res = await rpc('session/messages', params);
     if (sel !== me) return;  // 翻页期间切了会话：旧游标作废
     for (const raw of res.messages) appendMsg(raw);
+    // W6-3 起 role=tool 并入调用行、不再单独成块——children 数 ≠ 消息数，
+    // 翻页/末尾的计数口径改为「已载入的消息条数」（无头验收也读它）。
+    me.loaded = (me.loaded || 0) + res.messages.length;
+    sessMsgs.dataset.loaded = String(me.loaded);
     if (res.next_cursor) {
       me.next = res.next_cursor;
       const more = document.createElement('button');
       more.type = 'button';
-      more.textContent = '加载更多（已显示 ' + sessMsgs.children.length + ' 条）';
+      more.textContent = '加载更多（已显示 ' + me.loaded + ' 条）';
       more.addEventListener('click', loadMsgs);
       sessFoot.replaceChildren(more);
     } else {
       me.done = true;
-      paneHint(sessFoot, sessMsgs.children.length ? '— 已到末尾 —' : '（无消息）');
+      paneHint(sessFoot, me.loaded ? '— 已到末尾 —' : '（无消息）');
     }
   } catch (e) {
     paneHint(sessFoot, 'session/messages 失败：' + e.message);
@@ -3462,103 +3504,78 @@ async function loadMsgs() {
   me.busy = false;
 }
 
-// 一条消息行（c_ux7lvk 升级为调用树渲染）。逐条降级：树渲染抛错 → 老形态
-// （appendMsgPlain，升级前的工具行摘要+独立结果泡）→ 再抛 → 占位行——
-// 单条消息的渲染异常绝不断整页（不白屏）。耗时不在历史线里（transcript
-// 无逐消息时间戳）——名称+耗时在流式面（toolTreeRow），历史行的行尾给
-// 结果规模。messages 元素是服务端的 json.RawMessage——经 r.json() 已是
-// 对象；string 分支只是防御（jse 一致性由 W4.2 的服务端测试钉）。
+// ---- 历史渲染（W6-3 与实时收敛为同一套四形态）----
+// 逐条降级：正常渲染抛错 → 灰行字面落地（不再有第二套「老形态」——两套
+// 渲染器就是本卡要删的东西）→ 不白屏。role=tool 的消息并入对应调用行的
+// 结果区（treeResults + 行尾规模），不再单独成块；孤儿（无对应行）退灰行
+// 提示。messages 元素是服务端的 json.RawMessage——经 r.json() 已是对象；
+// string 分支只是防御（jse 一致性由 W4.2 的服务端测试钉）。
+let histMi = 0;   // 已处理的历史消息序号（1 起；openSession 重开清零）
 function appendMsg(raw) {
+  let m;
+  try { m = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch (e) { return; }
+  if (!m || typeof m !== 'object') return;
+  histMi++;
   try {
-    appendMsgTree(raw);
-    return;
-  } catch (e) { /* 树渲染异常：整条退老形态 */ }
-  try {
-    appendMsgPlain(raw);
+    histTurn(m, histMi);
   } catch (e) {
     const d = document.createElement('div');
-    d.className = 'smsg other';
+    d.className = 'msg hint';
+    // 渲染机制全灭时只落固定占位（不透传 content——降级路径不重复审核
+    // 模型产物的渲染纪律，c_ux7lvk 兜底契约原样）。
     d.textContent = '（消息渲染失败）';
     sessMsgs.appendChild(d);
   }
 }
 
-// 老形态（升级前 verbatim）：工具摘要行 + tool 结果独立成泡（限高由 CSS）。
-function appendMsgPlain(raw) {
-  let m;
-  try { m = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch (e) { return; }
-  if (!m || typeof m !== 'object') return;
-  const el = document.createElement('div');
-  el.className = 'smsg ' + (m.role || 'other');
-  const who = document.createElement('div');
-  who.className = 'swho';
-  who.textContent = m.role === 'tool' ? 'tool · ' + (m.tool_call_id || '') : (m.role || '?');
-  el.appendChild(who);
-  if (Array.isArray(m.tool_calls)) {
-    for (const tc of m.tool_calls) {
-      const t = document.createElement('div');
-      t.className = 'stool';
-      const fn = tc.function || {};
-      let args = fn.arguments || '';
-      if (args.length > 120) args = args.slice(0, 120) + '…';
-      const sname = document.createElement('span');
-      sname.textContent = (fn.name || '?') + '(' + args + ')';
-      t.replaceChildren(iconEl('settings'), sname);
-      el.appendChild(t);
-    }
-  }
-  if (m.content) {
-    const body = document.createElement('div');
-    body.className = 'sbody';
-    renderBody(body, m.content);
-    el.appendChild(body);
-  }
-  sessMsgs.appendChild(el);
+// 角色 → 四形态类名：user=右侧气泡、assistant=无框、system/未知=灰行。
+function histRole(m) {
+  if (m.role === 'user') return 'user';
+  if (m.role === 'assistant') return 'seek';
+  return 'hint';
 }
 
-// 树形态：助手消息的 tool_calls → 调用树（每次调用一行，点行展开参数/
-// 结果摘要）。tool 角色消息按 tool_call_id 把结果登记进对应行（展开面板
-// 与行尾规模读它）——消息本身仍按 W4.4 逐条渲染契约独立成泡（nmsgs=页内
-// 消息数的断言口径不动，零回归）。落 DOM 是收尾动作——此前任何异常都
-// 未沾页面，appendMsgPlain 可整条重来（不双渲染）。
-function appendMsgTree(raw) {
-  let m;
-  try { m = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch (e) { return; }
-  if (!m || typeof m !== 'object') return;
-
+function histTurn(m, mi) {
   if (m.role === 'tool') {
     const id = m.tool_call_id || '';
     if (id && treeRows.has(id)) {
       treeResults.set(id, typeof m.content === 'string' ? m.content : '');
       try { refreshTreeRow(id); } catch (e) { /* 行态刷新失败不升级：结果已入表 */ }
+    } else {
+      const d = document.createElement('div');
+      d.className = 'msg hint';
+      d.textContent = 'tool 结果（无对应调用行' + (id ? ' · ' + id : '') + '）';
+      sessMsgs.appendChild(d);
     }
-    // 孤儿（无对应行）只走通用渲染；有行的也继续成泡（下方通用路径）
+    return;
   }
-
   const el = document.createElement('div');
-  el.className = 'smsg ' + (m.role || 'other');
-  const who = document.createElement('div');
-  who.className = 'swho';
-  who.textContent = m.role === 'tool' ? 'tool · ' + (m.tool_call_id || '') : (m.role || '?');
-  el.appendChild(who);
+  el.className = 'msg ' + histRole(m);
+  if (mi) el.dataset.mi = String(mi);   // 消息序号（W6-3 起块数≠消息数，断言按它取）
+  if (m.role === 'user') {           // 历史用户消息：同一颗气泡（无附件线）
+    const bub = document.createElement('div');
+    bub.className = 'bub';
+    renderBody(bub, m.content || '');
+    el.appendChild(bub);
+  }
   const made = [];   // 本条消息建出的调用行（落 DOM 后才登记——中途异常不残留）
   if (Array.isArray(m.tool_calls) && m.tool_calls.length) {
-    const tree = document.createElement('div');
-    tree.className = 'ttree';
     for (const tc of m.tool_calls) {
       const node = callNode(tc);
       made.push(node);
-      tree.appendChild(node.frag);
+      el.appendChild(node.frag);
     }
-    el.appendChild(tree);
   }
-  if (m.content) {
+  if (m.content && m.role !== 'user') {
     const body = document.createElement('div');
-    body.className = 'sbody';
+    body.className = 'txt';
     renderBody(body, m.content);
     el.appendChild(body);
   }
-  sessMsgs.appendChild(el);   // 收尾动作：此前任何异常都未沾页面，老路径可整条重来
+  if (m.role === 'assistant' && typeof m.content === 'string' && m.content) {
+    el.appendChild(turnMeta(m.content));   // 历史 wire 无逐条时间：只有复制
+  }
+  sessMsgs.appendChild(el);   // 收尾动作：此前任何异常都未沾页面，灰行兜底可整条重来
   for (const node of made) {
     if (!node.id) continue;
     treeRows.set(node.id, node.entry);
@@ -3568,7 +3585,7 @@ function appendMsgTree(raw) {
 
 // 一个调用节点 = 行按钮 + 懒建展开面板（首点才装内容——长结果不进 DOM
 // 直到用户要看）。textContent-only 纪律与全页一致（模型产物零 HTML 面）。
-// 只构建、不登记——登记由 appendMsgTree 在落 DOM 后统一做。
+// 只构建、不登记——登记由 histTurn 在落 DOM 后统一做。
 function callNode(tc) {
   const fn = (tc && typeof tc === 'object' && tc.function) || {};
   const id = (tc && tc.id) || '';
@@ -3577,11 +3594,10 @@ function callNode(tc) {
 
   const row = document.createElement('button');
   row.type = 'button';
-  row.className = 'tnode';
+  row.className = 'tcall';
   const nm = document.createElement('span');
   nm.className = 'nm';
-  nm.replaceChildren(iconEl('settings'), Object.assign(document.createElement('span'),
-    { textContent: name }));
+  nm.textContent = name;
   const sm = document.createElement('span');
   sm.className = 'sm';
   sm.textContent = argSummary(args);
@@ -3590,9 +3606,7 @@ function callNode(tc) {
   if (args) row.title = name + ' ' + clipOneLine(args, 200);
   const rs = document.createElement('span');
   rs.className = 'rs';
-  row.appendChild(nm);
-  row.appendChild(sm);
-  row.appendChild(rs);
+  row.replaceChildren(iconEl('check'), nm, sm, rs);
 
   const detail = document.createElement('div');
   detail.className = 'tdetail';

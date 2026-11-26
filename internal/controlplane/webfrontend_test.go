@@ -982,7 +982,7 @@ func TestWeb_RunForbiddenAddr(t *testing.T) {
 // markdown-card gap this card closed (see the pitfalls entry): a fenced
 // block in a session transcript must ride the same horizontal-scroll
 // rule as .msg pre — that container is .sbody (the card first wrote
-// .smsg, which the merge narrowed: .sbody covers the same nodes with
+// .msg.seek > .txt (W6-3), which the merge narrowed: covers the same nodes with
 // lower specificity, leaving the tool-tree .tpre rules intact).
 // All additive strings — a rename strands the
 // behaviour silently, so they are pinned the way W5's other cards are.
@@ -994,7 +994,7 @@ func TestWeb_PageMobileResponsive(t *testing.T) {
 		"matchMedia('(max-width: 480px)')", // JS breakpoint == CSS breakpoint
 		"drawerClose()",                    // row pick closes the drawer
 		"flex-wrap: wrap",                  // command bar wraps, nothing unreachable
-		".msg pre, .sbody pre",             // code-block h-scroll covers ALL body containers
+		".msg pre, #ag-last pre",           // code-block h-scroll covers ALL body containers (W6-3: .sbody retired)
 		"--seek-scrim",                     // scrim colour is a themed token
 		"body.side-collapsed #side-head { flex-direction: column", // 44px rail stacks its icons
 	} {
@@ -1168,6 +1168,39 @@ func TestWeb_PageSkeletonW62(t *testing.T) {
 	} {
 		if !strings.Contains(page, need) {
 			t.Errorf("embedded page lost the W6-2 skeleton piece %q (c_onxxge)", need)
+		}
+	}
+}
+
+// TestWeb_PageChatFlowW63 pins the W6-3 conversation-flow unification
+// (c_ovly6d): one 768px reading column, the four message forms (user
+// right-aligned bubble on a themed token, frameless assistant, one-line
+// tool calls, gray system lines), and — the load-bearing retirement —
+// the page no longer emits the "tool · " role label anywhere, and the
+// two renderers (live addMsg/runBubble + history histTurn) share one
+// class vocabulary.
+func TestWeb_PageChatFlowW63(t *testing.T) {
+	page := string(webPage)
+	if strings.Contains(page, "tool · ") {
+		t.Error("page still emits the 'tool · ' role label — W6-3 retired it (results merge into the call row)")
+	}
+	for _, need := range []string{
+		"max-width: 768px",             // the reading column
+		"var(--seek-user-bubble)",      // user bubble rides a themed token, not a bare hex
+		"--seek-user-bubble:#1f2a44",   // dark value pinned
+		"--seek-user-bubble:#edf3fe",   // light value pinned
+		".tcall",                       // the one tool-call row shape (live + history)
+		"function histTurn",            // history renderer rides the same forms
+		"turn-meta",                    // per-turn hover copy affordance
+		"dataset.mi",                   // message-index stamp (blocks ≠ messages now)
+	} {
+		if !strings.Contains(page, need) {
+			t.Errorf("embedded page lost the W6-3 chat-flow piece %q (c_ovly6d)", need)
+		}
+	}
+	for _, gone := range []string{".smsg", ".swho", ".stool", ".ttree", ".tnode", "appendMsgPlain", "appendMsgTree"} {
+		if strings.Contains(page, gone) {
+			t.Errorf("page still carries the retired W4/W5 renderer piece %q (W6-3 must delete, not stack)", gone)
 		}
 	}
 }

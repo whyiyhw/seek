@@ -199,8 +199,8 @@ try {
   const { s } = await until('中断终态', s => s.nstream === 0
     && s.msgs.some(m => m.txt.includes('—— 已中断 ——'))
     && s.msgs.some(m => m.txt.includes('run 已中断')), 10000);
-  ck('②点击停止=透传 /cancel（you 气泡为指令文本）',
-    s.msgs.some(m => m.cls.includes('you') && m.txt.trim() === '/cancel'),
+  ck('②点击停止=透传 /cancel（user 气泡为指令文本，W6-3 类名）',
+    s.msgs.some(m => m.cls.includes('user') && m.txt.trim() === '/cancel'),
     JSON.stringify(s.msgs.map(m => m.txt)));
   ck('②草稿原样保留（停止不吃输入框）', s.draft === '草稿别动', `got ${JSON.stringify(s.draft)}`);
   const cut = s.msgs.find(m => m.txt.includes('—— 已中断 ——'));

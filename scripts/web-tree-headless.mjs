@@ -126,14 +126,14 @@ const clickSel = sel => evalJS(`(document.querySelector(${JSON.stringify(sel)})|
 const snapshot = () => evalJS(`(() => ({
   msgs: [...document.querySelectorAll('#list > .msg')].map(el => ({
     txt: el.textContent,
-    trows: [...el.querySelectorAll('.trow')].map(t => ({
+    trows: [...el.querySelectorAll('.tcall')].map(t => ({
       txt: t.textContent,
       bad: t.classList.contains('bad'),
       ml: parseFloat(getComputedStyle(t).marginLeft) || 0,
     })),
   })),
   nstream: document.querySelectorAll('.msg.streaming').length,
-  ntrow: document.querySelectorAll('.trow').length,
+  ntrow: document.querySelectorAll('.tcall').length,
 }))()`);
 
 // ---- 3. 场景驱动 + 断言 ----
@@ -220,12 +220,12 @@ try {
   await evalJS(`(document.querySelector(${JSON.stringify(
     `#sess-list .sess-row[data-sid="${treeSid}"]`)})||{click(){}}).click(),'ok'`);
   const treeSnap = () => evalJS(`(() => ({
-    tnodes: [...document.querySelectorAll('#sess-msgs .ttree > .tnode')].map(t => ({
+    tnodes: [...document.querySelectorAll('#sess-msgs .tcall')].map(t => ({
       nm: t.querySelector('.nm').textContent,
       sm: t.querySelector('.sm').textContent,
       rs: t.querySelector('.rs').textContent,
     })),
-    ntoolBubble: document.querySelectorAll('#sess-msgs .smsg.tool').length,
+    ntoolBubble: document.querySelectorAll('#sess-msgs .msg.tool').length,
     nscript: document.scripts.length,
     xssTree: typeof window.__xssTree,
   }))()`);
@@ -245,7 +245,7 @@ try {
     readRow && readRow.rs);
   ck('结果并入行：bash 行尾规模（登记进表）', !!bashRow && /字符/.test(bashRow.rs),
     bashRow && bashRow.rs);
-  ck('tool 消息全数成泡（W4.4 逐条渲染零回归，4 个）', tr.ntoolBubble === 4,
+  ck('tool 消息并入调用行（W6-3：不再单独成块）', tr.ntoolBubble === 0,
     `got ${tr.ntoolBubble}`);
   ck('XSS：args 字面渲染、未执行（摘要=payload=… 同样字面）',
     !!xssRow && xssRow.sm.startsWith('payload=') && xssRow.sm.includes('<script>')
@@ -255,9 +255,9 @@ try {
 
   // 展开 read 行：参数全文 + 结果摘要截断（END_MARK 不进 DOM）。
   const openDetail = async () => {
-    await evalJS(`[...document.querySelectorAll('#sess-msgs .ttree > .tnode')][0].click(),'ok'`);
+    await evalJS(`[...document.querySelectorAll('#sess-msgs .tcall')][0].click(),'ok'`);
     return evalJS(`(() => {
-      const d = [...document.querySelectorAll('#sess-msgs .ttree > .tnode')][0]
+      const d = [...document.querySelectorAll('#sess-msgs .tcall')][0]
         .nextElementSibling;
       return {
         hidden: d.hidden,
@@ -294,7 +294,7 @@ try {
       return oe(c, ...r);
     };
   })();'ok'`);
-  await evalJS(`[...document.querySelectorAll('#sess-msgs .ttree > .tnode')][0]
+  await evalJS(`[...document.querySelectorAll('#sess-msgs .tcall')][0]
     .nextElementSibling.querySelectorAll('.tcopy')[1].click(),'ok'`);
   await delay(200);
   const sink = await evalJS(`window.__copySink`);
@@ -303,8 +303,8 @@ try {
     `sink.len=${sink && sink.length}`);
 
   // 收起：再点行 → hidden。
-  await evalJS(`[...document.querySelectorAll('#sess-msgs .ttree > .tnode')][0].click(),'ok'`);
-  const hidden = await evalJS(`[...document.querySelectorAll('#sess-msgs .ttree > .tnode')][0]
+  await evalJS(`[...document.querySelectorAll('#sess-msgs .tcall')][0].click(),'ok'`);
+  const hidden = await evalJS(`[...document.querySelectorAll('#sess-msgs .tcall')][0]
     .nextElementSibling.hidden`);
   ck('收起：再点行面板隐藏', hidden === true, `got ${hidden}`);
 } catch (e) { ck('景 B 会话调用树', false, e.message); await dump(); }

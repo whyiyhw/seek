@@ -128,11 +128,11 @@ const snapshot = () => evalJS(`(() => ({
   msgs: [...document.querySelectorAll('#list > .msg')].map(el => ({
     cls: el.className,
     txt: el.textContent,
-    trows: [...el.querySelectorAll('.trow')].map(t => t.textContent),
+    trows: [...el.querySelectorAll('.tcall')].map(t => t.textContent),
     pres: el.querySelectorAll('pre').length,
   })),
   nstream: document.querySelectorAll('.msg.streaming').length,
-  ntrow: document.querySelectorAll('.trow').length,
+  ntrow: document.querySelectorAll('.tcall').length,
   nscript: document.scripts.length,
   nimg: document.querySelectorAll('img').length,
   xss1: typeof window.__xss, xss2: typeof window.__xss2,
