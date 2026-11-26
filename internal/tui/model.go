@@ -249,6 +249,13 @@ type Options struct {
 	// the inventory. nil = no skills available; /skills handles that.
 	Skills *skill.Set
 
+	// SkillsDisabled freezes the skill surface for the session
+	// (`seek --isolated`, judge-engine 缺口③). When true, /clear must
+	// not hot-reload skills: the whole point of the switch is that no
+	// skill file on this machine reaches the prompt or the registry,
+	// and a reload would quietly undo it mid-session.
+	SkillsDisabled bool
+
 	// AgentTypes is the typed-agent definition registry
 	// (feature-orchestration.md P2), loaded once at session start by
 	// cmd/seek. Read-only from the TUI: /agents types lists it, and

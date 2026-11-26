@@ -35,7 +35,26 @@ type Project struct {
 
 	entries map[string]Entry
 	order   []string // insertion order for deterministic iteration
+
+	// readOnly marks a handle produced by LoadReadOnly (or
+	// loadProjectReadOnly). Every mutating method refuses and every
+	// bookkeeping write (recall touch, injection touch, GC) becomes a
+	// no-op, so `seek --memory=ro` can inject L+M into the prompt
+	// without a single byte landing on disk (judge-engine PRD §2.2
+	// 缺口②, card c_4rp2py). Default false — LoadOrCreate keeps the
+	// historical read-write handle.
+	readOnly bool
 }
+
+// ErrReadOnly is returned by a mutating method on a Project opened by
+// LoadReadOnly. Callers that only want the fail-fast path can check
+// ReadOnly() first; the guard here is the backstop for a wiring slip.
+var ErrReadOnly = errors.New("memory: project opened read-only")
+
+// ReadOnly reports whether this handle was opened without write
+// permission. memory_recall uses it to skip the recall-count touch
+// instead of printing a spurious "failed to update" warning.
+func (p *Project) ReadOnly() bool { return p.readOnly }
 
 // LoadOrCreate returns the Project for cwd. Resolution order matches
 // PRD §4:
@@ -147,6 +166,25 @@ func LoadReadOnly(cwd string) (*Project, error) {
 	return loadProjectReadOnly(dir)
 }
 
+// OpenReadOnly is the session-lane read-only handle: it loads the
+// project exactly like LoadReadOnly (no directory creation, no
+// manifest bump, no pointer write) AND marks the handle so every
+// mutating method refuses. This is what `--memory=ro` opens — the
+// prompt gets L+M, the model gets memory_recall, and nothing on disk
+// changes (judge-engine PRD §2.2 缺口②, card c_4rp2py).
+//
+// Distinct from LoadReadOnly on purpose: the `seek memory` CLI uses
+// LoadReadOnly for its read verbs and then writes through the same
+// handle for `archive`, so that constructor must stay mutable.
+func OpenReadOnly(cwd string) (*Project, error) {
+	p, err := LoadReadOnly(cwd)
+	if err != nil || p == nil {
+		return p, err
+	}
+	p.readOnly = true
+	return p, nil
+}
+
 // resolveProjectID picks the project's ID following PRD §4 priority.
 func resolveProjectID(abs string) (string, error) {
 	pointer := filepath.Join(abs, ".seek", "project-id")
@@ -248,6 +286,9 @@ func (p *Project) writeEntries() error {
 func (p *Project) Save() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.readOnly {
+		return ErrReadOnly
+	}
 	if err := p.writeManifest(); err != nil {
 		return err
 	}
@@ -261,6 +302,9 @@ func (p *Project) Save() error {
 func (p *Project) Add(e Entry) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.readOnly {
+		return ErrReadOnly
+	}
 	if e.Name == "" {
 		return errors.New("memory: Entry.Name is required")
 	}
@@ -314,6 +358,9 @@ func (p *Project) Get(name string) (Entry, bool) {
 func (p *Project) Remove(name string) (bool, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.readOnly {
+		return false, ErrReadOnly
+	}
 	if _, ok := p.entries[name]; !ok {
 		return false, nil
 	}
@@ -333,6 +380,9 @@ func (p *Project) Remove(name string) (bool, error) {
 func (p *Project) Archive(name, reason string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.readOnly {
+		return ErrReadOnly
+	}
 
 	e, ok := p.entries[name]
 	if !ok {
@@ -360,6 +410,9 @@ func (p *Project) Archive(name, reason string) error {
 func (p *Project) Amend(name, appendContent string, now time.Time) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.readOnly {
+		return ErrReadOnly
+	}
 
 	e, ok := p.entries[name]
 	if !ok {
@@ -386,6 +439,12 @@ func (p *Project) Amend(name, appendContent string, now time.Time) error {
 func (p *Project) TouchRecall(name string, t time.Time) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	// Read-only handle: recall metadata is bookkeeping, and the
+	// read-only lane exists precisely so no byte of it lands. Silent
+	// no-op — the caller still gets the entry body.
+	if p.readOnly {
+		return nil
+	}
 	e, ok := p.entries[name]
 	if !ok {
 		return fmt.Errorf("%w: %s", ErrNotFound, name)
@@ -420,6 +479,9 @@ func (p *Project) TouchRecall(name string, t time.Time) error {
 func (p *Project) TouchInjections(names []string, t time.Time) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.readOnly {
+		return nil
+	}
 	touched := false
 	for _, name := range names {
 		e, ok := p.entries[name]

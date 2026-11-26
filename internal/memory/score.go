@@ -137,6 +137,15 @@ func (p *Project) RunGC(now time.Time) (GCReport, error) {
 	halfLife := HalfLifeFromEnv()
 	report := GCReport{HalfLife: halfLife}
 
+	// Read-only handles never flip stale flags or archive: GC is a
+	// write path (it persists flips to memory.jsonl and archives to
+	// archived.jsonl). A `--memory=ro` session must see the on-disk
+	// state exactly as it is.
+	if p.readOnly {
+		report.Skipped = len(p.entries)
+		return report, nil
+	}
+
 	var toArchive []Entry
 	dirty := false
 	for name, e := range p.entries {

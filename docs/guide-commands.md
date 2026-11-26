@@ -69,7 +69,9 @@ seek --effort off|low|high|max   # Reasoning effort for this session (default: m
 seek --temperature <0..2>   # Sampling temperature (absent = provider default, NO key on the wire). 0 is the determinism pin the judge lane wants
 seek --yolo                 # Bypass permission prompts
 seek --plan                 # Start in plan mode
-seek --no-save              # Ephemeral session (no persistence)
+seek --no-save              # Ephemeral session — owns the TRANSCRIPT only; memory/skills/MCP are unaffected (see --memory, --isolated)
+seek --memory off|ro|rw     # Memory axis for this session (default rw = historical behaviour; ro = load + inject + memory_recall only, zero write-back; off = no memory at all). Orthogonal to --no-save — the judge lane is `--no-save --memory=ro`
+seek --isolated             # Reproducibility switch: no skills, no MCP servers, no project AGENTS.md, implies --memory=off — same command, byte-identical prompt on any machine
 seek --tools read,grep      # Freeze the tool surface to a whitelist (v8·T1 bare-core lane)
 seek --tools none           # Zero tools: empty registry, the request carries no `tools` field at all (judge/pipe isolation)
 seek --keep-checkpoints     # Preserve checkpoint blobs across session end

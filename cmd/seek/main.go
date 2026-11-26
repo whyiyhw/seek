@@ -391,6 +391,8 @@ func run() error {
 		approvalStdin = flag.Bool("approval-stdin", false, "print mode (--json) only: surface permission prompts as approval_request lines on stdout and read the decision lines from stdin (the remote control plane's approval channel)")
 		list          = flag.Bool("list", false, "list saved sessions and exit")
 		noProj        = flag.Bool("no-project-md", false, "do not auto-load AGENTS.md from the project tree")
+		memoryFlag    = flag.String("memory", "", "memory access for this session: `off|ro|rw`. rw (default) = load M/L memory, inject it, and allow writes (the historical behaviour). ro = load + inject + memory_recall only, NOTHING is written back (no recall-count touch, no GC flips, no auto-dream). off = do not load memory at all. Orthogonal to --no-save (which owns the transcript only) — --no-save --memory=ro is the judge lane")
+		isolatedFlag  = flag.Bool("isolated", false, "one switch that pins the environment out of the prompt: no skills, no MCP servers, no project AGENTS.md, no memory (implies --memory=off). Makes the same command byte-identical across machines. Off by default — TUI users see no change")
 		providerFlag  = flag.String("provider", "", "LLM provider: deepseek (default) | anthropic | openai | gemini | glm | opencode | opendesign | compatible")
 		baseURL       = flag.String("base-url", "", "base URL for --provider=compatible; overrides the default endpoint for --provider=glm / --provider=opencode / --provider=opendesign")
 		providerName  = flag.String("provider-name", "Compatible", "display name for --provider=compatible")
@@ -468,6 +470,34 @@ func run() error {
 	// historical max default to a 16K cap, nor clobber a resumed session's
 	// saved effort.
 	effortSet := visited["effort"] && strings.TrimSpace(*effortFlag) != ""
+
+	// --memory / --isolated (judge-engine PRD §2.2 缺口②③, card
+	// c_4rp2py). Both default to the historical behaviour: absent
+	// --memory == rw, absent --isolated == false. Validated here,
+	// before any provider probe, so a bad value dies with exit 2.
+	memoryModeValue, memErr := resolveMemoryMode(
+		*memoryFlag, visited["memory"] && strings.TrimSpace(*memoryFlag) != "", *isolatedFlag)
+	if memErr != nil {
+		fmt.Fprintln(os.Stderr, "seek:", memErr)
+		return errFlagUsage
+	}
+	// memLoad: M/L are read from disk and injected into the prompt.
+	// memWrite: the model may write memory back (tools + hook writers).
+	// In ro the read half is on and the write half is off — a Project
+	// opened by OpenReadOnly refuses writes at the storage layer too,
+	// so this is belt and braces rather than the only guard.
+	memLoad := memoryModeValue != memoryOff
+	memWrite := memoryModeValue == memoryReadWrite
+
+	// --isolated: one switch that takes every machine-local source out
+	// of the prompt (skills, MCP servers, project AGENTS.md, memory).
+	// Expressed as the flag itself plus the folded memory/AGENTS
+	// decisions; the individual gates below read these two values, so
+	// the isolation is one place to audit.
+	isolated := *isolatedFlag
+	if isolated {
+		memLoad, memWrite = false, false
+	}
 
 	// --yolo and --plan are mutually exclusive.
 	if *yolo && *plan {
@@ -782,8 +812,9 @@ func run() error {
 	// Project-level AGENTS.md, if present. Walks up from cwd. Failures
 	// (permission denied on a real file) are reported but non-fatal —
 	// the rest of seek still works without project instructions.
+	// --isolated subsumes --no-project-md: one switch, one audit point.
 	var projMD projectmd.Result
-	if !*noProj {
+	if !*noProj && !isolated {
 		pm, perr := projectmd.Load(cwd)
 		if perr != nil {
 			fmt.Fprintln(os.Stderr, "project-md:", perr)
@@ -794,12 +825,23 @@ func run() error {
 	// Load skills before the system prompt is rendered — the manifest
 	// is appended below. Errors are non-fatal: a malformed user skill
 	// shouldn't lock the agent out of running.
-	skills, skillStats, _ := skill.Load(skill.LoadOptions{ProjectDir: cwd})
-	for _, err := range skillStats.Errors {
-		fmt.Fprintln(os.Stderr, "skills:", err)
-	}
-	if summary := skillStats.FormatLoadSummary(); summary != "" {
-		fmt.Fprintln(os.Stderr, summary)
+	//
+	// --isolated skips the load entirely (not just the manifest): a
+	// skill file read is already machine-local I/O, and the Skill tool
+	// over an empty set is a cleaner zero than the tool over a
+	// silently-hidden set. skills stays nil, which every downstream
+	// consumer (Compose's SkillManifest, the Skill tool, /skills,
+	// auto-distill) already treats as "nothing loaded".
+	var skills *skill.Set
+	if !isolated {
+		var skillStats skill.LoadStats
+		skills, skillStats, _ = skill.Load(skill.LoadOptions{ProjectDir: cwd})
+		for _, err := range skillStats.Errors {
+			fmt.Fprintln(os.Stderr, "skills:", err)
+		}
+		if summary := skillStats.FormatLoadSummary(); summary != "" {
+			fmt.Fprintln(os.Stderr, summary)
+		}
 	}
 
 	// Typed agent definitions (feature-orchestration.md P2-a + P2-c):
@@ -1065,10 +1107,18 @@ func run() error {
 		Add(guarded(goalBash)).
 		Add(monitor.New(bgMgr)).
 		Add(guarded(gittool.New())).
-		Add(skilltool.NewWithStats(skills, statsWriter, statsEnv)).
 		Add(skillinstall.NewFetch()).
 		Add(skillinstall.NewCommit(policy)).
 		Add(askusertool.New(askPolicy))
+
+	// The Skill tool is registered only when a set was actually loaded.
+	// Default runs always have one (skill.Load returns a Set even from
+	// an empty tree); --isolated leaves it nil, and a Skill tool whose
+	// every call answers "no skills are loaded in this session" is
+	// noise in the schema, not a surface (judge-engine 缺口③).
+	if skills != nil {
+		reg.Add(skilltool.NewWithStats(skills, statsWriter, statsEnv))
+	}
 
 	// v5 柱 G worktree tools — only register when Manager
 	// constructed successfully. nil Manager would force the
@@ -1141,15 +1191,27 @@ func run() error {
 	// and no configured MCP server could supply it) exits 2 without
 	// paying a single subprocess — judge/CI lanes used to fork all
 	// configured servers only to die in applyToolsWhitelist afterwards.
+	//
+	// --isolated (judge-engine 缺口③, c_4rp2py) skips the config read
+	// AND the fork entirely: no server is started, no tool schema
+	// enters the prefix, no `mcp:` line on stderr. The precheck still
+	// runs against an EMPTY config, so `--isolated -tools x__y` fails
+	// fast with the same unknown-tool exit 2 instead of silently
+	// deferring to a load that will never happen.
 	var mcpSection string
-	mcpCfg, mcpCfgErr := mcpconfig.Load()
-	if mcpCfgErr != nil {
-		fmt.Fprintln(os.Stderr, "mcp config:", mcpCfgErr)
+	mcpCfg := mcpconfig.Config{}
+	if !isolated {
+		var mcpCfgErr error
+		mcpCfg, mcpCfgErr = mcpconfig.Load()
+		if mcpCfgErr != nil {
+			fmt.Fprintln(os.Stderr, "mcp config:", mcpCfgErr)
+			mcpCfg = mcpconfig.Config{} // a broken file supplies nothing
+		}
 	}
 	if err := checkToolsWhitelistPreMCP(*toolsFlag, reg, mcpCfg); err != nil {
 		return err
 	}
-	if mcpCfgErr == nil && len(mcpCfg.MCPServers) > 0 {
+	if len(mcpCfg.MCPServers) > 0 {
 		servers := make(map[string]mcptool.ServerConfig, len(mcpCfg.MCPServers))
 		for name, e := range mcpCfg.MCPServers {
 			servers[name] = mcptool.ServerConfig{
@@ -1176,16 +1238,32 @@ func run() error {
 		}
 	}
 
-	// M layer + L layer. Without session persistence (--no-save) we
-	// also skip memory persistence — they share the "this is a
-	// throwaway run" intent. Load failures are non-fatal: a broken
-	// or read-only ~/.seek/projects/ degrades the session (no memory
-	// injection, no recall, no remember) but should not block startup.
-	// memProject is forward-declared above (the Skill stats env fn
-	// captures it by reference); only the assignment lives here.
+	// M layer + L layer, now on their own axis (judge-engine 缺口②,
+	// c_4rp2py). --no-save no longer decides this; --memory does:
+	//
+	//   off → nothing loaded, no memory tool, no hook.
+	//   ro  → L + M read through memory.OpenReadOnly (no directory
+	//         creation, no manifest bump, no pointer write) and
+	//         memory_recall only; every mutator refuses at the storage
+	//         layer, so "read the taste, leave no trace" is structurally
+	//         true rather than a promise about the tools we happened to
+	//         register.
+	//   rw  → the historical path (LoadOrCreate + the four tools).
+	//
+	// Load failures are non-fatal: a broken or read-only
+	// ~/.seek/projects/ degrades the session (no memory injection, no
+	// recall, no remember) but should not block startup. memProject is
+	// forward-declared above (the Skill stats env fn captures it by
+	// reference); only the assignment lives here.
 	var memSoul *memory.Soul
-	if !*noSave {
-		if proj, err := memory.LoadOrCreate(abs); err != nil {
+	if memLoad {
+		if memWrite {
+			if proj, err := memory.LoadOrCreate(abs); err != nil {
+				fmt.Fprintln(os.Stderr, "memory:", err)
+			} else {
+				memProject = proj
+			}
+		} else if proj, err := memory.OpenReadOnly(abs); err != nil {
 			fmt.Fprintln(os.Stderr, "memory:", err)
 		} else {
 			memProject = proj
@@ -1195,10 +1273,12 @@ func run() error {
 		} else {
 			memSoul = soul
 		}
-		reg.Add(memorytool.NewRecall(memProject)).
-			Add(memorytool.NewRemember(memProject, policy)).
-			Add(memorytool.NewArchive(memProject)).
-			Add(memorytool.NewAmend(memProject))
+		reg.Add(memorytool.NewRecall(memProject))
+		if memWrite {
+			reg.Add(memorytool.NewRemember(memProject, policy)).
+				Add(memorytool.NewArchive(memProject)).
+				Add(memorytool.NewAmend(memProject))
+		}
 	}
 
 	// sessionDate is computed ONCE here and threaded through every
@@ -1708,6 +1788,14 @@ func run() error {
 	// pointer and dispatches at call-time, so deferring registration
 	// past agent.New is safe — no events fire until NotifySessionStart
 	// below.
+	//
+	// --memory=ro registers the hook WITHOUT any write-side collaborator
+	// (Distiller / Dreamer / HistoryProvider): the prompt still gets the
+	// L+M snapshot, but no observe filter, no memory_observe tool, and
+	// no auto-dream can start a write. The storage layer refuses the
+	// writes too (memory.ErrReadOnly) — two independent guards, because
+	// the hook's writers each reach a different file (M JSONL, soul.md,
+	// observe-stats.json).
 	var memHook *memory.Hook
 	if memProject != nil || memSoul != nil {
 		memHook = &memory.Hook{
@@ -1715,7 +1803,7 @@ func run() error {
 			Soul:       memSoul,
 			ResultChan: make(chan memory.ObserveResult, 20),
 		}
-		if memProject != nil && dsClient != nil {
+		if memWrite && memProject != nil && dsClient != nil {
 			memHook.Distiller = &memory.Distiller{Client: dsClient}
 			memHook.HistoryProvider = ag.Messages
 			memHook.Dreamer = &memory.Dreamer{Client: dsClient}
@@ -2063,8 +2151,13 @@ func run() error {
 	// constructible when we have a DeepSeek client — second-tier
 	// providers don't currently expose a Chat method on the same
 	// interface, so /distill is DeepSeek-only for now.
+	//
+	// --memory=ro leaves it nil: /distill's whole output is a memory
+	// write, so offering it in a read-only session would be a button
+	// that always fails. nil is the TUI's documented "unavailable"
+	// signal (commands.go: "记忆不可用").
 	var distiller *memory.Distiller
-	if memProject != nil && dsClient != nil {
+	if memWrite && memProject != nil && dsClient != nil {
 		distiller = &memory.Distiller{Client: dsClient}
 	}
 
@@ -2175,6 +2268,7 @@ func run() error {
 		Keymap:                userKeymap,
 		Suggester:             predictor,
 		Skills:                skills,
+		SkillsDisabled:        isolated,
 		AgentTypes:            agentTypes,
 		Hooks:                 hooksReg,
 		Webhook:               routinescli.WebhookDispatcherFromConfig(),
@@ -2202,8 +2296,14 @@ func run() error {
 			// Skills, however, ARE hot-reloaded here so that newly
 			// installed skills (via skill_commit) appear in the system
 			// prompt manifest after /new without requiring a full restart.
-			if freshSkills, _, lerr := skill.Load(skill.LoadOptions{ProjectDir: cwd}); lerr == nil && freshSkills != nil {
-				skills = freshSkills
+			// --isolated keeps skills nil for the process lifetime: the
+			// whole point of the switch is that no skill file is read
+			// (judge-engine 缺口③, c_4rp2py), and a rebuild must not
+			// quietly reintroduce the machine-local manifest.
+			if !isolated {
+				if freshSkills, _, lerr := skill.Load(skill.LoadOptions{ProjectDir: cwd}); lerr == nil && freshSkills != nil {
+					skills = freshSkills
+				}
 			}
 			sp := sysprompt.Compose(sysprompt.Header{
 				Cwd:            abs,
