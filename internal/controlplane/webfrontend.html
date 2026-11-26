@@ -301,10 +301,13 @@
   body { margin: 0; font-family: var(--seek-sans); font-size: 14px; line-height: 24px;
          background: var(--seek-inset); color: var(--seek-fg); display: flex; flex-direction: column;
          height: 100vh; }
-  /* 双段状态栏（W2.3）：左段绑定/连接态可截断，右段 usage 计量恒完整 */
-  #status { display: flex; align-items: baseline; gap: 12px; padding: 8px 14px;
-            background: var(--seek-panel); border-bottom: 1px solid var(--seek-line); }
-  #status-l { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden;
+  /* #status 视觉隐藏的 aria-live 节点（W6-2 骨架卡）：文本写法一字不动
+     （18 个 web-*-headless.mjs 靠 #status-l 判绑定态），只是不再占一条
+     可见横栏——可见绑定信息由 #conv-head 项目芯片承担。1px 剪裁盒保
+     读屏可读；#status-l 保留 ellipsis 是 web-mobile 溢出探针的排除位。 */
+  #status { position: absolute; width: 1px; height: 1px; overflow: hidden;
+            clip-path: inset(50%); white-space: nowrap; }
+  #status-l { white-space: nowrap; overflow: hidden;
               text-overflow: ellipsis; }
   #status.ok #status-l { color: var(--seek-ok); }
   #status.warn #status-l { color: var(--seek-warn); }
@@ -601,56 +604,84 @@
   .msg .thumbs .doc .ic { width: 14px; height: 14px; }
   body.dropping form { outline: 2px dashed var(--seek-line-focus); outline-offset: -4px; }
 
-  /* ---- 指令快捷按钮（W2.2）+ 会话侧栏（W5 卡 c_txz6vz——W4.4 的会话弹出面板在此退役）---- */
-  #bar { display: flex; gap: 8px; padding: 6px 14px; background: var(--seek-panel);
-         border-bottom: 1px solid var(--seek-line); overflow-x: auto; }
-  #bar button { padding: 4px 12px; font-size: 13px; white-space: nowrap; }
-  #bar .cmd { background: var(--seek-soft); }          /* 指令钮与视图钮同档（c_25d2ey），class 只留浏览面隐藏闸 */
-  #mem-btn { margin-left: auto; }             /* 视图按钮组（记忆/统计/后台）靠右 */
-  body.browsing #bar .cmd { display: none; }  /* 浏览面不显示聊天指令 */
+  /* ---- 顶部 #bar 横栏退役（W6-2 骨架卡，notes §3 搬家表）----
+     五个视图钮搬进 #side-foot 的 #side-nav（侧栏底部导航行），页面顶部
+     不再有第二条横栏；dsh 的入口全在左栏。#bar 的 CSS 随节点一起删。 */
 
   /* 布局骨架：左栏常驻 + 中栏内容。收起态 = 44px 图标轨（dsh 折叠轨同
      语言：logo/新建/搜索入轨，展开态的文字让位）。宽度过渡 150ms，与
      prefers-reduced-motion 兜底同 W5 既有口径（无动画依赖，纯装饰）。 */
   #shell { flex: 1; display: flex; min-height: 0; }
-  #side { width: 260px; flex: none; display: flex; flex-direction: column;
+  #side { width: 280px; flex: none; display: flex; flex-direction: column;
           min-height: 0; background: var(--seek-panel); border-right: 1px solid var(--seek-line);
           transition: width .15s; }
   body.side-collapsed #side { width: 44px; }
-  /* 侧栏头部（c_25d2ey 间距节奏修正）：新建/归档/折叠三钮同高 26px、
-     同 gap 6px；按钮的 margin 一律 0，垂直节奏由容器 padding 统一。
-     展开态「新建」是图标+文字胶囊，归档/折叠是 26×26 图标钮；
-     收起态三钮同宽 26px 竖排（见下方 side-collapsed 块）。 */
-  #side-head { display: flex; align-items: center; gap: 6px; padding: 8px 10px;
+  /* 侧栏头重排（W6-2 骨架卡，notes §1/§3）：品牌行（标识+seek+版本小字+
+     折叠钮）→ 满宽「＋ 新会话」→「工作区」小节头（13px 三级色）+ 搜索
+     切换/归档/新建工作区三枚图标钮 → 搜索框（默认收起，点搜索钮展开）。 */
+  #side-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px 8px;
                border-bottom: 1px solid var(--seek-line); }
-  #side-title { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap;
-                color: var(--seek-fg-soft); font-size: 13px; font-weight: 500;
-                letter-spacing: .02em; }
-  #side-head button { height: 26px; padding: 0 8px; font-size: 13px; flex: none; }
-  #side-head .btn-icon { width: 26px; padding: 0; }
+  .brand-mark { width: 18px; height: 18px; flex: none; color: var(--seek-fg); }
+  .brand-name { flex: none; font-size: 16px; font-weight: 700; letter-spacing: .01em; }
+  #side-ver { color: var(--seek-fg-dim); font-size: 12px; white-space: nowrap;
+              overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  #side-head .btn-icon { margin-left: auto; }
   #side-head .ic { width: 16px; height: 16px; }
-  #side-arch.on { background: var(--seek-sel); }  /* 归档可见位：高亮记开关态 */
-  #side-ws-new { margin: 0; display: flex; gap: 6px; align-items: center;
-              justify-content: center; }
-  #side-search { margin: 0 10px 8px; background: var(--seek-inset); color: inherit;
-                 border: 1px solid var(--seek-line); border-radius: 8px; padding: 5px 8px;
-                 font: inherit; font-size: 13px; outline: none; }
+  #side-new { margin: 8px 14px 10px; height: 38px; border-radius: 12px;
+              border: 1px solid var(--seek-line-2); display: flex; align-items: center;
+              justify-content: center; gap: 6px; font-size: 14px; font-weight: 500; }
+  #side-new .ic { width: 15px; height: 15px; }
+  #side-sec { display: flex; align-items: center; gap: 2px; padding: 0 14px 6px; }
+  #side-title { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap;
+                color: var(--seek-fg-dim); font-size: 13px; font-weight: 500;
+                letter-spacing: .02em; }
+  #side-sec .btn-icon { width: 22px; height: 22px; }
+  #side-sec .ic { width: 14px; height: 14px; }
+  #side-arch.on, #side-find.on { background: var(--seek-sel); }  /* 开关态高亮 */
+  #side-search { display: none; margin: 0 14px 8px; background: var(--seek-inset);
+                 color: inherit; border: 1px solid var(--seek-line); border-radius: 8px;
+                 padding: 5px 8px; font: inherit; font-size: 13px; outline: none; }
+  #side.search-open #side-search { display: block; }   /* 点搜索钮才出场 */
   #side-search:focus { border-color: var(--seek-line-focus); }
   #sess-list { flex: 1; overflow-y: auto; min-height: 0; }
+  /* 侧栏脚（W6-2）：#side-nav = 五个视图钮的导航行（原 #bar 搬家，图标16+
+     文字14、行高32、r8、悬停一档底），设置压底；#side-err = 侧栏写面错误位
+     （原 sideFoot.prepend 的静态落点）；「加载更多」随列表走 .ws-more。 */
   #side-foot { border-top: 1px solid var(--seek-line); }
-  #side-foot button { width: 100%; border-radius: 0; font-size: 13px; padding: 6px; }
-  /* 收起态：标题/搜索/列表/翻页让位，新建与折叠钮收成图标轨 */
+  #side-nav { display: flex; flex-direction: column; gap: 2px; padding: 6px 8px 10px; }
+  #side-nav button { display: flex; align-items: center; gap: 8px; height: 32px;
+                     padding: 0 10px; border-radius: 8px; font-size: 14px;
+                     text-align: left; }
+  #side-nav .ic { width: 16px; height: 16px; flex: none; }
+  #side-nav button:hover:not(.cur) { background: var(--seek-hover); }
+  #set-btn { margin-top: 4px; border-top: 1px solid var(--seek-line); }
+  #side-err { padding: 6px 12px; }
+  .ws-more { display: block; width: calc(100% - 24px); margin: 4px 12px 8px;
+             padding: 6px; border-radius: 8px; font-size: 13px;
+             background: var(--seek-soft); }
+  /* 收起态（W6-2 后的 44px 图标轨，W6-8 会正式重排）：品牌字/版本/小节
+     标题/搜索/列表让位；新会话与视图钮收成图标；设置分离线不占位。
+     #side-nav 图标化保住了收起态的视图入口——不然五钮进了侧栏脚就被
+     收起态整体藏掉，成了「收起=没有记忆/统计」的功能回归。 */
+  body.side-collapsed .brand-name, body.side-collapsed #side-ver,
   body.side-collapsed #side-title, body.side-collapsed #side-search,
-  body.side-collapsed #sess-list, body.side-collapsed #side-foot,
-  body.side-collapsed #side-ws-new .lbl { display: none; }
-  /* 图标轨竖排（c_lqtt2m 返工轮）：44px 宽 − 两侧 6px padding = 32px 内宽。
-     横排时两个 26px 宽的归档/折叠钮加 8px gap 就已 60px+，必然溢出轨右缘、压到
-     中栏——会话详情页与设置页下 ⟩ 被相邻列的「聊天」/标题行盖住，只露出
-     一角（rect 断言看不见，元素级 hit-test 才红）。竖排后 新建/归档/折叠 三个图标
-     钮各自 26px 全部落在轨内、互不重叠。 */
+  body.side-collapsed #sess-list, body.side-collapsed #side-err,
+  body.side-collapsed #side-new .lbl { display: none; }
+  /* 图标轨竖排（c_lqtt2m 返工轮口径沿用）：44px 宽 − 两侧 6px padding =
+     32px 内宽，26px 钮竖排全部落在轨内、互不重叠（hit-test 断言在
+     web-mobile RAIL_JS）。搜索切换留在轨里（dsh 轨有搜索位）。 */
   body.side-collapsed #side-head { flex-direction: column; gap: 6px;
                                    padding: 8px 6px; justify-content: flex-start; }
-  body.side-collapsed #side-ws-new { margin: 0; width: 26px; height: 26px; padding: 0; }
+  body.side-collapsed #side-head .btn-icon { margin-left: 0; }
+  body.side-collapsed #side-new { margin: 6px 2px; width: 26px; height: 26px;
+                                  padding: 0; border: 0; gap: 0; }
+  body.side-collapsed #side-sec { flex-direction: column; padding: 0 6px; gap: 6px; }
+  body.side-collapsed #side-ws-new { width: 26px; height: 26px; padding: 0; }
+  body.side-collapsed #side-nav { padding: 6px 2px 10px; }
+  body.side-collapsed #side-nav button { width: 26px; height: 26px; padding: 0;
+                                         justify-content: center; gap: 0; }
+  body.side-collapsed #side-nav .lbl { display: none; }
+  body.side-collapsed #set-btn { margin-top: 0; border-top: 0; }
   /* 抽屉遮罩（c_lqtt2m）：默认不出场；≤480px 展开态翻成 block（断点块），
      点击关抽屉。z 在 #side（30）之下、盖住中栏。 */
   #side-scrim { display: none; position: absolute; inset: 0; z-index: 20;
@@ -658,6 +689,27 @@
 
   #center { flex: 1; display: flex; flex-direction: column;
             min-width: 0; min-height: 0; }
+  /* 会话头（W6-2 骨架卡，notes §1）：主区唯一一条头（h≈56）。左=会话标题+
+     项目芯片（文件夹+目录名，title=完整路径——可见绑定信息从 #status 横栏
+     搬到这里）；右=#ap-badge 药丸（从 #bar 搬来，id 原样）。 */
+  #conv-head { flex: none; display: flex; align-items: center; gap: 10px;
+               padding: 12px 28px 0 20px; min-height: 44px;
+               border-bottom: 1px solid var(--seek-line); }
+  .ch-l { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; }
+  #conv-title { min-width: 0; overflow: hidden; text-overflow: ellipsis;
+                white-space: nowrap; font-size: 14px; font-weight: 600; }
+  #conv-proj { flex: none; display: inline-flex; align-items: center; gap: 5px;
+               max-width: 40%; padding: 2px 10px; border-radius: 999px;
+               background: var(--seek-soft); color: var(--seek-fg-soft);
+               font-size: 12px; }
+  #conv-proj[hidden] { display: none; }
+  #conv-proj .ic { width: 13px; height: 13px; flex: none; }
+  #conv-proj span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* 计量行（W6-2 搬家 / W6-4 定样式）：#ctx 上下文余量条与 #usage 会话计量
+     从 #status 横栏挪到 composer 下方的元信息行，id 与更新器原样。 */
+  #composer-meta { flex: none; display: flex; align-items: center; gap: 14px;
+                   padding: 4px 28px 8px 20px; color: var(--seek-fg-dim);
+                   font-size: 12px; }
   /* 会话正文（主区）：点侧栏一条即亮，聊天面/输入框让位；聊天钮收回。
      三个资产面板（记忆/统计/后台）同一个「中栏一个面」口径：browsing 时
      聊天面也让位。 */
@@ -670,36 +722,26 @@
      button 套 button/input 是非法嵌套，div 承载才装得下（W5 c_rqcuaa）。
      底色仍显式透明落回 panel（别吃全局 button 的软底）；
      .cur 的选中底在各自规则里。 */
-  .sess-row { display: block; width: 100%; text-align: left; border-radius: 0;
-              border-bottom: 1px solid var(--seek-line-2); padding: 8px 12px;
+  /* 会话行改单行（W6-2 骨架卡，notes §1/dsh 会话列表）：标题（14，省略）+
+     右对齐相对时间（12，三级色）；轮数/模型/$（c_6xktw4 的 per-session
+     计量）移进行 title 提示——行面只留身份与新鲜度。行高 32、r=8、选中
+     底 --seek-sel（§2 选中行 rgba(38,49,72,.06) 档）。 */
+  .sess-row { display: flex; align-items: center; gap: 8px; width: 100%;
+              text-align: left; border-radius: 8px; padding: 4px 8px; height: 32px;
               background: transparent; cursor: pointer; position: relative; }
-  .sess-row .t1 { display: block; overflow: hidden; text-overflow: ellipsis;
-                  white-space: nowrap; }
-  /* t2 行是两段（左=时间/轮次/模型，右=per-session cost 列，c_6xktw4）：
-     flex 让 cost 右贴不换行，左段自己省略。cost 走 --seek-usd（c_jf3grt：
-     成本不是健康度，别和绿撞语义）；数字用 tabular-nums 保列宽，但字族
-     跟着 body 的无衬线走（W6-1：会话列表元信息是 UI 文本，不是代码）。 */
-  .sess-row .t2 { display: flex; gap: 8px; justify-content: space-between;
-                  color: var(--seek-fg-dim); font-size: 13px; line-height: 20px; margin-top: 2px; }
-  .sess-row .t2l { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .sess-row .t2c { flex: none; color: var(--seek-usd);
-                   font-variant-numeric: tabular-nums; }
+  .sess-row .t1 { flex: 1; min-width: 0; display: block; overflow: hidden;
+                  text-overflow: ellipsis; white-space: nowrap; }
+  .sess-row .t-when { flex: none; color: var(--seek-fg-dim); font-size: 12px; }
   /* 悬停行（W6-1，dsh interactive-bg-hover）：列表行悬停提一档底色。
      排在 .cur 之前：选中行自己的 --seek-sel 更亮，悬停不该把它盖掉；
      .arch:not(.cur) 在更后面，归档行悬停也不翻回 normal 底。 */
   .sess-row:hover:not(.cur) { background: var(--seek-hover); }
   .sess-row.cur { background: var(--seek-sel); }
-  /* 选中行仍升主文色：选中层是 alpha 叠层（不是实色），升到 fg 后两主题都
-     留足余量（暗 13.3、亮 15.9）；dsh 的选中行同款做法。 */
-  .sess-row.cur .t2 { color: var(--seek-fg); }
-  .sess-row.cur .t2c { color: var(--seek-fg); }
-  /* 归档行（c_lbys7d）：不再用整行 opacity——.55 叠在 panel 上合成后 t2
-     只剩 2.61（暗）/2.29（亮）、t1 也掉到 4.51/3.68，整行读不动。改底色
-     降一档（inset 是「页面底」那一档，暗更暗、亮更白，两个方向都表示
-     「非活动面」），文字保持 fg/fg-dim：t1 12.9/16.7、t2 6.0/6.1。归档态
-     另由 t2 的「已归档 ·」前缀与行内归档钮表达，不靠整体透明度。
-     :not(.cur) 是让「归档 + 选中」仍吃选中底（.cur 与 .arch 同特异
-     性，本规则在其后，不排除会盖掉选中底）。 */
+  .sess-row.cur .t-when { color: var(--seek-fg-soft); }
+  /* 归档行（c_lbys7d / W6-2 单行化）：底色降一档（inset=「非活动面」），
+     文字保持 fg/fg-dim。归档态由 title 提示的「已归档 ·」前缀与行内归档
+     钮（⤴ 取消归档）表达，不靠整体透明度。:not(.cur) 是让「归档+选中」
+     仍吃选中底（.cur 与 .arch 同特异性，本规则在其后）。 */
   .sess-row.arch:not(.cur) { background: var(--seek-inset); }
   .sess-row:focus-visible { outline: 1px solid var(--seek-line-focus); }
   /* 悬停/聚焦才亮的行内操作组：底色取侧栏底，盖住底下文字避免叠字 */
@@ -714,7 +756,7 @@
                color: inherit; border: 1px solid var(--seek-line-focus); border-radius: 8px;
                padding: 4px 8px; font: inherit; font-size: 13px; outline: none; }
   .sess-row.editing .sess-edit { display: block; }
-  .sess-row.editing .t1, .sess-row.editing .t2,
+  .sess-row.editing .t1, .sess-row.editing .t-when,
   .sess-row.editing .sess-acts { display: none; }
   /* ---- 工作区树（两级：组头 + 组内会话行）----
      组头一行承载「选这个工作区」（点字面 = 把本会话绑过去），折叠是独立的
@@ -967,11 +1009,9 @@
     #usage { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
     #ctx-m { display: none; }
     #ctx .bar { width: 36px; }
-    /* 按钮组：换行全显代替横滚——所有入口常显可达（指令组/视图组各一
-       行，390px 实测）；极端字体下装不下仍可横滚兜底（基线的 auto） */
-    #bar { flex-wrap: wrap; gap: 6px; padding: 6px 8px; }
-    #bar button { padding: 4px 8px; font-size: 12px; }
-    #mem-btn { margin-left: 0; }
+    /* 视图入口随 #side-nav 进了侧栏抽屉（W6-2），窄屏不再有 #bar 换行
+       问题；计量行在窄屏给 composer 让位（padding 收窄）。 */
+    #composer-meta { padding: 4px 16px 8px 12px; }
     /* 双栏→单栏：展开态抽屉化（脱离文档流覆盖中栏），收起态 44px 轨
        保持原样；遮罩同态翻出（基线 display:none） */
     #shell { position: relative; }
@@ -1054,46 +1094,56 @@
     <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
     <symbol id="i-file-text" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/></symbol>
     <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.8-3.8"/></symbol>
     <symbol id="i-alert" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></symbol>
     <symbol id="i-shield-check" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1 1 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></symbol>
   </defs>
 </svg>
-<header id="status" class="warn"><span id="status-l">连接中…</span><span id="conn" class="warn" role="status" aria-label="SSE 连接状态：连接中"><span class="dot" aria-hidden="true"></span><span id="conn-t">连接中</span></span><span id="ctx" hidden><span id="ctx-m"></span><span class="bar"><i></i></span><span id="ctx-p"></span></span><span id="usage"></span></header>
-<div id="connbar" hidden><span>SSE 已断开——正在自动重连…</span><button id="reconn" class="btn-primary" type="button">手动重连</button></div>
-<nav id="bar">
-  <!-- 指令快捷钮退役（工作区树卡）：dsh 的顶栏没有斜杠指令组，工作区/会话
-       的导航全在左栏两级树里。原来的 /bind /projects /switch /new /cancel
-       五钮整体撤掉——绑定=点组头、换绑=点另一个组头、新会话=组头 ＋、
-       中断=发送键在生成中自己变「停止」。页面不再要求任何人手打 /bind。 -->
-  <!-- 审批未决角标（W5 c_n37tnr）：有待审批卡片时常显计数；hidden 默认在
-       ——空态不占顶栏（验收③零侵入）。W5 侧栏卡（c_txz6vz）退役了顶栏
-       的会话按钮——会话入口移左栏，这里不再有它。 -->
-  <span id="ap-badge" hidden></span>
-  <button id="mem-btn" type="button"><svg class="ic" aria-hidden="true"><use href="#i-brain"/></svg><span>记忆</span></button>
-  <button id="stat-btn" type="button"><svg class="ic" aria-hidden="true"><use href="#i-chart"/></svg><span>统计</span></button>
-  <button id="agents-btn" type="button"><svg class="ic" aria-hidden="true"><use href="#i-tasks"/></svg><span>后台</span></button>
-  <button id="set-btn" type="button"><svg class="ic" aria-hidden="true"><use href="#i-settings"/></svg><span>设置</span></button>
-  <!-- hooks 实时审计（W5 c_xz2bey）：审计 tail 视图 + /events 的 hooks
-       topic 实时追加。图标 = activity 脉冲线（实时事件流语义）。 -->
-  <button id="hk-btn" type="button"><svg class="ic" aria-hidden="true"><use href="#i-activity"/></svg><span>审计</span></button>
-</nav>
-<!-- 布局骨架（W5 卡 c_txz6vz）：左栏常驻会话侧栏 + 中栏内容。W4.4 的
-     会话弹出面板在此退役——会话列表不再抢占整页，只是左栏；中栏仍归
-     聊天面（#list + #form）或三个资产面板。 -->
+<!-- 绑定/连接状态（W6-2 骨架卡）：视觉隐藏的 aria-live 节点——文本写法与
+     18 个 web-*-headless.mjs 的读取口一字不动，只是不再占可见横栏。可见
+     绑定信息由 #conv-head 的项目芯片承担；SSE 断线提示由 #center 顶的
+     #connbar 承担（原 #conn 灯随本节点一起进隐藏盒）。 -->
+<header id="status" class="warn" aria-live="polite"><span id="status-l">连接中…</span><span id="conn" class="warn" role="status" aria-label="SSE 连接状态：连接中"><span class="dot" aria-hidden="true"></span><span id="conn-t">连接中</span></span></header>
+<!-- 布局骨架（W5 c_txz6vz → W6-2 换 dsh 形）：左栏常驻会话侧栏 + 中栏内容；
+     顶部不再有第二条横栏——视图入口在 #side-foot 的 #side-nav，审批角标与
+     项目芯片在 #conv-head，计量在 #composer-meta。 -->
 <div id="shell">
   <div id="side-scrim"></div>
   <aside id="side">
     <div id="side-head">
-      <span id="side-title">工作区</span>
-      <button id="side-ws-new" type="button" title="新建工作区：从可浏览目录里选一个绑定（同名工作区直接切换）"><svg class="ic" aria-hidden="true"><use href="#i-folder-plus"/></svg><span class="lbl">新建</span></button>
-      <button id="side-arch" class="btn-icon" type="button" title="显示归档会话" aria-label="显示归档会话"><svg class="ic" aria-hidden="true"><use href="#i-archive"/></svg></button>
+      <svg class="brand-mark" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 1.6 18.4 10 10 18.4 1.6 10Z" fill="currentColor"/></svg>
+      <span class="brand-name">seek</span><span id="side-ver" hidden></span>
       <button id="side-toggle" class="btn-icon" type="button" title="收起/展开工作区侧栏" aria-label="收起工作区侧栏"><svg class="ic" aria-hidden="true"><use href="#i-panel-close"/></svg></button>
+    </div>
+    <button id="side-new" type="button" title="在当前工作区开始新会话；未绑定先选一个目录"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg><span class="lbl">新会话</span></button>
+    <div id="side-sec">
+      <span id="side-title">工作区</span>
+      <button id="side-find" class="btn-icon" type="button" title="搜索工作区或会话标题" aria-label="搜索工作区或会话标题" aria-pressed="false"><svg class="ic" aria-hidden="true"><use href="#i-search"/></svg></button>
+      <button id="side-ws-new" class="btn-icon" type="button" title="新建工作区：从可浏览目录里选一个绑定（同名工作区直接切换）" aria-label="新建工作区"><svg class="ic" aria-hidden="true"><use href="#i-folder-plus"/></svg></button>
+      <button id="side-arch" class="btn-icon" type="button" title="显示归档会话" aria-label="显示归档会话"><svg class="ic" aria-hidden="true"><use href="#i-archive"/></svg></button>
     </div>
     <input id="side-search" type="search" autocomplete="off" placeholder="搜索工作区或会话标题…" aria-label="搜索工作区或会话标题">
     <div id="sess-list"></div>
-    <div id="side-foot"></div>
+    <div id="side-foot">
+      <div id="side-err" hidden></div>
+      <div id="side-nav">
+        <button id="mem-btn" type="button"><svg class="ic" aria-hidden="true"><use href="#i-brain"/></svg><span class="lbl">记忆</span></button>
+        <button id="stat-btn" type="button"><svg class="ic" aria-hidden="true"><use href="#i-chart"/></svg><span class="lbl">统计</span></button>
+        <button id="agents-btn" type="button"><svg class="ic" aria-hidden="true"><use href="#i-tasks"/></svg><span class="lbl">后台</span></button>
+        <button id="hk-btn" type="button"><svg class="ic" aria-hidden="true"><use href="#i-activity"/></svg><span class="lbl">审计</span></button>
+        <button id="set-btn" type="button"><svg class="ic" aria-hidden="true"><use href="#i-settings"/></svg><span class="lbl">设置</span></button>
+      </div>
+    </div>
   </aside>
   <div id="center">
+    <div id="connbar" hidden><span>SSE 已断开——正在自动重连…</span><button id="reconn" class="btn-primary" type="button">手动重连</button></div>
+    <div id="conv-head">
+      <div class="ch-l">
+        <span id="conv-title">新会话</span>
+        <span id="conv-proj" hidden><svg class="ic" aria-hidden="true"><use href="#i-folder"/></svg><span id="conv-proj-name"></span></span>
+      </div>
+      <span id="ap-badge" hidden></span>
+    </div>
     <main id="list"></main>
     <section id="browser">
       <div id="browser-body">
@@ -1184,6 +1234,7 @@
            输入/附件/流态改写。生成中它是停止键，恒可点。 -->
       <button id="send" class="btn-primary" disabled>发送</button>
     </form>
+    <div id="composer-meta"><span id="ctx" hidden><span id="ctx-m"></span><span class="bar"><i></i></span><span id="ctx-p"></span></span><span id="usage"></span></div>
     <div id="tray"></div>
   </div>
 </div>
@@ -1224,6 +1275,7 @@ function setBtnIcon(btn, id) {
 }
 function setBtn(btn, id, text) {
   const t = document.createElement('span');
+  t.className = 'lbl';          // W6-2：收起轨按 .lbl 藏字（侧栏导航行）
   t.textContent = text;
   btn.replaceChildren(iconEl(id), t);
 }
@@ -1254,6 +1306,23 @@ function fmtDay(t) {
   const p = n => String(n).padStart(2, '0');
   const md = p(d.getMonth() + 1) + '-' + p(d.getDate());
   return d.getFullYear() === new Date().getFullYear() ? md : d.getFullYear() + '-' + md;
+}
+// 相对时间（W6-2 会话行单行化，dsh「3天/2时/2个月」语）：分/时/天/月向下
+// 取整；超过一年退绝对日期 fmtDay（跨年的时间点本身比「14个月」可读）。
+function fmtAgo(t) {
+  const d = t ? new Date(t) : null;
+  if (!d || isNaN(d.getTime())) return '';
+  const ms = Date.now() - d.getTime();
+  if (ms < 60e3) return '刚刚';
+  const min = Math.floor(ms / 60e3);
+  if (min < 60) return min + '分';
+  const h = Math.floor(min / 60);
+  if (h < 24) return h + '时';
+  const day = Math.floor(h / 24);
+  if (day < 30) return day + '天';
+  const mon = Math.floor(day / 30);
+  if (mon < 12) return mon + '个月';
+  return fmtDay(t);
 }
 // 「N 轮」：中文没有量词单复数，英文 "1 turns" 的复数错随本函数退休。
 function fmtTurns(n) { return (n || 0) + ' 轮'; }
@@ -2799,9 +2868,16 @@ const sessList = document.getElementById('sess-list');
 const sessMeta = document.getElementById('sess-meta');
 const sessMsgs = document.getElementById('sess-msgs');
 const sessFoot = document.getElementById('sess-foot');
-const sideFoot = document.getElementById('side-foot');
+const sideErrEl = document.getElementById('side-err');
+const sideEl = document.getElementById('side');
 const sideToggle = document.getElementById('side-toggle');
 const sideSearch = document.getElementById('side-search');
+const sideNew = document.getElementById('side-new');
+const sideFind = document.getElementById('side-find');
+const convTitle = document.getElementById('conv-title');
+const convProj = document.getElementById('conv-proj');
+const convProjName = document.getElementById('conv-proj-name');
+const sideVer = document.getElementById('side-ver');
 const sessBack = document.getElementById('sess-back');
 const MSG_PAGE = 50;
 // 调用树登记表（c_ux7lvk，随 sel 同生命周期——openSession 清空）：
@@ -2879,6 +2955,37 @@ sideArch.addEventListener('click', () => {
   loadSessions();
 });
 applyArchBtn();
+
+// ＋ 新会话（W6-2，notes §3）：已绑定 → /new（项目不变、会话重置）；未
+// 绑定 → 打开目录浏览器选一个（与空态引导同一个入口 openDirPicker）。
+sideNew.addEventListener('click', () => {
+  if (posting) return;
+  if (boundProject) sendText('/new', false);
+  else openDirPicker();
+  drawerClose();
+});
+// 搜索切换（W6-2）：#side-search 默认收起，点搜索图标展开并聚焦；再点
+// 收起。aria-pressed 记开关态（color-not-only 的非色承载）。
+sideFind.addEventListener('click', () => {
+  const open = sideEl.classList.toggle('search-open');
+  sideFind.classList.toggle('on', open);
+  sideFind.setAttribute('aria-pressed', String(open));
+  if (open && !sideCollapsed) sideSearch.focus();
+});
+// 品牌行版本小字（W6-2）：settings/get 的快照里带 serve 版本——一次性
+// 拉取填 #side-ver，失败静默隐藏（读不到版本不该影响页面）。
+async function loadVersion() {
+  try {
+    const r = await rpc('settings/get', {});
+    if (r && r.version && r.version !== 'unknown') {
+      // 品牌行只放短版（semver 段；原始串形如 v0.13.2-/<date>-<hash> 太长，
+      // 折行会把品牌行撑高）。完整串仍可在设置面板看到。
+      const short = (r.version.match(/\d+\.\d+\.\d+/) || [r.version])[0];
+      sideVer.textContent = 'v' + short;
+      sideVer.hidden = false;
+    }
+  } catch (e) { /* 未鉴权/方法缺失：版本位留空 */ }
+}
 
 // ---- 工作区树 ----
 // 两级：组头（工作区）+ 组内会话行。组 = project/list 的 root ∪ serve.projects
@@ -3005,6 +3112,24 @@ function markCur() {
   for (const head of sessList.querySelectorAll('.ws-head')) {
     head.classList.toggle('cur', !!head.dataset.root && head.dataset.root === boundRoot);
   }
+  renderConvHead();
+}
+// 会话头（W6-2）：标题跟随「你正在看的」会话（侧栏打开的或已绑定的），
+// 项目芯片承载可见绑定信息（原 #status 横栏的职责，title=完整路径）。
+// 未绑定时芯片退场、标题回落「新会话」——与空态引导（renderChatEmpty）
+// 同一个口径。
+function renderConvHead() {
+  const cur = curSid();
+  const s = cur && allSessions.find(x => x.sid === cur);
+  convTitle.textContent = (s && s.title) || (cur ? '（无标题）' : '新会话');
+  convTitle.title = (s && s.title) || '';
+  if (boundProject) {
+    convProjName.textContent = baseOf(boundProject);
+    convProj.title = boundProject;
+    convProj.hidden = false;
+  } else {
+    convProj.hidden = true;
+  }
 }
 
 // 组头：折叠箭头 + 文件夹 + 名字 + 会话数 + 悬停操作（＋新会话）。
@@ -3080,7 +3205,7 @@ function treeNewSession(root) {
 
 function renderSessRows() {
   sessList.replaceChildren();
-  sideFoot.replaceChildren();
+  sideErrReset();                 // 侧栏写面错误位是一次性的，重渲即清
   const groups = wsGroups();
   if (!groups.length) {
     paneHint(sessList, allSessions.length || (bindData && bindData.length)
@@ -3117,9 +3242,10 @@ function renderSessRows() {
   if (rendered < visible) {
     const more = document.createElement('button');
     more.type = 'button';
+    more.className = 'ws-more';   // W6-2：翻页钮随列表走（侧栏脚现在是导航区）
     more.textContent = '加载更多（已显示 ' + rendered + ' 条 / 共 ' + visible + ' 条）';
     more.addEventListener('click', () => { shownSessions = rendered + SESS_PAGE; renderSessRows(); });
-    sideFoot.appendChild(more);
+    sessList.appendChild(more);
   }
   markCur();
 }
@@ -3136,27 +3262,20 @@ function buildSessRow(s) {
   const t1 = document.createElement('span');
   t1.className = 't1';
   t1.textContent = s.title || '（无标题）';
-  const t2 = document.createElement('span');
-  t2.className = 't2';
-  const when = fmtWhen(s.last_at);
-  const t2l = document.createElement('span');
-  t2l.className = 't2l';
-  // 日期短格式 + 「N 轮」（c_jf3grt）：英文 locale 长日期与 "1 turns" 的
-  // 残留在此归零；空值不上「·」分隔（无 last_at 时不留孤儿分隔符）。
+  // 单行行面（W6-2）：标题 + 相对时间；日期短格式/轮数/模型/$（c_jf3grt 与
+  // c_6xktw4 的 per-session 计量）移进行 title 提示——绝对时间与成本在
+  // 提示里仍然一伸手就有（无 last_at 时不留孤儿分隔符）。
   const bits = [];
   if (s.archived) bits.push('已归档');
+  const when = fmtWhen(s.last_at);
   if (when) bits.push(when);
-  bits.push(fmtTurns(s.turns), s.model || '?');
-  t2l.textContent = bits.join(' · ');
-  // per-session cost 列（c_6xktw4）：cost_usd 服务端算好的，页面只排版
-  // （§2.5 client never prices）。
-  const t2c = document.createElement('span');
-  t2c.className = 't2c';
-  t2c.textContent = fmtUSD(s.cost_usd);
-  t2.appendChild(t2l);
-  t2.appendChild(t2c);
+  bits.push(fmtTurns(s.turns), s.model || '?', fmtUSD(s.cost_usd));
+  row.title = bits.join(' · ');
+  const tw = document.createElement('span');
+  tw.className = 't-when';
+  tw.textContent = fmtAgo(s.last_at);
   row.appendChild(t1);
-  row.appendChild(t2);
+  row.appendChild(tw);
   const acts = document.createElement('span');
   acts.className = 'sess-acts';
   const ren = document.createElement('button');
@@ -3189,12 +3308,13 @@ function buildSessRow(s) {
   return row;
 }
 
-// 侧栏写面错误位：落在侧栏脚（下一次渲染自然清空），不动列表本体。
+// 侧栏写面错误位（W6-2 起是 #side-foot 里的静态 #side-err，不动列表本体；
+// 下一次 renderSessRows 重置）。
+function sideErrReset() { sideErrEl.hidden = true; sideErrEl.textContent = ''; }
 function sideErr(msg) {
-  const d = document.createElement('div');
-  d.className = 'pane-hint';
-  d.textContent = msg;
-  sideFoot.prepend(d);
+  sideErrEl.hidden = false;
+  sideErrEl.className = 'pane-hint';
+  sideErrEl.textContent = msg;
 }
 
 // 行内改名（c_rqcuaa）：改名钮把行切进编辑态，Enter 提交（改了才发
@@ -4597,6 +4717,7 @@ window.addEventListener('resize', () => {
 // 是常驻面（W5），鉴权通过后即拉一次 session/list 与项目候选（后者让
 // 「空工作区」也有组头；不再等用户点按钮）。
 refreshState().then(ok => { if (ok) { listen(); loadSessions(); loadProjects(); } });
+loadVersion();   // 品牌行版本小字（W6-2）：与鉴权无关，失败自隐
 </script>
 </body>
 </html>

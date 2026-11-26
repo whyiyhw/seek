@@ -134,7 +134,7 @@ const snapshot = () => evalJS(`(() => {
     tipText: tip ? tip.textContent : '',
     winBtns: [...document.querySelectorAll('#trend-tools .tbtn')].map(b => ({ w: b.dataset.win, on: b.classList.contains('on') })),
     cardText: cards ? cards.textContent : '',
-    costCells: [...document.querySelectorAll('#sess-list .sess-row .t2c')].map(e => e.textContent),
+    costCells: [...document.querySelectorAll('#sess-list .sess-row')].map(r => (r.title.match(/\\$[\\d.]+/) || [''])[0]),
     nRows: document.querySelectorAll('#sess-list .sess-row').length,
     statsShown: getComputedStyle(document.getElementById('stats')).display !== 'none',
   };

@@ -519,9 +519,10 @@ func TestWeb_PageSessionSidebar(t *testing.T) {
 	}
 	// The header ＋新建 that W5 shipped is retired in favour of per-header ＋
 	// (a click on the old id would now be a no-op button — silently dead).
-	if strings.Contains(page, `id="side-new"`) {
-		t.Error("embedded page still carries #side-new — the workspace headers own the new-session action now")
-	}
+	// W6-2 (c_onxxge) reintroduces #side-new as the sidebar's full-width
+	// primary action (dsh shape) — this time wired to /new · openDirPicker,
+	// so the W5 prohibition is lifted; the per-workspace ＋ stays too.
+
 }
 
 // TestWeb_PageThemeSettings pins the W5 theme/settings card (c_ni7mzw):
@@ -830,9 +831,11 @@ func TestWeb_PageStatsTrend(t *testing.T) {
 			t.Errorf("page references a chart vendor %q — the trend line is hand-drawn SVG (zero build chain)", gone)
 		}
 	}
-	// The sidebar cost column is formatted server-priced data, never a rate.
-	if !strings.Contains(page, "t2c") {
-		t.Error("sidebar row lost its per-session cost cell (c_6xktw4)")
+	// The sidebar row's per-session cost is formatted server-priced data,
+	// never a rate. W6-2 moved it from a visible .t2c cell into the row's
+	// title tooltip (single-line rows); the pin follows the carrier.
+	if !strings.Contains(page, "fmtUSD(s.cost_usd)") {
+		t.Error("sidebar row lost its per-session cost readout (c_6xktw4 → W6-2 title tip)")
 	}
 	if strings.Contains(page, "PerMTok") || strings.Contains(page, "pricing.") {
 		t.Error("page carries pricing vocabulary — cost_usd is read server-priced (§2.5)")
@@ -1031,7 +1034,8 @@ func TestWeb_PageMobileResponsive(t *testing.T) {
 //  4. the design-scale tokens are converged: font sizes come from the
 //     14/13/12 + 21/19/18 title ladder (16px is the documented iOS
 //     input-zoom guard inside the ≤640px block), weights from
-//     400/500/600/700, radii from 8/12/22/999.
+//     400/500/600/700, radii from 8/12/22/999. (16px additionally carries
+//     the W6-2 brand row — still inside the allowed set.)
 //
 // Raw-hex discipline is pinned by TestWeb_PageThemeSettings; this test
 // only guards the places W6-1 rewrote, so a later card cannot quietly
@@ -1127,6 +1131,46 @@ var (
 	reFontWeight   = regexp.MustCompile(`font-weight:\s*([\w.]+)`)
 	reBorderRadius = regexp.MustCompile(`border-radius:\s*([\d.]+)px`)
 )
+
+// TestWeb_PageSkeletonW62 pins the W6-2 skeleton swap (c_onxxge): the top
+// #bar row is GONE, the five view buttons live inside #side-foot, the
+// visible binding info moved into a #conv-head project chip, and #status
+// survives as a visually-hidden aria-live node (its text feeds ~18 headless
+// probes — the node may not be deleted, only hidden). Positional
+// assertions, the same style as W5's skeleton pins: a rename that strands
+// the wiring fails here instead of silently dead-buttoning in production.
+func TestWeb_PageSkeletonW62(t *testing.T) {
+	page := string(webPage)
+	if strings.Contains(page, `<nav id="bar"`) {
+		t.Error("the #bar top row is still present — W6-2 removed it (view buttons moved to #side-nav)")
+	}
+	// The five view buttons must sit between #side-foot's opening tag and the
+	// sidebar's closing </aside> (inside the foot, not merely on the page).
+	foot := strings.Index(page, `<div id="side-foot">`)
+	endAside := strings.Index(page, `</aside>`)
+	if foot < 0 || endAside < 0 || foot > endAside {
+		t.Fatalf("page shape changed: side-foot=%d </aside>=%d", foot, endAside)
+	}
+	for _, id := range []string{`id="mem-btn"`, `id="stat-btn"`, `id="agents-btn"`, `id="hk-btn"`, `id="set-btn"`} {
+		at := strings.Index(page, id)
+		if at < 0 || at < foot || at > endAside {
+			t.Errorf("view button %q is not inside #side-foot (pos %d, foot %d..%d)", id, at, foot, endAside)
+		}
+	}
+	for _, need := range []string{
+		`id="conv-head"`,                                       // the one conversation header
+		`id="composer-meta"`,                                   // meter row under the composer
+		`id="side-new"`,                                        // full-width new-session button
+		`id="side-find"`,                                       // search toggle (collapsed #side-search)
+		`<header id="status" class="warn" aria-live="polite">`, // hidden but alive
+		`clip-path: inset(50%)`,                                // the visually-hidden pattern itself
+		`fmtAgo`,                                               // relative time on session rows
+	} {
+		if !strings.Contains(page, need) {
+			t.Errorf("embedded page lost the W6-2 skeleton piece %q (c_onxxge)", need)
+		}
+	}
+}
 
 // TestWeb_PageInputEnhancements pins the c_7lsngm input contract: a
 // multi-line input that sends on Enter and newlines on Shift+Enter, a

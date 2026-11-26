@@ -149,11 +149,11 @@ const snapshot = () => evalJS(`(() => {
     listShown: vis(list),
     rows: [...document.querySelectorAll('#sess-list .sess-row')].map(r => ({
       sid: r.dataset.sid, t1: r.querySelector('.t1').textContent,
-      t2: (r.querySelector('.t2l') || {}).textContent || '',
+      tip: r.title,
+      when: (r.querySelector('.t-when') || {}).textContent || '',
       cur: r.classList.contains('cur'),
     })),
-    sideFoot: document.getElementById('side-foot').textContent,
-    sideFootBtn: !!document.querySelector('#side-foot button'),
+    moreBtn: !!document.querySelector('#sess-list .ws-more'),
     sideHint: document.getElementById('sess-list').textContent,
     // 工作区树：组头（名字/会话数/当前态）
     groups: [...document.querySelectorAll('#sess-list .ws-head')].map(h => ({
@@ -234,26 +234,26 @@ try {
   const s = await until('侧栏列表', s => s.rows.length >= SESS_PAGE, 10000);
   ck('侧栏常驻且缺省展开（宽视口）', !s.collapsed && s.sideW > 200, `w=${s.sideW}`);
   ck('侧栏列表首屏 30 行 + 「加载更多」',
-    s.rows.length === SESS_PAGE && s.sideFootBtn && s.sideFoot.includes('已显示 30 条'),
-    `rows=${s.rows.length} foot=${s.sideFoot}`);
+    s.rows.length === SESS_PAGE && s.moreBtn, `rows=${s.rows.length} moreBtn=${s.moreBtn}`);
   ck('列表按 updated 倒序：长会话在前、短会话次之',
     s.rows[0].sid === LONG_SID && s.rows[1].sid === TINY_SID,
     JSON.stringify(s.rows.slice(0, 3).map(r => r.sid)));
   ck('长会话标题=首条用户消息首行', s.rows[0].t1.includes('第 1 条：请读一下这段代码并解释。'), s.rows[0].t1);
   ck('短会话标题=首条用户消息', s.rows[1].t1.includes('tiny fixture：你好'), s.rows[1].t1);
-  // c_jf3grt 文案口径：侧栏行 = 短日期（MM-DD HH:mm，无秒、不吃 locale）
-  // + 「N 轮」（中文无量词单复数，不再有 "1 turns"）。
-  ck('侧栏行：日期短格式 + 「N 轮」（无 "turns"）',
-    /\d{2}-\d{2} \d{2}:\d{2}/.test(s.rows[0].t2) && s.rows[0].t2.includes('617 轮')
-    && !s.rows[0].t2.includes('turns') && s.rows[1].t2.includes('1 轮'),
-    JSON.stringify([s.rows[0].t2, s.rows[1].t2]));
+  // c_jf3grt 文案口径（W6-2 单行行面）：短日期（MM-DD HH:mm，无秒、不吃
+  // locale）+ 「N 轮」+ 模型 + $ 移进行 title 提示；行面是相对时间。
+  ck('侧栏行：提示含日期短格式 + 「N 轮」（无 "turns"），行面相对时间',
+    /\d{2}-\d{2} \d{2}:\d{2}/.test(s.rows[0].tip) && s.rows[0].tip.includes('617 轮')
+    && !s.rows[0].tip.includes('turns') && s.rows[1].tip.includes('1 轮')
+    && s.rows[1].when.length > 0,
+    JSON.stringify([s.rows[0].tip, s.rows[1].tip, s.rows[1].when]));
   ck('聊天面/输入框原样可见（零回归）', s.chatShown && s.formShown && !s.detail, '');
   ck('原 📚 弹出按钮已退役（DOM 无 browse-btn）', !s.browseBtn, '');
   // 加载更多：30 → 32 行（夹具总数），按钮随后消失。
-  await clickSel('#side-foot button');
+  await clickSel('#sess-list .ws-more');
   const all = await until('侧栏全量 32 行', s => s.rows.length === N_ALL, 8000);
   ck('「加载更多」把侧栏补到全量 32 行', all.rows.length === N_ALL, `got ${all.rows.length}`);
-  ck('补满后翻页按钮消失', !all.sideFootBtn, all.sideFoot);
+  ck('补满后翻页按钮消失', !all.moreBtn, 'ws-more still present');
 } catch (e) { ck('基线侧栏', false, e.message); await dump(); }
 
 // 景 1：长会话首页 —— 中栏切正文 + 50 条 + 元信息行 + 侧栏高亮。
