@@ -17,6 +17,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -94,11 +95,14 @@ func testWAV(seconds float64) []byte {
 
 // newTestVoice assembles the full v2 stack with the stub ASR: web
 // frontend + attached voice frontend over httptest, voice.Run live on
-// a cancellable ctx. Returns the pieces the tests poke at.
+// a cancellable ctx. Returns the pieces the tests poke at. The billing
+// ledger is redirected into the test's temp tree — the frontend's
+// default is <serve>/voice-usage.jsonl (paths.ServeDir), which a test
+// must never touch (voiceusage_test.go asserts the rows).
 func newTestVoice(t *testing.T, asr VoiceASR) (*WebFrontend, *VoiceFrontend, chan Inbound, string) {
 	t.Helper()
 	web, _, tok := newTestWeb(t)
-	v := NewVoice(asr)
+	v := NewVoiceAt(asr, filepath.Join(t.TempDir(), "voice-usage.jsonl"))
 	v.Attach(web)
 
 	in := make(chan Inbound, 8)
@@ -457,7 +461,7 @@ func TestVoice_RunNeedsAttachAndASR(t *testing.T) {
 func TestVoice_RunReturnsOnCancel(t *testing.T) {
 	web, _, tok := newTestWeb(t)
 	asr := &stubVoiceASR{text: "x", block: make(chan struct{})}
-	v := NewVoice(asr)
+	v := NewVoiceAt(asr, filepath.Join(t.TempDir(), "voice-usage.jsonl"))
 	v.Attach(web)
 	srv := httptest.NewServer(web.handler())
 	defer srv.Close()
