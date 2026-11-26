@@ -279,7 +279,7 @@ L2 零新机制——`applyToolsWhitelist` 现成。
 | 4 | 参数校验先于 MCP fork | `cmd/seek/main.go` 启动段（内建名预校验；「MCP 名校验依赖加载完成」的冲突显式解决） | 1 天 | 实测 §8.1-5：缺口③加重 |
 | 5 | `seek judge` 骨架（JSONL in/out、有界并发、退出码、`_meta`） | 新文件 `cmd/seek/judge.go` + `internal/judge/`（纯逻辑，可表驱动测试）。**前半已落地**（c_42a7rf）：`internal/judge` = 输入行解析（`{id,text,meta}`，meta 原样回填）、单条判读（一次 `deepseek.Chat`，system=固定前导+rubric、user=条目 DATA，请求不带 tools / 不带 response_format）、verdict 三值解析与正则容错、按行失败隔离、`_meta` 聚合（model/rubric_sha256/items/kept/dropped/gray/tokens/cost/temperature/effort）+ `JSONL()` 渲染（`_meta` 恒最后一行）。**未落**：`cmd/seek/judge.go` 的旗标/JSONL 文件 I/O/退出码/有界并发——它们依赖工作项 6/7 | 2-3 天 | — |
 | 6 | `--isolated` + 拆 `--no-save` × `--memory` | `cmd/seek/main.go` 启动段 | 1 天 | 缺口② |
-| 7 | 成本硬顶 `--max-cost` | `internal/pricing` 现成三档 + 累加 | 0.5 天 | — |
+| 7 | 成本硬顶 `--max-cost` | **已落地**（c_qjuags）：`cmd/seek/judge.go` 加 `--max-cost <USD>`（≤0/非数值 exit 2）；`judge.Folder.Cost()` 累加真实成本（含 cache-hit 折价，与 `_meta.cost_usd` 同一数字），有序 emitter 是唯一判定点——累计触顶即关闸，feeder 不再派新条、在飞条收尾后落完整文件（行 + `_meta`）并 exit 3；无 cap 时与工作项 5 后半行为等价（回归测试钉死）。`internal/pricing` 三档现成 | 0.5 天 | — |
 | —（可选） | `ResponseFormat` 接线 + 固定信封校验 | `pkg/deepseek` 接已有字段；校验在 `internal/judge` | 1 天 | 实测 §8.1-1 降级：输出变复杂后再上 |
 
 **总计 ~6-7 天**（1–4 是 judge 之外所有 `-p` 程序消费者共享的 seek 侧修补，先落地先受益；5–7 是 judge 本体）。原排布以 `ResponseFormat` 为必修、总计 ~5 天——实测把它降级、把 1/2 两项提上来，重排依据全部在 §8.1。

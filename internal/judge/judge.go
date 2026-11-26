@@ -150,37 +150,15 @@ func (j *Judge) Model() string { return j.model }
 // output never has a half line and never silently loses an input.
 func (j *Judge) Batch(ctx context.Context, entries []Entry) *Result {
 	res := &Result{Rows: make([]Row, 0, len(entries))}
-	var usage deepseek.Usage
-	var cost float64
+	fold := j.NewFolder()
 
 	for _, e := range entries {
-		if err := ctx.Err(); err != nil {
-			// Still one row per entry: a canceled batch is a complete
-			// batch of "not judged" rows, not a truncated file.
-			res.Rows = append(res.Rows, Row{
-				ID:    e.Item.ID,
-				Meta:  e.Item.Meta,
-				Error: "not judged: " + err.Error(),
-			})
-			continue
-		}
-		if e.Err != "" {
-			res.Rows = append(res.Rows, Row{ID: e.Item.ID, Meta: e.Item.Meta, Error: e.Err})
-			continue
-		}
-		row, u, billed := j.one(ctx, e.Item)
-		res.Rows = append(res.Rows, row)
-		if billed {
-			usage.PromptTokens += u.PromptTokens
-			usage.CompletionTokens += u.CompletionTokens
-			usage.TotalTokens += u.TotalTokens
-			usage.PromptCacheHitTokens += u.PromptCacheHitTokens
-			usage.PromptCacheMissTokens += u.PromptCacheMissTokens
-			cost += priceUsage(j.model, j.tier, u)
-		}
+		o := j.JudgeEntry(ctx, e)
+		res.Rows = append(res.Rows, o.Row)
+		fold.Add(o)
 	}
 
-	res.Meta = j.meta(res.Rows, usage, cost)
+	res.Meta = fold.Meta()
 	return res
 }
 
@@ -236,41 +214,24 @@ func (j *Judge) one(ctx context.Context, it Item) (row Row, u deepseek.Usage, bi
 	}, resp.Usage, true
 }
 
-// meta folds the run into the PRD §3.3 `_meta` contract. items counts
-// OUTPUT rows (verdict and error rows alike), so the reconciliation
-// identity items == kept+dropped+gray+(error rows) always holds and a
-// caller can audit a file without knowing the input.
-func (j *Judge) meta(rows []Row, u deepseek.Usage, cost float64) Meta {
-	m := Meta{
-		Model:          j.model,
-		RubricSHA256:   j.rubricSHA,
-		Items:          len(rows),
-		PromptTokens:   u.PromptTokens,
-		CacheHitTokens: u.PromptCacheHitTokens,
-		OutputTokens:   u.CompletionTokens,
-		CostUSD:        cost,
-		Effort:         j.effort,
-	}
-	if j.temperature != nil {
-		v := *j.temperature
-		m.Temperature = &v
-	}
-	for _, r := range rows {
-		switch r.Verdict {
-		case VerdictKeep:
-			m.Kept++
-		case VerdictDrop:
-			m.Dropped++
-		case VerdictGray:
-			m.Gray++
-		}
-	}
-	return m
-}
-
 func sha256Hex(s string) string {
 	sum := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(sum[:])
+}
+
+// Cost prices ONE outcome: what the provider actually billed for it, at
+// this Judge's model and tier. Zero when the call never reached the wire
+// (Billed false) — an unmetered failure must not eat a budget.
+//
+// Exported because the CLI's --max-cost gate has to accumulate the same
+// number the trailing `_meta.cost_usd` reports: one pricing authority, so
+// "the figure we stopped on" and "the figure we printed" cannot drift
+// apart (PRD §6 item 7, card c_qjuags).
+func (j *Judge) Cost(o Outcome) float64 {
+	if !o.Billed {
+		return 0
+	}
+	return priceUsage(j.model, j.tier, o.Usage)
 }
 
 // priceUsage prices one call's usage block.
@@ -281,7 +242,7 @@ func sha256Hex(s string) string {
 // does not add up to prompt_tokens, the remainder is treated as cache
 // MISS — the expensive side. Over-reporting cost is the safe direction
 // for an audit field: under-reporting would let a --max-cost cap
-// ("later half of PRD §6 item 7") sail past its budget.
+// (PRD §6 item 7) sail past its budget.
 //
 // Prior art for WHY this guard exists: pricing.Cost structurally prices
 // input only through those two buckets, so a usage block that carries
