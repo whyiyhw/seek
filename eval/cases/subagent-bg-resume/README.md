@@ -102,7 +102,7 @@ any gate tightening are a human/main-session action on a release lane.
 PRD §六.3 doctrine floor, so the case gates as-is; a real-key baseline
 calibrates (narrows or confirms) the same number later, but it was never
 a precondition for membership. Fake-key verification of the lane path
-(same date, evidence in `.butler-evidence-c_3xyt7w/`):
+(same date, evidence in `docs/evidence/c_3xyt7w/`):
 `eval/tools/fake_subagent_endpoint.py` as the scripted model, then
 `eval/run.sh --lane release --rounds 1` → `PASS  subagent-bg-resume`
 with all nine `bg_*`/`agent_*` metrics correct (the other 9 red rows in
