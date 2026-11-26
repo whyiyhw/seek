@@ -24,6 +24,7 @@
 - c_vmrguu：叙事稿开首稿：seek
 - c_tnzudu：路由表与推断口径对齐：opencode/deepseek 条目补全，消掉跨车道报错的死胡同提示（c_dxrjjl 复审发现）
 - c_4gw4rd：证据目录归位到 docs/evidence/：两个 .butler-evidence-* 目录 git mv + 全部引用一次性更新
+- c_nfeloo：修 ACP/TUI 非 opencode 启动时 modelcap 视觉误判：catalogue grants 只在 provLabel==OpenCode 装
 
 ## v0.13.1（2026-11-24）
 
