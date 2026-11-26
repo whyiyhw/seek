@@ -1,118 +1,134 @@
 # whyiyhw/seek 项目叙事稿
 
-> 数据截至 2026-11-25（北京；采集 2026-11-24T20:05Z）；负责人会话（agent，2026-11-12 用户全权移交）定期更新。
-> 模板与写作纪律见 butler 仓 `docs/narrative/README.md`；事件 `#N` 指 butler 事件 id（memory_search 可查）。
+> 数据截至 2026-11-26（北京；采集 2026-11-26T05:03Z，main `76dce969`）；负责人会话（agent，2026-11-12 用户全权移交）定期更新。
+> 模板与写作纪律见 butler 仓 `docs/narrative/README.md`（seek 仓内没有该文件）；事件 `#N` 指 butler 事件 id（`memory_search` / `GET /events` / 看板详情可查）。
+> 上一版 `cc35355f`（2026-11-24，#15210，采集 20:05Z）；其后 `544c378a`（v0.13.1 发版物）同步改了本稿几行。本稿由卡 c_vmrguu 刷新。
 
 ## 目标
 
-**以 projects 表为准**（`project_get whyiyhw/seek`；2026-11-17 v8 D1 拍板改写 #7859，拿掉
-「能力对标 Claude Code」）：把 seek 从终端 coding agent 核心迭代成**能自我进化的本地 agent 平台**，
-形态走 v8 论题——**薄内核 + 外围按需 + 用证据筛形态**（内核只留边界/记录/裁判/缓存拼装与基础工具，
-其余外置；每个零件可度量、可拆掉对照）：① 成本断崖（DeepSeek-first）；② 多端通用（`Frontend`
-端口）；③ 自进化闭环（失败 → eval → 修复 → 发布）。完成标准（同表）：一次过率 / 每任务花费 /
-人审分钟有基线；有裸核/完整对照表；内核违例数可追（`scripts/kernel-deps.sh`）。止损线见
-`docs/prd/v8.md` §9（第二波无改善不开第三波）。**不做公开跑分**（#2575：eval 降位内部回归，
-#14002 的外部锚只做私有校准、永不外发）。治理层是 butler（卡片/派发/验证/合并），seek 是执行与
-产品层；seek 自身也经 paseo 车道回到调度池。
+**以 projects 表为准**（`project_get whyiyhw/seek`，最近更新 2026-11-17；D1 拍板改写 #7859）：
+把 seek 从终端 coding agent 核心，迭代成**能自我进化的本地 agent 平台**。形态走 v8 论题——
+**薄内核 + 外围按需 + 用证据筛形态**（内核只留边界/记录/裁判/缓存拼装与基础工具，其余外置；
+每个零件可度量、可拆掉对照）：① 成本断崖（DeepSeek-first）；② 多端通用（`Frontend` 端口）；
+③ 自进化闭环（失败 → eval → 修复 → 发布）。完成标准（同表）：一次过率 / 每任务花费 / 人审分钟
+有基线；有裸核/完整对照表；内核违例数可追（`scripts/kernel-deps.sh`）。止损线见 `docs/prd/v8.md`
+§9（第二波无改善不开第三波）。**不做公开跑分**（#2575：eval 降位内部回归；外部锚只做私有校准）。
+治理层是 butler（卡片/派发/验证/合并），seek 是执行与产品层；seek 自身也经 paseo 车道回到调度池。
 
 ## 现状
 
-- **v0.13.0 已发**（#15390/#15378，用户亲批）：merge `dd90ca60` → annotated tag `v0.13.0` →
-  goreleaser 7 资产 → `gh release edit`。内容是回合控制（流中插入、`internal/guidance`、
-  `seek ui-trace`）+ eval v3（判分层 + 外部锚）+ web 收边 + 减法三刀。发版时主检出有用户并行会话
-  WIP（judge-engine 设计稿），走临时克隆合并，零触碰。此后 main 又合入 judge gate 与 hooks 注记
-  （#15437/#15431），并合入二线车道空补全死路修复（53d60834）——这条死路在
-  `opencode:deepseek-v4.1-flash` 上 11-20 起撞了十几次、每次零产出，故 v0.13.1 当补丁版发（用户亲批）。
-- **止损读数未变，堵点清了一轮**（#13073/#15390）：R2 后 2.46 天窗口一次过率 32.1% vs 基线
-  64.3%、人审中位 181′ vs 113′，两数无改善 → 第三波（U3 本体 / T3 例行消融 / W 试验田）不开、
-  R3 不开、S2 缓开。11-24 16:33–17:50Z 按用户「解决问题」指令清出 17 张（原 9 blocked + 4 review
-  待决，加两张后到 review 与两张当日新死亡），处置分三类：用户亲拍、代拍验收收口、盘点后翻 todo
-  重派。死亡根因是一个额度窗——zcode 1308 在 12:04–16:00Z 耗尽，退道 seek 直连时余额 0.19 崩溃，
-  叠加 flash 道两张 90min 超时；16:00Z 额度已重置（#15281）。**仍是堵点移位，不是交付质量崩塌**；
-  样本薄（2.46 天 / 56 卡），5–7 天后同口径复测定趋势。
-- **自进化内环四段都有物，但「量」未起**：证据——R2 独立 verifier 已进 main（42f821f8 / merge
-  6c25bd24）却**零触发**，接线卡未建；评测——用例库 36 例 + 8 题外部锚，v3 判分层 J1–J3 与外部锚
-  A1–A3 全落地（#14002/#14018），**judge gate 已开**（#15437：record → gating，开关就是 per-case
-  `judge.mode` 字段、未另造全局开关，`SEEK_EVAL_JUDGE=0` 一行关回；真车道标定 30/34 = 0.88
-  agreement、false-pass = 0；两个保留理由——单轮余量薄、凭证路径非正式——留档未清零）；减法——
-  fim_complete 与 think 按实测退役（#13687/#13725）、deadcode B 类第 6 刀（#15050/#15082）；
-  记忆——M-index 注入即计有效使用（#15102）。
-- **内核清单可追**：23 包、违例 1（`pkg/agent → internal/hooks`，定性见 `v8.md` §9.6）；pitfalls
-  367 条活条目；AGENTS.md 3189 词 / 3200 上限（frozen）。
-- **车道与成本**：OpenDesign Cloud 订阅车道已进 main（41f955ff，22 文件 +688/−26；真 key 冒烟走
-  `~/.seek/config.json` 的 `providers.opendesign.api_key`，#15262）——**共享 wire id、不建车道级
-  注册表**；`modelcap.LaneOf` 对共享 id 仍判给 OpenCode（车道 chip、`glm-5.3-flash` 牌价高估 2×
-  等四个显示缺口记在 `docs/guide-config.md` §3），子代理路由刻意不进 opendesign（#15199/#15423）。
-  无人值守 eval 缺省走 OpenCode Go 订阅道、回计量 key 须显式（#9336）。
-- **断流防丢是当日最实的机制缺口**：11-24「正常结束但未写回」四例（#15381）——工作已 commit 在
-  drive 分支、只差写回；设计稿卡 c_pzq2h6 等的「第三次实证」已到，卡面任务已按四例更新。并行的
-  车道健康度信号卡 c_r2cg7e：flash 道当日两崩未降权，待核 `lane.go` 是否感知崩溃/超时。
-- **看板近空**：seek 仓在册 1 张（本稿），其余在飞是 butler 仓治理卡（验证存疑率 50.8% 归因
-  c_veouhh、巡检换道迁 Go c_nsqvaj 等）。瓶颈仍是「人拍板 + 归因」，不是卡不够。
+- **v0.13.1 已发，之后 main 前进了 68 个提交 / 17 个 drive 合并**：补丁版 11-25 06:12Z 发布
+  （#16276，7 资产，tag `v0.13.1`→`544c378a`）；至 11-26 05:03Z main=`76dce969`（与 origin 同步）。
+  本窗口（自上一版采集 20:05Z 起）合入 18 张 seek 卡 = tag 之后的 17 张 + c_sd3x7o（20:08Z 先落、
+  已含在 tag 里）。**CHANGELOG「已进 main、未部署」已 17 条 / 6242B**（超 6000B 预算 242B，
+  `scripts/weight.sh` 判 over）——下一版发版卡得先收口。本机部署位已同步到 main
+  （`~/.local/bin/seek --version` 自证 `v0.13.2-0.20261126042801-76dce969fe12`），未进任何 release。
+- **二线车道死路一轮收口**：c_koutux 两个结构性缺陷（开流零重试 + `streamBody` 不判 `sc.Err()`）
+  修复 `d3fc6e36` 经 merge `8cb2a385` 进 main（#17329 verdict=pass，覆盖
+  opencode/glm/opendesign/compatible 四道）；c_trrsn7 四处根因（#16161）与 c_rnhce7 的 `max_tokens`
+  单一口径（#16217）随 v0.13.1 出（`53d60834`）；c_dxrjjl 模型×lane 错配闸 + opendesign 子代理路由
+  `44aedfc3` 经 merge `ead02026` 进 main（#17492，真机补证 #17557）。
+- **judge 线开了头**：`internal/judge` 判读内核进 main（c_42a7rf，`d565d669` / merge `b796ddd0`，#17455）；
+  gate 已于 11-24 开（#15437：开关就是 per-case `judge.mode`，`SEEK_EVAL_JUDGE=0` 一行关回；两个保留
+  理由——单轮余量薄、凭证路径非正式——留档未清零）。**CLI 接线仍是断点**：c_jdo7rp 90 分钟被杀
+  （#17027）、c_qjuags（`--max-cost`）同因（#17161），两卡 blocked。
+- **验证读数仍由「人核 + 归因」主导**：本窗口 seek 合并 18 张卡，verdict 分布 pass 8 / doubt 6 /
+  未验证 3 / 人工改判 1。doubt 六张里：三张是同一批 `~/.seek` 写入事件（serve 18:07:51Z 与
+  projects worktrees 17:17:30Z，一次人核可解 c_skczdu/c_yc2thl/c_idinaj，见 #16905/#16933）、
+  一张是 c_7vpiz5 自报反向实验写进真实 `~/.seek` 再删除（#16888）、两张各一处枚举缺口
+  （c_3xyt7w 的 projects/*/sessions、c_lh6tlq 的 projects/*/worktrees）。这不是代码质量崩塌，
+  是**存疑归因缺机器闸**。
+- **状态控制三卡已拍板、零落地**（#17344/#17363）：非额度三态死亡仍一律落 blocked「需人工检查」；
+  11-26 03:37Z 三张（c_pozbmd / c_jobprc / c_osfttl）在同一拍以「session 正常结束但未写回」死亡
+  （#17407、#17408、#17413）。
+  断流防丢两步（保险 commit + progress 快照）已进 drive 派单 prompt（c_norxjd，#15950/#15972），
+  但本窗口仍有四张卡要主会话接手才闭：c_4rp2py（死会话半成品收尾，#17442/#17466）、c_fpnlir
+  （验证会话 verdict 成孤儿，#17446）、c_42a7rf（代拍合并读 /cards 超时，#17459）、c_dxrjjl
+  （合并收口，#17492）。
+- **内核与卫生**：23 内核包、违例 1（`pkg/agent → internal/hooks`，定性见 `v8.md` §9.6）；pitfalls
+  live=392；AGENTS.md 3189 词 / 3200 上限（frozen）；eval 用例 45 例（含 8 题外部锚），release lane
+  24 条（承重轴 2/3 在册）。
+- **看板**：全仓 33 张（todo 24 / doing 3 / blocked 4 / review 2）；seek 仓 15 张（todo 9 / doing 2
+  —本稿与 c_ozeqxx—/ blocked 4 / review 0）。瓶颈依旧是人拍板与归因，不是卡不够。
 
 ## 关键决策
 
-- **目标改写为 v8 论题**（#7859，2026-11-17 用户拍板 D1）：拿掉「能力对标 Claude Code」，改成
-  薄内核 + 外围按需 + 用证据筛形态；完成标准收敛为三基线 + 裸核对照表 + 违例可追。
-- **按数据止损，不硬开第三波**（#13073）：两数无改善即触发 §9 止损线；把「堵点在哪」与
-  「要不要再来」分开判——止损是堵点移位，不是路线证伪。
-- **判分的「可复算」从单次判决移到校准层**（#14002/#14018，2026-11-22 用户拍板）：judge 只补
-  复算不可能的面，标注集与 agreement 报告入库可复算；没有校准证据不开 gate。
-- **gate 开了，但开关与保留理由都留着**（#15437，2026-11-24 用户拍板）：开关落在 per-case
-  `judge.mode`、kill-switch 一行关回；两个保留理由（单轮余量薄、凭证路径非正式）留档不清零——
-  gate 是可撤销的决策，不是终局结论。
-- **对外发布人亲批，且不碰用户并行 WIP**（#15378/#15038）：发版顺序 merge → tag → goreleaser →
-  `gh release edit`（`gh release create` 会与 goreleaser 的 `v*` 触发相撞，拟人因此拒批过一次）；
-  主检出有并行会话改动时走临时克隆合并。
-- **无人值守测试默认不烧计量 key**（#9336）：eval 缺省走 OpenCode Go 订阅道，回计量 key 必须显式
-  `SEEK_EVAL_PROVIDER=deepseek`——每次计量消耗都可归因到一个人工决定。
-- **工具按实测调用率退役**（#13687 fim_complete 调用比率 0%/11%；#13725 think 109 个项目仅 2 次）：
-  减法是常规动作不是例外；退役连同死代码一起删，历史文档只增不改。
-- **注入即计有效使用**（#15102）：新开 `LastInjectedAt` 而非复用 `LastRecalledAt`，保住 recall
-  语义、旧数据公式逐字节不变；保鲜自限靠 born-stale / 预算挤出 / 项目停用三通道（已记 pitfall）。
-- **合并闸声明是机器本地文件**（#14385）：闸是本机合并点的质量门，不是仓库对外契约；
-  `git rm --cached` + ignore，克隆缺声明则宽容跳过。
-- **pitfalls 一条目一文件**（#11009）：11-13 起 46 次合并冲突 31 次涉同一文件——按「段/slug」拆分、
-  计数现算不入库，冲突面结构性消失（现 367 条活条目）。
-- **验证车道不重跑合并闸**（#14759，口径复核 #14774）：web-gate 的权威读数只能在合并点同线取；
-  卡面统一标 `{not-in-lane：合并闸+测量线}` + 合并后动作，不让验证车道制造第二条读数线。
-- **ACP 走规范而不是自创扩展**（#12845 审批门 / #13171 `/plan` 走 session-modes / #13315 多会话
-  回合级时间复用）：从「能连上」到「完整协作」的能力全落在协议面，单会话 wire 字节不变。
-- **断流不是死亡：盘点 → 复用/重派，不重做**（#15281/#15381）：同日四例的产物都在分支上，处置一律
-  翻 todo 复用续做；只有零产物的才全新开始——重做等于把车道额度再烧一遍。
+- **目标改写为 v8 论题**（#7859）：拿掉「能力对标 Claude Code」，换成薄内核 + 外围按需 + 用证据筛
+  形态；完成标准收敛为三基线 + 裸核对照表 + 违例可追。
+- **按数据止损，不硬开第三波**（#13073）：R2 后 2.46 天窗口（样本 56 卡，薄）一次过率 32.1% vs
+  基线 64.3%、人审中位 181′ vs 113′，两数无改善 → 第三波（U3/T3/W）不开、R3 判缓、S2 缓开；
+  并钉死「堵点移位 ≠ 路线证伪」的读法。
+- **承重轴名单按闸门语义定，不按「case 有没有落地」**（#16405）：E4 `subagent-bg-resume` 在册，
+  E3 `plan-e2e` 留在名单外——`record_only: true` 的行永不染色，写进闸门只会让闸门永久绿。
+- **`--tools none` 是整值哨兵，不是列表特例**（#16382）：空串=全量注册表是已发布契约，零工具必须有
+  自己的拼写；让 `none` 走列表解析会静默吞掉或退化成未知工具名。
+- **二线车道故障按客户端结构性缺陷修，不按「等上游」处置**（#16420 → #16777）：开流零重试与吞错
+  是四车道共用的一条裸奔路径，重试 + 判 `sc.Err()` 才是治具；「强制 HTTP/1.1」刻意不做（#16420）。
+- **模型×lane 错配用单源 + 分权修**（#16458、#17492）：`resolveProviderName` 单源抽取，
+  `modelcap.Serves` / `LaneOf` 两问分离，`providerOrder` 修掉 map 遍历随机序。
+- **OpenDesign 走共享 wire id，不建车道级注册表**（#15199、#15262）：同 id 互相覆盖、按 id 反推车道
+  会因 map 遍历而不确定；key 落 `~/.seek/config.json` 而非 env，四个显示缺口写进 `guide-config.md` §3。
+- **慢道超时按车道取值**（#17111）：eco（0.27× 速率）150 分钟、其余 90，单点在
+  `internal/drive/lane.go`；显式压短值原样尊重，不动快道预算。
+- **状态机加转移不加状态**（#17344/#17363）：五态不动；死亡事实落一份（事实卡先行），卡级 ≤2 重派
+  走既有 rework 轮次（不依赖 serve 可读性），车道级窗口读 lane-deaths 视图、读不到 fail-open——
+  「凡死亡必人工」的默认路径退役。
+- **收活前先落盘，再写回**（#15950）：prompt 加保险 commit + progress 快照两步，让断流死在写回与
+  快照之间也能被收活闸按产物救活，而不是按「未写回」重派重做。
+- **审批模式靠后缀重建，路径唯一**（#16843）：`[plan: approved] (auto-approve-per-step)` 后缀读成
+  batch，resume 侧在 `planTool.Restore` 之前装回；无后缀旧会话字节不变。
+- **测试隔离必须是两半：隔离 + 落点断言**（#16878）：只 Setenv 不改断言，下一次回归照样全绿；
+  c_7vpiz5 的修法是补「字节落在哪」的断言，并把全仓 attach/store 同族按同一口径清点。
+- **合并闸声明是机器本地文件**（#14385）：闸是本机合并点的质量门，不是仓库对外契约；克隆缺声明
+  则宽容跳过（opted-in 仓缺文件升级为告警，c_u2int2）。
+- **pitfalls 一条目一文件**（#11009）：11-13 起 46 次合并冲突有 31 次撞同一文件——拆成
+  `docs/pitfalls/<段>/<slug>.md`，计数现算不入库。
+- **web 对齐 dsh：抄皮不抄骨，按整体结构重做**（#8533 → #16807）：W5 十四卡「能力映射」式拆分
+  仍不像 dsh，改按 dsh 的整体骨架拆 W6 九卡链（口径源 `docs/notes-web-w6-dsh-shell.md`，`ee2dfb56`）。
+- **无人值守 eval 默认不烧计量 key**（#9336）：缺省走 OpenCode Go 订阅道，回计量 key 必须显式指名。
+- **autopilot 车道自升 Yolo，用 `flag.Args()` 判道**（#16864）：唯一约束是 no-remote 闸；
+  「子命令在前、全局 flag 在后」在 Go flag 语义下互斥，`--yolo` 没有可表达的位置。
 
 ## 否掉的方案
 
-- **跑分超越作为目标**：#2575 用户否——没有意义；外部锚只做私有校准（#14002）。
-- **无脑抄 dsh 插件框架**：`docs/dsh-analysis.md` §0/§8——两条赛道，编译期注册是护城河不是债；
-  前端同理「抄皮不抄骨」（#8533）。
-- **把常驻塞进核心 agent loop**：`feature-remote-control-plane.md` §1.4，违背零-daemon 精确化（v8 D2）。
-- **现在开第三波 / R3 / S2**：#13073——止损线触发；R3 的治具对象结构性为零，S1 摩擦数据零消费、
-  第一堵点不在工具面。
-- **体积基线随本卡棘轮**：#13370——main 侧别人的增长不能记进一张 ≤12KB 卡的账；pin 不动、超配额认账。
-- **用计量 key 跑无人值守 eval**：#9336 + `v8.md` §9.1——无人值守不得烧按量 key。
-- **为 OpenDesign 建车道级注册表**：#15199——只按模型 id 索引的表会同 id 互相覆盖、按 id 反推车道
-  还会因 map 遍历而不确定；改为共享 id + 四个显示缺口写文档（落地 41f955ff，缺口见
-  `docs/guide-config.md` §3）。
-- **复用 drive/c_raxldd 旧草稿分支**：#15423——tip 7462f84d 与最终提交同父、是同功能旧草稿
-  （+297/−610），合并会回退 main 上更全的 guide-config §3；归档不复用，按重做版进 main。
-- **把发版卡当一步合并代拍**：#15038——合并后紧跟 tag 与 GitHub Release 就是对外发布，拟人判定按
-  RSI 例外拒批；实际走用户亲批 + `gh release edit`。
-- **web-gate 登记进验证白名单**：#14759（口径复核 #14774）——跨目录/跨机读数不同线，登记只会
-  复现「存疑」。
+- **跑分超越作为目标**：#2575（用户否，无意义）；外部锚只做私有校准、永不外发（#14002）。
+- **抄 dsh 插件框架 / React 运行时**：`docs/dsh-analysis.md` §0/§8（两条赛道，编译期注册是护城河不是
+  债）；web 同理「抄皮不抄骨」（#8533）。
+- **现在开第三波 / R3 / S2**：#13073 + `v8.md` §9（止损线已触发；R3 治具对象结构性为零）。
+- **把 E3 `plan-e2e` 写进 release lane**：#16405（record_only 行永不染色 = 把闸门关掉）。
+- **为 OpenDesign 建车道级注册表**：#15199（只按模型 id 索引的表会同 id 互相覆盖）。
+- **用计量 key 跑无人值守 eval**：#9336 + `v8.md` §9.1。
+- **web-gate 登记进验证白名单**：#14759（口径复核 #14774）——跨目录读数不同线，登记只会复现「存疑」。
+- **复用 drive/c_raxldd 旧草稿分支**：#15423（tip 与最终提交同父，是同功能旧草稿 +297/−610，
+  合并会回退 main 上更全的 `guide-config.md` §3）。
+- **rebase 逐个重放收尾**：#16519（会把 main 已合并的提交重放，冲突与重复消费都放大）；改分支内
+  「重落主线」。
+- **把 `none` 当列表特例 / 匿名特例**：#16382（要么零、要么明确白名单）。
+- **把常驻塞进核心 agent loop**：`docs/prd/feature-remote-control-plane.md` §1.4（违背零-daemon
+  精确化，v8 D2）。
 
 ## 下一步
 
-- **自进化接线（主线）**：R2 接线两卡仍未建（#13073 §9.8 堵点清单）；judge gate 已开，下一层是把
-  gate 读数接进 release lane 承重轴（E3/E4 成员资格，`eval/README.md` 的 E7 遗留项）。
-- **机制缺口两卡**：断流防丢 c_pzq2h6（四例实证已足，待其判定是否出实现卡）；车道健康度
-  c_r2cg7e（flash 两崩未降权）——都在 butler 仓。
-- **工程债**：c_z2eibv 孤儿扫描（根因 #14122 已定位在 butler 仓 `internal/drive/orphan.go`，补丁
-  在案；落库路径 A/B 待人定，卡已移 whyiyhw/butler）。
-- **评测口径收尾**：A 线 anchor 首基线、judge-calibrate 复认需 OpenCode 凭证（人 / 主会话跑）；
-  真 key 冒烟类动作属车道能力外，卡面一律写明交接。
-- **叙事稿机制自身**：建卡模板缺验收段已开 c_f7md4l（butler 仓）；本稿按写下来的四条验收，
-  不再走「未验证代拍」。
-- **方向待定**：第三波与 W 试验田都不开；v0.13.1 已发（补丁版，无减法卡义务），v0.14 范围未定——
-  已扫好的减法候选是 `docs/notes-slim-candidates-2026-11.md` A 类 14 项全死符号（~80–120 行，风险低），
-  v0.14 开卡时直接取用。seek 仓在册 1 张（本卡收工后 0）——下一批卡方向由主会话 / 用户定，本稿不越权排期。
+- **主线一 · judge 本体**：内核已进 main；c_jdo7rp（CLI 接线 JSONL in/out + 有界并发 + 退出码
+  0/1/2）与 c_qjuags（`--max-cost` + exit 3）两卡 blocked（均 90 分钟机制杀、零残值），需翻 todo
+  复用续做（勿重做内核）；之后才是 release lane 接入（`eval/README.md` §E7）。另有两张新卡：c_tnzudu
+  （路由表与推断口径对齐，c_dxrjjl 复审发现的死胡同提示）、c_ozeqxx（自动会话标题落 header 的
+  additive `title` 字段，#17579）。
+- **主线二 · web W6 九卡链**（口径源 `docs/notes-web-w6-dsh-shell.md` + dsh 中文实拍四图
+  `ee2dfb56`）：c_pozbmd（blocked，依赖 c_ru7rbn 已于 #17259/#17280 收口，可翻）→ c_onxxge →
+  c_ovly6d → c_ljtmy4 → c_mo7quv → c_ekuuof → c_w74tuo → c_eq3eak → c_3dz3kg。每卡都带亮/暗 ×
+  1440/390 截图过目（`scripts/web-page-review.sh`，条款 c_mqz4kg）。
+- **主线三 · 状态控制（butler 仓）**：c_ivcu2a 事实源先行落笔 → c_fnnjzl（≤2 次自动重派）、
+  c_vfssar（车道熔断）读它、不各造窗口；c_arsxj5（晨报在飞健康段）独立。信号卡 c_osfttl（eco 四连
+  死）已转 review（#17558 代拍暂缓，主检出 MERGE_HEAD 挂着），是「车道病死人工复查」的末代。
+- **断流/收活缺口**：c_ryng2v（五形态审计：验证会话后台等长命令被当结束、漏派验证、验证车道拒
+  只读检查、`.butler-commit.md` 顺序合并必冲突、坑 8 并发下闭合不了——c_fpnlir/c_o7o23h 实录）、
+  c_ozjcdb（pass 卡代拍合并失败无独立重试路径，c_42a7rf 白等 2 小时+）。两张都是「死亡不是活」的治具。
+- **工程债**：c_f3jdf4（drive stash dance 吞主检出未跟踪件：c_sozboy 合并 1492 行仅靠 fsck 救回，
+  #17313）；c_ckla3l（eval 结果文件并发写零保护，E7 待开卡 #1，90 分钟机制杀 #17053）。
+- **发布与读数**：CHANGELOG 17 条未部署且超预算 242B（`weight.sh` 判 over），下一版发版卡先收口；
+  v0.14.0 范围未定（须带一张减法卡——`docs/notes-slim-candidates-2026-11.md` A 类 14 项已全消费且
+  已复核零引用 #16280，新刀口需重扫）；`v8.md` §9.1 同口径复测待排（5–7 天样本攒足后定趋势）。
+- **本稿口径**：信息源 `project_get` + `memory_search` / `GET /events` + `/cards` + `git log main`；
+  数字均可用命令复现（内核 23 包 / 违例 1、pitfalls live=392、eval 45 例、release lane 24 条、
+  CHANGELOG 6242B）。
