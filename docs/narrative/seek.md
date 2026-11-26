@@ -48,8 +48,8 @@
 - **内核与卫生**：23 内核包、违例 1（`pkg/agent → internal/hooks`，定性见 `v8.md` §9.6）；pitfalls
   live=392；AGENTS.md 3189 词 / 3200 上限（frozen）；eval 用例 45 例（含 8 题外部锚），release lane
   24 条（承重轴 2/3 在册）。
-- **看板**：全仓 34 张（todo 25 / doing 3 / blocked 4 / review 2）；seek 仓 16 张（todo 10 / doing 2
-  —本稿与 c_ozeqxx—/ blocked 4 / review 0）。瓶颈依旧是人拍板与归因，不是卡不够。
+- **看板（采集时刻读数）**：全仓 34 张（todo 25 / doing 3 / blocked 4 / review 2）；seek 仓 16 张
+  （todo 10 / doing 2 —本稿与 c_ozeqxx—/ blocked 4 / review 0）。瓶颈依旧是人拍板与归因，不是卡不够。
 
 ## 关键决策
 
