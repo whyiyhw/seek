@@ -29,6 +29,12 @@
 #      非布尔（PRD §四：不许静默当 1.0/false）；
 #   ⑥ reader 兼容：带 round 字段的轮次行 + 聚合行喂给
 #      scripts/eval-trend.sh —— 聚合行不双计（runs == 轮次行数）。
+#   ⑦ 两进程并发同写同一 results jsonl（PRD §四「并发」的钉死，E7 待开卡
+#      #1，c_ckla3l）：各 --rounds 99（99 轮行 + 1 聚合行 = 各 100 行），
+#      断言 200 行全部完整——无撕裂半行、无交错挤行、逐行恰好一个 JSON
+#      值可解析；聚合行恰 2、轮次行恰 198（丢写/重复写同炸）。
+#   ⑧ 负证：手造「撕裂半行」「两对象挤一行」坏文件喂同一断言器必须红——
+#      断言对撕裂不敏感，⑦ 的绿就是假绿。
 #
 # 中断（Ctrl-C 半程）不注入信号测试：macOS bash 3.2 下信号注入不定
 # （SIGINT 的 deferral 语义随等待状态变化）。「已完成轮次不丢」由结构
@@ -276,12 +282,95 @@ runs=$(jq -r '.cases[] | select(.case == "'"$CASE"'") | .runs' "$tmp/trend.json"
 skipped=$(jq -r '.rows_skipped' "$tmp/trend.json")
 [ "$skipped" = "1" ] || fail "⑥ trend must skip exactly the 1 aggregate row, got ${skipped}"
 
+# ---- 断言器：结果行完整性（行数 / 无空行 / 值数==行数） ----------------------
+# ⑦ 的正断言与 ⑧ 的负证共用同一函数：负证喂手造坏文件必须红，否则断言
+# 对撕裂不敏感、⑦ 的绿是假绿。三查各抓一种坏形态——
+#   行数不相等   ：丢写 / 整行重复；
+#   空行        ：撕裂残留的孤立换行；
+#   值数≠行数   ：两对象挤一行——jq 流式解析把 `{"a":1}{"b":2}` 当两个值
+#                 照单全收，只有值/行对账能抓；撕裂半行（截断的对象无论
+#                 从哪断都拼不成合法 JSON 值）由 jq 全文解析非零退出抓。
+rows_intact() { # rows_intact EXPECT_LINES FILE... → 红则 echo 原因 + return 1
+  local expect=$1; shift
+  local lines values empty
+  lines=$(cat "$@" | wc -l | tr -d ' ')
+  [ "$lines" = "$expect" ] || { echo "want ${expect} lines, got ${lines} (lost or duplicated rows?)"; return 1; }
+  empty=$(cat "$@" | grep -c '^$')
+  [ "$empty" = "0" ] || { echo "${empty} empty line(s) (torn-write residue)"; return 1; }
+  if ! values=$(jq -s 'length' "$@" 2>/dev/null); then
+    echo "jq stream parse failed — torn half-line present"
+    return 1
+  fi
+  [ "$values" = "$expect" ] || { echo "want ${expect} JSON values, got ${values} (two objects packed onto one physical line?)"; return 1; }
+  return 0
+}
+
+# ---- ⑦：两进程并发同写同一 results jsonl（PRD §四「并发」钉死） -------------
+# run.sh 的原子性只押在「-cn 单行 JSON + 单条 echo >>（O_APPEND 单次
+# write）」上——E7 待开卡 #1 指认的零保护面。本场景把约定钉死：两进程同时
+# 跑，每轮完成后各自追加，写入窗口全程重叠。
+# STATE 两进程独立：假二进制的调用计数器有它自己的竞态，与 results 文件
+# 并发无关，混进来只会把 pass 值搅浑。
+export GOOD_N=999
+# ⑤ 的最后一个畸形用例把 expect.json 留成了 record_only:"yes"——⑦ 跑前
+# 重置回干净界（同 ③b 跑前重写的先例）。
+printf '{"max_turns":3,"min_turns":1,"exact_agent_ends":1}\n' > "$sb/eval/cases/$CASE/expect.json"
+mkdir -p "$tmp/conc"
+: > "$tmp/stateA"
+: > "$tmp/stateB"
+STATE="$tmp/stateA" SEEK_EVAL_RESULTS_DIR="$tmp/conc" \
+  bash "$sb/eval/run.sh" --rounds 99 "$CASE" "$fake" > "$tmp/concA.out" 2>&1 &
+pid_a=$!
+STATE="$tmp/stateB" SEEK_EVAL_RESULTS_DIR="$tmp/conc" \
+  bash "$sb/eval/run.sh" --rounds 99 "$CASE" "$fake" > "$tmp/concB.out" 2>&1 &
+pid_b=$!
+wait "$pid_a"; rc_a=$?
+wait "$pid_b"; rc_b=$?
+[ "$rc_a" = "0" ] || fail "⑦ concurrent run A exited ${rc_a}: $(tail -3 "$tmp/concA.out")"
+[ "$rc_b" = "0" ] || fail "⑦ concurrent run B exited ${rc_b}: $(tail -3 "$tmp/concB.out")"
+conc_files=("$tmp/conc/"*.jsonl)
+if [ ! -e "${conc_files[0]:-}" ]; then
+  fail "⑦ no results file under $tmp/conc"
+else
+  # date_stamp 只到日——跨日极小概率裂成两文件；断言吃全集，行数对账不变。
+  if ! reason=$(rows_intact 200 "${conc_files[@]}"); then
+    fail "⑦ rows not intact under two-process concurrent append: ${reason}"
+  fi
+  n_agg=$(jq -s '[.[] | select(.type == "aggregate")] | length' "${conc_files[@]}")
+  [ "$n_agg" = "2" ] || fail "⑦ want 2 aggregate rows (one per process), got ${n_agg}"
+  n_round=$(jq -s '[.[] | select(.type != "aggregate")] | length' "${conc_files[@]}")
+  [ "$n_round" = "198" ] || fail "⑦ want 198 round rows (2×99), got ${n_round}"
+  n_case=$(jq -s '[.[] | select(.case == "zrounds-gate")] | length' "${conc_files[@]}")
+  [ "$n_case" = "200" ] || fail "⑦ case field wrong on some rows: ${n_case}/200"
+fi
+
+# ---- ⑧：负证——手造坏文件喂 rows_intact 必须红 ------------------------------
+# 每种坏形态各验一次敏感性；喂坏文件仍返 0 = 断言无效，当场 FAIL。
+mkdir -p "$tmp/neg"
+mk_good3() { # mk_good3 FILE —— 3 行好行打底
+  printf '{"case":"n","pass":true,"round":1}\n{"case":"n","pass":true,"round":2}\n{"case":"n","pass":true,"round":3}\n' > "$1"
+}
+mk_good3 "$tmp/neg/torn.jsonl"
+printf '{"case":"n","pass":tr\nue}\n' >> "$tmp/neg/torn.jsonl"
+if reason=$(rows_intact 5 "$tmp/neg/torn.jsonl"); then
+  fail "⑧ torn-line fixture passed the integrity check — assertion insensitive to torn lines"
+else
+  echo "eval-rounds selftest: ⑧ negative proof (torn half-line went red): ${reason}" >&2
+fi
+mk_good3 "$tmp/neg/interleave.jsonl"
+printf '{"case":"n","pass":true,"round":4}{"case":"n","pass":true,"round":5}\n' >> "$tmp/neg/interleave.jsonl"
+if reason=$(rows_intact 4 "$tmp/neg/interleave.jsonl"); then
+  fail "⑧ packed-line fixture passed the integrity check — assertion insensitive to interleaved lines"
+else
+  echo "eval-rounds selftest: ⑧ negative proof (packed line went red): ${reason}" >&2
+fi
+
 # ---- 收尾：真实 eval/results 零污染 ----------------------------------------
 results_after=$(find eval/results 2>/dev/null | sort)
 [ "$results_before" = "$results_after" ] || fail "eval/results inventory changed: $(diff <(printf '%s\n' "$results_before") <(printf '%s\n' "$results_after") | head -5)"
 
 if [ "$fails" -eq 0 ]; then
-  echo "eval-rounds selftest: PASS (rounds-1 byte-equivalence + 5-round aggregation w/ crash denominator + boundary green/red @rounds5 & @rounds=3 + record-only + malformed exit-2 + trend no-double-count)"
+  echo "eval-rounds selftest: PASS (rounds-1 byte-equivalence + 5-round aggregation w/ crash denominator + boundary green/red @rounds5 & @rounds=3 + record-only + malformed exit-2 + trend no-double-count + concurrent two-process append integrity + torn/packed negative proof)"
   exit 0
 fi
 echo "eval-rounds selftest: FAIL (${fails} assertion(s))" >&2

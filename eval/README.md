@@ -367,8 +367,8 @@ v2 §2.4 点名的五项「移回 Go 单测」清单，逐项归属：
 | 检查 | 归属 | 证据 / 理由 |
 |---|---|---|
 | 数据竞争 / 并发正确性 | 已有测试 | CI 三 OS `go test -race ./...`；点例：`TestACPBackend_MultiSession_ConcurrentPromptsNoCrossTalk`（acp）、`TestPolicy_ConcurrentAskAndSetMode`（askuser）、`TestConcurrentExecute`（plan）、`TestTracker_ConcurrentSafe` / `TestTracker_AdoptChild_ConcurrentCumulativeDoesNotDeadlock`（cache）、`TestConcurrentWrites`（sessmeta）、`TestSessionLookupConcurrent`（servecli）、`TestWriteGuarded_ExclusiveCreateRefusesRaceWinner`（write） |
-| eval 自身多进程同写 `results/*.jsonl` | **需补** → 待开卡 #1 | v2 §四「并发」明列「两个进程各写 100 行验证」；`scripts/eval-rounds-test.sh` 未实现该断言。`run.sh` 目前只靠单行 `echo "$row" >> "$results_file"`（1078 / 1249 行）的 O_APPEND 约定，无钉死测试 |
-| Ctrl-C 中途中断不产生半行 JSONL | 接受不保证（结构替代信号注入） | 已完成轮次的落盘由结构保证：每轮完成后单行 `echo` 追加。`scripts/eval-rounds-test.sh` 头注释 34–36 行显式记录「信号注入测试故意不做；若未来改行写入方式，先回来补」——这是计划过的取舍，不是缺口 |
+| eval 自身多进程同写 `results/*.jsonl` | 已有测试 | `scripts/eval-rounds-test.sh` ⑦⑧（待开卡 #1 收口，c_ckla3l，2026-11-26）：两进程各 `--rounds 99`（99 轮行+1 聚合行=各 100 行）并发同写同一 jsonl，断言 200 行完整——行数对账（丢写/重复写）、无空行（撕裂残留）、值数==行数（两对象挤一行的交错，jq 流式解析抓不到只有对账能抓）、jq 全文解析零错（撕裂半行），另钉聚合恰 2 / 轮次恰 198；⑧ 手造撕裂与挤行坏文件喂同一断言器必红（断言敏感性负证）。O_APPEND 单次 write 约定自此有钉死测试，`run.sh` 写法未动（压测证实该边界下原子） |
+| Ctrl-C 中途中断不产生半行 JSONL | 接受不保证（结构替代信号注入） | 已完成轮次的落盘由结构保证：每轮完成后单行 `echo` 追加。`scripts/eval-rounds-test.sh` 头注释 39–42 行显式记录「信号注入测试故意不做；若未来改行写入方式，先回来补」——这是计划过的取舍，不是缺口 |
 | 崩溃轮（无 `agent_end`）计入分母 | 已有测试 | `scripts/eval-rounds-test.sh` ②（前 3 轮好、后 2 轮崩溃 → 3/5 对 0.6 绿、对 0.7 红）与 @rounds=3 边界；口径见 §Judgment |
 
 ### C4 平台与前端差异
@@ -396,7 +396,7 @@ v2 §2.4 点名的五项「移回 Go 单测」清单，逐项归属：
 
 | # | 建议标题 | 为什么是真缺口 | 证据 |
 |---|---|---|---|
-| 1 | eval 并发写结果行自测：PRD §四 计划项未实现 | v2 §四把「两个进程各写 100 行」写成测试计划，仓库里没有对应断言；当前原子性只靠单行 `echo >>` 的 O_APPEND 约定，改写入方式即无保护 | `docs/prd/feature-eval-v2.md` §四「并发」；`scripts/eval-rounds-test.sh` 无并发场景；`eval/run.sh:1078,1249` |
+| 1 | ~~eval 并发写结果行自测：PRD §四 计划项未实现~~ **已收口**（c_ckla3l，2026-11-26） | 断言落 `scripts/eval-rounds-test.sh` ⑦⑧：两进程各 100 行并发同写、200 行完整性三查（行数 / 空行 / 值==行数）+ jq 全文解析（撕裂半行），结构对账另钉聚合 2 / 轮次 198；⑧ 负证钉断言敏感性。`run.sh` 写法未动——压测证实单条 `echo >>`（O_APPEND 单次 write）在该边界条件下原子 | `scripts/eval-rounds-test.sh` ⑦⑧；`docs/prd/feature-eval-v2.md` §四「并发」；`eval/run.sh:1078,1249` |
 | 2 | AGENTS.md 会话存储句校正：legacy `.json` 迁移已删 + `schema_version` 写的是 2 | 同一句两处与代码不符：①「Legacy `.json` files (schema_version ≤ 1) are migrated on next `Save`」——`65a31d50` 之后 `Load`/`LoadFrom` 只开 `.jsonl`，无迁移路径；②写 `schema_version=2`，代码是 `CurrentSchemaVersion = 3`。照文档写测试会测到不存在的路径 | `git show 65a31d50`（"seek hasn't shipped, so there are no schema-v1 single-file JSON sessions in the wild"）；`internal/session/session.go` 的 `Load` / `LoadFrom` / `CurrentSchemaVersion`；`AGENTS.md:94` |
 | 3 | ~~E3 / E4 承重轴的 release lane 成员资格定案~~ **已收口**（c_3xyt7w，2026-11-25） | 定案结果：E4 `subagent-bg-resume` **在册**（`lane-release.txt` 的承重轴块；gate 0.6 @ 5 轮是 §六.3 的 doctrine 下限，闸门语义完整）；E3 `plan-e2e` **不进名单**（`record_only: true` ⇒ 写进闸门只会让闸门永久绿），转正路径（主会话真 key 5 轮 baseline → E2 记 gate → 翻 `record_only` + 取消注释）落在 § Load-bearing axes 表的 E3 行与 `eval/cases/plan-e2e/README.md`；旧占位卡号已作废，README lane 表与名单一致 | `eval/lane-release.txt` 的承重轴块（在册项 `subagent-bg-resume`）＋§ Load-bearing axes 表；`eval/cases/plan-e2e/README.md` §record_only 现状 |
 
