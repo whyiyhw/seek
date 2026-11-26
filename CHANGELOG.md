@@ -22,6 +22,7 @@
 - c_3j2ovf：握手预算：车道继承 stdlib 10s TLS 握手超时、超时类失败又与瞬时 reset 共用 500ms 退避，opendesign 一轮死在 `TLS handshake timeout (after 2 attempts)`。改共享 20s transport（克隆 DefaultTransport，proxy/HTTP2 原样）+ 按失败类别退避（`net.Error.Timeout()` → 3s），覆盖 openai/compatible、anthropic、gemini 与 DeepSeek 一线
 - c_qjuags：seek judge 本体·下：--max-cost 成本硬顶——pricing 累加、预算尽停派新条、exit 3（judge §6-7）
 - c_vmrguu：叙事稿开首稿：seek
+- c_tnzudu：路由表与推断口径对齐：opencode/deepseek 条目补全，消掉跨车道报错的死胡同提示（c_dxrjjl 复审发现）
 
 ## v0.13.1（2026-11-24）
 
