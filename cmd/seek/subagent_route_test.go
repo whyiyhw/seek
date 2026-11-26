@@ -138,9 +138,9 @@ func TestBuildSubagentRunner_MixedFleetCostRollup(t *testing.T) {
 			SessionDir:   t.TempDir(),
 			Tracker:      child,
 			Policy:       policy,
-			ToolNames: []string{"read"},
-			Provider:  provider,
-			Model:     map[string]string{"": "", "glm": pricing.ModelGLM53}[provider],
+			ToolNames:    []string{"read"},
+			Provider:     provider,
+			Model:        map[string]string{"": "", "glm": pricing.ModelGLM53}[provider],
 		})
 		if err != nil {
 			t.Fatalf("runner(provider=%q): %v", provider, err)
