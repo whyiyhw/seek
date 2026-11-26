@@ -17,6 +17,8 @@
 | `seek -resume` 重建 plan state（event-sourcing） | ✅ v2.x | `internal/tools/plan/reconstruct.go` |
 | Re-plan 时已完成步骤的结构化注入 | ✅ v2.x | `propose.ProgressReporter` 可选接口 + `planBridge.ProgressSummary` |
 | propose 第 4 选项 `approve_batch`（step 级预批准） | ✅ v2.x | `permission.Policy.preApproved` + `planBridge` |
+| `seek -resume` 恢复 batch/preApproved（读 marker 后缀） | ✅ c_idinaj | `plan/reconstruct.go:batchApproval` 返回值 + `planBridge.RestoreApprovalMode`（c_n2k6qi §6.2 缝隙） |
+| `persistSession` 回写 `Session.Plan`（workflow 轴 header 投影） | ✅ c_idinaj | `internal/tui/update_agent.go:persistSession`（同 §1.1 顺带发现） |
 | plan-analyze 内 bash 只读白名单 | ✅ v2.x | `internal/tools/bash/readonly.go` + `permission.Action.ReadOnly` |
 | propose maxSteps 12 → 20 | ✅ v2.x | `internal/tools/propose/propose.go:34` |
 | 重复 plan 短路 | ✅ v2.x | `propose.DuplicateChecker` 可选接口 + `planBridge.IsDuplicateOfLastApproved` |

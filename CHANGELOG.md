@@ -12,6 +12,7 @@
 - c_sozboy：AGENTS.md 会话存储句漂移：legacy .json 迁移已删（65a31d50）+ schema_version 实为 3，文档仍写「migrated on next Save / =2」（eval E7 待开卡 #2，纯文档）
 - c_skczdu：autopilot 车道 pref 升 YOLO + flag 解析形状（R2 接线前置，§9.5③2）
 - c_yc2thl：ASR 计费链路接线：pricing.ASRCost 至今零调用方，照 TTSCost 接线点对称接上
+- c_idinaj：resume 两断点：reconstruct 丢 `[plan: approved] (auto-approve-per-step)` 后缀、persistSession 不回写 Session.Plan
 
 ## v0.13.1（2026-11-24）
 

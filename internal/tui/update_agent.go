@@ -915,6 +915,12 @@ func (m *Model) persistSession() {
 	}
 	m.opts.Session.Model = m.opts.Model
 	m.opts.Session.Yolo = m.opts.Yolo
+	// Persist the /plan toggle so -resume inherits it. Yolo was already
+	// written here; Plan was not, so a session that entered /plan mid-run
+	// resumed as "plan off" — the header projection of the workflow axis
+	// never reflected runtime changes (c_n2k6qi §1.1, fixed here as the
+	// persist side of the same wire-through gap reconstruct had).
+	m.opts.Session.Plan = m.opts.Plan
 	m.opts.Session.Effort = m.opts.Effort
 	// Persist the active /goal so -resume continues it; empty when no goal
 	// is running (clearGoal zeroes goalCond), which clears it on disk.

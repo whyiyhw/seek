@@ -94,6 +94,23 @@ type planBridge struct {
 	now func() time.Time
 }
 
+// RestoreApprovalMode installs the approval mode recovered from the
+// transcript on resume (plan.ReconstructFromTranscript's batch return).
+// The mode is transcript-only state: planBridge.batch is a runtime
+// field with no persistence, so before this call a resumed session
+// always believed the user had picked the plain "ask per call"
+// approval and the plan(start) re-arm path silently disarmed instead
+// of arming the per-step gate (c_n2k6qi §6.2).
+//
+// Deliberately NOT a separate persistence field on Session: the batch
+// tag already rides the propose result in the transcript, and adding a
+// header bool would be a second source of truth for the same fact.
+func (b *planBridge) RestoreApprovalMode(batch bool) {
+	b.mu.Lock()
+	b.batch = batch
+	b.mu.Unlock()
+}
+
 func (b *planBridge) Approved(steps []string, batch bool) {
 	b.mu.Lock()
 	b.batch = batch

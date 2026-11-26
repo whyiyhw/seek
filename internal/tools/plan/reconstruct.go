@@ -13,7 +13,12 @@
 //     Content starts with "[plan: approved]" — that's the seeding
 //     point. Everything before it is from earlier proposals (adjust
 //     loops, prior `/plan` runs) and is intentionally discarded so
-//     the active plan reflects the user's last decision.
+//     the active plan reflects the user's last decision. The
+//     "(auto-approve-per-step)" variant tag that propose appends
+//     AFTER the closing bracket is also read: it is the transcript's
+//     only record of the approval mode, and dropping it (prefix match
+//     only) permanently disarmed the "plan(start) re-arms the gate"
+//     contract after `-resume` (c_n2k6qi §6.2).
 //
 //  2. The matching assistant tool_call (matched by ToolCallID) whose
 //     function arguments JSON carries the steps array. The result
@@ -39,7 +44,25 @@ import (
 
 const (
 	approvedMarker = "[plan: approved]"
+	// batchTag is propose's variant tag for an "auto-approve per step"
+	// approval. It is appended AFTER the closing bracket — the marker
+	// itself stays byte-identical so the prefix scan above still finds
+	// the seeding point.
+	batchTag = "(auto-approve-per-step)"
 )
+
+// batchApproval reports whether an approved propose result carries the
+// auto-approve-per-step tag. This is the transcript's ONLY record of
+// the approval mode: the runtime flag (planBridge.batch, which drives
+// policy.preApproved on plan(start)) is not persisted anywhere, so a
+// prefix-only read silently downgraded every resumed batch plan to
+// per-call y/N and the "plan(start) re-arms the gate" contract the
+// result text teaches the model stopped holding (c_n2k6qi §6.2).
+func batchApproval(content string) bool {
+	rest := strings.TrimPrefix(content, approvedMarker)
+	rest = strings.TrimLeft(rest, " \t")
+	return strings.HasPrefix(rest, batchTag)
+}
 
 // toolNameAt resolves the tool name for the tool-role message at
 // index i. Persisted tool messages carry NO `name` field: on the
@@ -68,9 +91,15 @@ func toolNameAt(msgs []deepseek.Message, i int) string {
 
 // ReconstructFromTranscript scans the given messages and returns the
 // plan state implied by the most recent approval and any subsequent
-// plan tool calls. Returns (nil, -1) when no approved plan is present
-// — callers should treat that as "no active plan, do not seed".
-func ReconstructFromTranscript(msgs []deepseek.Message) ([]Step, int) {
+// plan tool calls. Returns (nil, -1, false) when no approved plan is
+// present — callers should treat that as "no active plan, do not seed".
+//
+// The batch flag reports whether the governing approval was the
+// auto-approve-per-step variant. It is part of the return value rather
+// than a separate query so a caller cannot seed the steps and forget
+// the approval mode — the exact half-restore that broke the re-arm
+// contract after `-resume` (c_n2k6qi §6.2).
+func ReconstructFromTranscript(msgs []deepseek.Message) ([]Step, int, bool) {
 	// Pass 1: find the index of the last "[plan: approved]" tool
 	// message. Iterate from the tail so we land on the most recent
 	// approval if multiple exist (re-propose flow).
@@ -86,8 +115,9 @@ func ReconstructFromTranscript(msgs []deepseek.Message) ([]Step, int) {
 		break
 	}
 	if approvalIdx < 0 {
-		return nil, -1
+		return nil, -1, false
 	}
+	batch := batchApproval(msgs[approvalIdx].Content)
 
 	// Pass 2: locate the matching propose tool_call to extract the
 	// approved steps. The matching call is in an earlier assistant
@@ -100,7 +130,7 @@ func ReconstructFromTranscript(msgs []deepseek.Message) ([]Step, int) {
 		// can't render a meaningful task list without them. Treat as
 		// "no usable plan" so the TUI stays clean rather than
 		// rendering empty rows.
-		return nil, -1
+		return nil, -1, false
 	}
 
 	steps := make([]Step, len(stepTexts))
@@ -150,7 +180,7 @@ func ReconstructFromTranscript(msgs []deepseek.Message) ([]Step, int) {
 		}
 	}
 
-	return steps, currentIdx
+	return steps, currentIdx, batch
 }
 
 // extractProposeSteps walks the assistant messages in msgs looking
