@@ -439,7 +439,7 @@ func TestWeb_PageIconSystem(t *testing.T) {
 		"ISC License",                      // licence comment
 		`<symbol id="i-tasks"`,             // jobs/tasks semantics for the 后台 entry
 		`<use href="#i-tasks"/>`,           // the nav button reuses it
-		`<use href="#i-paperclip"/>`,       // attach icon
+		`<use href="#i-plus"/>`,            // attach icon (W6-4: round ＋ button; paperclip symbol stays vendored for the tray)
 		`<use href="#i-mic"/>`,             // voice icon
 		".btn-primary",                     // primary tier
 		".btn-icon",                        // icon-button tier
@@ -1103,7 +1103,7 @@ func TestWeb_PageVisualBase(t *testing.T) {
 	}
 
 	// ④ the design scale is converged (the ladder the manifest counts).
-	allowedSize := map[string]bool{"12": true, "13": true, "14": true, "16": true, "18": true, "19": true, "21": true}
+	allowedSize := map[string]bool{"12": true, "13": true, "14": true, "16": true, "18": true, "19": true, "21": true, "24": true} // 24 = W6-4 empty-state Hero title
 	for _, m := range reFontSize.FindAllStringSubmatch(stripped, -1) {
 		if !allowedSize[m[1]] {
 			t.Errorf("font-size %spx is outside the 14/13/12 + 21/19/18 ladder (16px = iOS input-zoom guard only)", m[1])
@@ -1202,6 +1202,34 @@ func TestWeb_PageChatFlowW63(t *testing.T) {
 		if strings.Contains(page, gone) {
 			t.Errorf("page still carries the retired W4/W5 renderer piece %q (W6-3 must delete, not stack)", gone)
 		}
+	}
+}
+
+// TestWeb_PageComposerW64 pins the W6-4 composer card + empty hero
+// (c_ljtmy4): the form is a 774px r=22 card with a two-row layout (textarea
+// + action row), #send is a round brand-blue icon button (semantics ride
+// aria-label/title, no text), the empty state renders the Hero structure
+// (mark + "seek" title) and vertically centers the group, and an unbound
+// plain-text send opens the directory picker instead of posting.
+func TestWeb_PageComposerW64(t *testing.T) {
+	page := string(webPage)
+	for _, need := range []string{
+		"border-radius: 22px",          // the card itself (form rule)
+		"max-width: 774px",             // card width == reading column frame
+		"border-radius: 999px",         // round send (+ attach/mic/chips)
+		`id="ws-chip"`,                 // workspace chip in the action row
+		`id="model-tag"`,               // model label (hidden until known)
+		"hero-t",                       // empty-state Hero title class
+		"chat-empty-on",                // the centering body class
+		"applyWsChip",                  // chip/placeholder follow binding
+		"先选一个工作区",                  // unbound plain-text send → picker copy
+	} {
+		if !strings.Contains(page, need) {
+			t.Errorf("embedded page lost the W6-4 composer piece %q (c_ljtmy4)", need)
+		}
+	}
+	if !strings.Contains(page, "#send:disabled { opacity: .4; }") {
+		t.Error("round send lacks its 40% disabled treatment (W6-4 ①)")
 	}
 }
 

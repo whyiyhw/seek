@@ -213,10 +213,10 @@ ck('基线弹层关闭', !base.menuOpen, JSON.stringify(base));
 // 未绑定的空聊天面给 /bind 引导（含点选按钮），空草稿时发送键禁用；
 // 有草稿即可点，清空回到禁用。这两条是「页面不许给死气/可点的空操作」
 // 的可见证据。
-ck('主区空态（未绑定）：工作区引导 + 选择目录按钮',
-  base.chatEmpty.includes('还没有工作区')
-  && base.chatEmpty.includes('工作区')
-  && (await evalJS(`!!document.querySelector('#list .chat-empty .ce-acts button')`)),
+ck('主区空态（未绑定）：Hero + 选择工作区芯片（W6-4）',
+  base.chatEmpty.includes('seek')
+  && base.chatEmpty.includes('选择工作区')
+  && (await evalJS(`!!document.querySelector('#list .chat-empty .ce-chip.pick')`)),
   JSON.stringify(base.chatEmpty));
 ck('发送键：空草稿缺省禁用（静态标记 + syncSend）',
   base.sendDisabled === true, `disabled=${base.sendDisabled}`);
