@@ -152,7 +152,8 @@ func ResolveRoute(provider, model string) (Route, error) {
 		// the first-tier lanes keep their FREE-FORM ids: a model-only
 		// "deepseek-v4-flash" (a retired id the official API still
 		// server-routes) resolves to deepseek even though no entry lists
-		// it, which is exactly what ACP's lane restore relies on.
+		// it, which is exactly what ACP's lane restore relies on
+		// (applyLane re-points the lane from the session's model id).
 		//
 		// Only lanes the process can actually route are accepted (a
 		// LaneOf answer like "openai" with no route entry falls through to
