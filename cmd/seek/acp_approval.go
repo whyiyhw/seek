@@ -107,7 +107,7 @@ func (ap *acpApproval) ask(a permission.Action) bool {
 		},
 		Options: acp.PermissionOptions(),
 	}
-	raw, err := ap.srv.Call(t.ctx, "session/request_permission", params, ap.timeout)
+	raw, err := ap.srv.Call(t.ctx, acp.MethodRequestPermission, params, ap.timeout)
 	if err != nil {
 		// Timeout / disconnect / cancellation / client JSON-RPC error
 		// (a client that doesn't implement the method answers -32601):

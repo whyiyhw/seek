@@ -3216,18 +3216,32 @@ func (b *acpBackend) Initialize(p acp.InitializeParams) acp.InitializeResult {
 			p.ProtocolVersion, version, acp.ProtocolVersion, why)
 	}
 	// Ask lane (acp_askuser.go): the ONE place a headless lane may opt the
-	// shared askpolicy into ModeAsk, and only when the client promised it
-	// can render a form. Everything else (print / rpc / goal / autopilot /
-	// benchmark) leaves the policy Disabled — there is no human and
-	// ErrDisabled's "rephrase as plain text" is the right instruction.
-	// A client that advertises nothing keeps the old behaviour byte for
-	// byte, which is why the pre-existing ACP lane test (no capabilities
-	// declared) still sees ErrDisabled.
-	if p.SupportsElicitationForm() && b.askUser != nil && b.askPolicy != nil {
+	// shared askpolicy into ModeAsk. Everything else (print / rpc / goal /
+	// autopilot / benchmark) leaves the policy Disabled — there is no human
+	// and ErrDisabled's "rephrase as plain text" is the right instruction.
+	//
+	// Two channels, picked here because this is where the capabilities
+	// land (card c_7bqiq5):
+	//   - elicitation.form advertised → the protocol's form method, one
+	//     form per batch, free-text twin included. Zed's current shape.
+	//   - otherwise → session/request_permission, one popup per question,
+	//     the question's own rows as options plus a trailing Skip. This is
+	//     what makes Paseo work at all: it declares no elicitation
+	//     capability (and has no handler), but does implement
+	//     requestPermission.
+	// An ACP session always has a human on the other end, so both channels
+	// arm ModeAsk; the difference is only how the question travels.
+	if b.askUser != nil && b.askPolicy != nil {
+		form := p.SupportsElicitationForm()
+		b.askUser.arm(form)
 		b.askPolicy.SetMode(askuser.ModeAsk)
 		b.askPolicy.SetAskFn(b.askUser.ask)
 		b.askPolicy.SetAskBatchFn(b.askUser.askBatch)
-		fmt.Fprintln(os.Stderr, "acp: ask_user lane enabled (client advertises elicitation.form)")
+		if form {
+			fmt.Fprintln(os.Stderr, "acp: ask_user lane enabled (client advertises elicitation.form)")
+		} else {
+			fmt.Fprintln(os.Stderr, "acp: ask_user lane enabled via session/request_permission (client does not advertise elicitation.form)")
+		}
 	}
 	return acp.InitializeResult{
 		ProtocolVersion: version,
