@@ -12,9 +12,14 @@ package main
 // The regression this pins: askPolicy was born ModeAsk and only the TUI
 // path ever installed a callback, so every headless lane (print/json,
 // rpc, acp, goal, autopilot, benchmark) hit ErrNoCallback. The fix
-// inverts the default — askPolicy starts ModeDisabled and the TUI opts
-// in at its wiring block. These tests drive the REAL binary on two
-// lanes, because the bug lived in the wiring between them.
+// inverts the default — askPolicy starts ModeDisabled and each lane that
+// HAS a human opts in at its wiring block. These tests drive the REAL
+// binary on two lanes, because the bug lived in the wiring between them.
+//
+// Card c_7bqiq5 moved the ACP half: an ACP session always has a human, so
+// that lane now asks over session/request_permission instead of failing.
+// What remains pinned here is the PRINT lane (no human → ErrDisabled) and
+// the ACP lane's no-answer ending (timeout → cancelled, never a hang).
 //
 // Sandbox-only: httptest backend + temp SEEK_HOME/HOME, no keys, no
 // network.
@@ -188,38 +193,33 @@ func TestAskUserLane_PrintModeSaysRephrase(t *testing.T) {
 	}
 }
 
-// TestAskUserLane_ACPSaysRephrase is the ACP lane, end to end through
-// the protocol: the failure rides tool_call_update's rawOutput, and it
-// must carry the same actionable text. The turn must still end cleanly.
-func TestAskUserLane_ACPSaysRephrase(t *testing.T) {
+// TestAskUserLane_ACPTimeoutsToCancelled is the ACP lane's no-ANSWER
+// ending (card c_7bqiq5 changed what this lane does: an ACP session
+// always has a human, so the question now travels over
+// session/request_permission instead of failing as ErrDisabled). A client
+// that never answers must not wedge the turn: SEEK_ACP_ASK_TIMEOUT=1
+// bounds the wait and the tool result becomes a cancelled answer.
+func TestAskUserLane_ACPTimeoutsToCancelled(t *testing.T) {
 	workDir := t.TempDir()
 	b := askToolBackend(t, "ask_user", askUserArgs)
-	c := startACPChild(t, b.URL, workDir)
-	sid := c.handshake(t, workDir)
+	c := startACPChild(t, b.URL, workDir, "SEEK_ACP_ASK_TIMEOUT=1")
+	sid := c.handshake(t, workDir) // no capabilities → request_permission fallback
 
 	c.rpc(t, 3, "session/prompt", map[string]any{
 		"sessionId": sid,
 		"prompt":    []map[string]string{{"type": "text", "text": "问一个问题"}},
 	})
-	// The tool's failure text reaches the client as the tool call's
-	// rawOutput — the same road every tool result takes. Match the
-	// update that carries the ask_user outcome, then assert on ITS
-	// payload only, so text from some other frame can't satisfy it.
-	frame := c.waitWhere(t, "ask_user tool_call_update", 60*time.Second, func(m map[string]json.RawMessage) bool {
-		if !rawEq(m["method"], "session/update") {
-			return false
-		}
-		params := string(m["params"])
-		return strings.Contains(params, "tool_call_update") && strings.Contains(params, "ask_user")
-	})
-	params := string(frame["params"])
-	if strings.Contains(params, noCallbackText) {
-		t.Fatalf("ACP lane leaked the programming-error text; want only ErrDisabled:\n%s", params)
-	}
-	if !strings.Contains(params, disabledText) {
-		t.Fatalf("ask_user rawOutput = %s, want the ErrDisabled text (%q) so the model rephrases", params, disabledText)
-	}
+	// The question must actually reach the client — that is the whole
+	// difference from the pre-c_7bqiq5 ErrDisabled dead end.
+	c.waitWhere(t, "session/request_permission", 60*time.Second, isPermissionRequest)
+
+	// Stare at it: the deadline must land as a cancelled tool result, not
+	// a hang and not the ErrDisabled text (the human was asked).
+	c.awaitToolOutcome(t, `"cancelled":true`)
 	if reason := c.awaitTurnEnd(t); reason != "end_turn" {
-		t.Fatalf("stopReason = %q, want end_turn (a disabled ask must not kill the turn)", reason)
+		t.Fatalf("stopReason = %q, want end_turn (an unanswered ask must not kill the turn)", reason)
+	}
+	if strings.Contains(c.stderrText(), noCallbackText) {
+		t.Fatalf("lane leaked the programming-error text:\n%s", c.stderrText())
 	}
 }

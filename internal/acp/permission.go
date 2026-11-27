@@ -22,6 +22,14 @@ import (
 	"encoding/json"
 )
 
+// MethodRequestPermission is the wire method for a client-side approval
+// prompt (schema: CLIENT_METHODS.session_request_permission). Two lanes
+// call it: the permission gate (acp_approval.go) and — since card
+// c_7bqiq5 — the ask_user FALLBACK for clients that do not implement
+// `elicitation/create`. The constant exists so those two call sites can
+// never drift apart on the spelling.
+const MethodRequestPermission = "session/request_permission"
+
 // Permission option kinds — the vocabulary both sides speak. seek
 // offers exactly three (allow_once / allow_always / reject_once);
 // reject_always exists in the schema but permission.Policy has no
@@ -144,4 +152,42 @@ func classifyOptionID(id string) PermissionDecision {
 	default:
 		return DecisionReject // unknown echo: deny (see doc comment)
 	}
+}
+
+// ParsePermissionSelection decodes a session/request_permission reply into
+// the RAW optionId the client echoed, without classifying it.
+//
+// Why this exists alongside ParsePermissionOutcome: the approval lane hands
+// the client a closed menu of three fixed ids, so an exotic echo there is a
+// client bug and "deny" is the honest reading. The ask_user FALLBACK (card
+// c_7bqiq5) instead hands over the QUESTION's own option ids, so the id is
+// the answer — interpreting it against the approval vocabulary would turn
+// every one of them into a denial.
+//
+// second=false means "no usable selection" (the protocol's cancelled
+// outcome, a malformed body, or a client error); callers treat that as the
+// cancelled answer, the same posture as the form channel's decline.
+func ParsePermissionSelection(raw []byte) (optionID string, ok bool) {
+	var body struct {
+		Outcome json.RawMessage `json:"outcome"`
+	}
+	if err := json.Unmarshal(raw, &body); err != nil || len(body.Outcome) == 0 {
+		return "", false
+	}
+	var nested struct {
+		Outcome  string `json:"outcome"`
+		OptionID string `json:"optionId"`
+	}
+	if err := json.Unmarshal(body.Outcome, &nested); err == nil && nested.Outcome != "" {
+		if nested.Outcome != "selected" || nested.OptionID == "" {
+			return "", false
+		}
+		return nested.OptionID, true
+	}
+	// Legacy bare-string form: the string IS the option id.
+	var legacy string
+	if err := json.Unmarshal(body.Outcome, &legacy); err == nil && legacy != "" {
+		return legacy, true
+	}
+	return "", false
 }

@@ -69,7 +69,7 @@ per case it executed, e.g.:
 Historically every case ran **once** and that single sample was the
 PASS/FAIL verdict — noise could flip either way (the v0.12.0 pre-release
 run had 3 reds of which 2 were false alarms; see
-[`docs/prd/feature-eval-v2.md`](../docs/prd/feature-eval-v2.md) §1).
+[`docs/prd/archive/feature-eval-v2.md`](../docs/prd/archive/feature-eval-v2.md) §1).
 `--rounds N` (default 1 = historical behaviour, byte for byte) changes
 the judgement to a **distribution**:
 
@@ -120,7 +120,7 @@ non-boolean, unparseable JSON) exits 2 before any round runs — never
 silently coerced to 1.0/false.
 
 The values are calibrated — see ["Calibration table (E2)"](#calibration-table-e2-2026-11-21)
-below ([`docs/prd/feature-eval-v2.md`](../docs/prd/feature-eval-v2.md) §三 E2;
+below ([`docs/prd/archive/feature-eval-v2.md`](../docs/prd/archive/feature-eval-v2.md) §三 E2;
 landed 2026-11-21, card c_347nnh).
 
 ### Judgment self-test (deterministic, no key)
@@ -163,7 +163,7 @@ the 372 committed sample rows in `results/` — all-time, plus the window
 since each case's last bound/prompt repair (all-time is contaminated
 wherever a repair landed mid-history; the window is the honest basis).
 
-**Rounds policy** ([PRD §2.5](../docs/prd/feature-eval-v2.md), pinned by
+**Rounds policy** ([PRD §2.5](../docs/prd/archive/feature-eval-v2.md), pinned by
 card c_347nnh): **5 rounds only for known-flaky cases and the
 load-bearing axes; every other case 3 rounds.** (PRD §五's "cheap read
 cases may get 5, axes 3" contradicts §2.5; the card resolved to §2.5.)
@@ -326,7 +326,7 @@ verification only.
 
 ## 不由 eval 保证（E7，2026-11-24，c_okmkfl）
 
-`docs/prd/feature-eval-v2.md` E7 的交付面：eval 的判分面只有一件事——
+`docs/prd/archive/feature-eval-v2.md` E7 的交付面：eval 的判分面只有一件事——
 **模型在给定 schema/prompt 下的选择倾向**（v2 §1.1 第三层）。下列五类行为面
 **不在判分覆盖内**，每条检查在这里有且只有一个归属，三态闭集：
 
@@ -396,13 +396,13 @@ v2 §2.4 点名的五项「移回 Go 单测」清单，逐项归属：
 
 | # | 建议标题 | 为什么是真缺口 | 证据 |
 |---|---|---|---|
-| 1 | ~~eval 并发写结果行自测：PRD §四 计划项未实现~~ **已收口**（c_ckla3l，2026-11-26） | 断言落 `scripts/eval-rounds-test.sh` ⑦⑧：两进程各 100 行并发同写、200 行完整性三查（行数 / 空行 / 值==行数）+ jq 全文解析（撕裂半行），结构对账另钉聚合 2 / 轮次 198；⑧ 负证钉断言敏感性。`run.sh` 写法未动——压测证实单条 `echo >>`（O_APPEND 单次 write）在该边界条件下原子 | `scripts/eval-rounds-test.sh` ⑦⑧；`docs/prd/feature-eval-v2.md` §四「并发」；`eval/run.sh:1078,1249` |
+| 1 | ~~eval 并发写结果行自测：PRD §四 计划项未实现~~ **已收口**（c_ckla3l，2026-11-26） | 断言落 `scripts/eval-rounds-test.sh` ⑦⑧：两进程各 100 行并发同写、200 行完整性三查（行数 / 空行 / 值==行数）+ jq 全文解析（撕裂半行），结构对账另钉聚合 2 / 轮次 198；⑧ 负证钉断言敏感性。`run.sh` 写法未动——压测证实单条 `echo >>`（O_APPEND 单次 write）在该边界条件下原子 | `scripts/eval-rounds-test.sh` ⑦⑧；`docs/prd/archive/feature-eval-v2.md` §四「并发」；`eval/run.sh:1078,1249` |
 | 2 | AGENTS.md 会话存储句校正：legacy `.json` 迁移已删 + `schema_version` 写的是 2 | 同一句两处与代码不符：①「Legacy `.json` files (schema_version ≤ 1) are migrated on next `Save`」——`65a31d50` 之后 `Load`/`LoadFrom` 只开 `.jsonl`，无迁移路径；②写 `schema_version=2`，代码是 `CurrentSchemaVersion = 3`。照文档写测试会测到不存在的路径 | `git show 65a31d50`（"seek hasn't shipped, so there are no schema-v1 single-file JSON sessions in the wild"）；`internal/session/session.go` 的 `Load` / `LoadFrom` / `CurrentSchemaVersion`；`AGENTS.md:94` |
 | 3 | ~~E3 / E4 承重轴的 release lane 成员资格定案~~ **已收口**（c_3xyt7w，2026-11-25） | 定案结果：E4 `subagent-bg-resume` **在册**（`lane-release.txt` 的承重轴块；gate 0.6 @ 5 轮是 §六.3 的 doctrine 下限，闸门语义完整）；E3 `plan-e2e` **不进名单**（`record_only: true` ⇒ 写进闸门只会让闸门永久绿），转正路径（主会话真 key 5 轮 baseline → E2 记 gate → 翻 `record_only` + 取消注释）落在 § Load-bearing axes 表的 E3 行与 `eval/cases/plan-e2e/README.md`；旧占位卡号已作废，README lane 表与名单一致 | `eval/lane-release.txt` 的承重轴块（在册项 `subagent-bg-resume`）＋§ Load-bearing axes 表；`eval/cases/plan-e2e/README.md` §record_only 现状 |
 
 ## 发版前跑什么（lanes, E6）
 
-E6（[`docs/prd/feature-eval-v2.md`](../docs/prd/feature-eval-v2.md)
+E6（[`docs/prd/archive/feature-eval-v2.md`](../docs/prd/archive/feature-eval-v2.md)
 §2.2/§2.3、card c_rkoeiy）把两条观测道落成 **lane 名单**：`eval/run.sh
 --lane <name>` 跑 `eval/lane-<name>.txt` 里的用例集（一行一名，`#` 注释
 与空行忽略；名单出现不存在的用例、`--lane` 与显式 `<case-name>` 同给、
@@ -624,7 +624,7 @@ This repo's own tuning history:
 | 粒度 | 单例 | 全部会话 / 按 model×月份分组 |
 | 用在 | 回归闸门、发版前 | 连续效率趋势、参数调优的改前/改后对照 |
 
-它填的是 [`docs/prd/feature-eval-v2.md`](../docs/prd/feature-eval-v2.md) §1.3
+它填的是 [`docs/prd/archive/feature-eval-v2.md`](../docs/prd/archive/feature-eval-v2.md) §1.3
 诊断的留白——用例集由 pitfalls 台账孵化，本质是「历史 bug 的回归集」，测不了
 「复杂任务上的效率分布」。这个工具补的正是后者：同一批 transcript 上量出
 **连续量**，而不是再补一条二值断言。
@@ -767,7 +767,7 @@ While the opencode/compatible lane is active, `run.sh` **scrubs `DEEPSEEK_API_KE
 
 Cost note: rows on a provider lane carry no model id, so cross-lane cost comparisons read the ratios, not the absolute `$` (same caution as the ablation table).
 
-## Load-bearing axis cases (eval v2 E3+, `docs/prd/feature-eval-v2.md` §2.2 B)
+## Load-bearing axis cases (eval v2 E3+, `docs/prd/archive/feature-eval-v2.md` §2.2 B)
 
 Task-level cases for the v0.11–0.12 surface that grew fastest with zero eval
 coverage (plan state machine, subagent lifecycle, serve/web plane). Judging is
@@ -803,7 +803,7 @@ emitted as `runner_fact` lines and counted by `runner_assert_failures`.
 ## Judge 层：LLM-as-judge over final_text（eval v3 J，2026-11-22）
 
 修订 eval-v2 §2.5 的「❌ 不做 LLM-as-judge」（修订依据与边界见
-[`docs/prd/feature-eval-v3.md`](../docs/prd/feature-eval-v3.md) 状态头）：
+[`docs/prd/archive/feature-eval-v3.md`](../docs/prd/archive/feature-eval-v3.md) 状态头）：
 确定性优先不变——judge 只补**复算不可能的面**（答案对不对、是否答非所问），
 可复算性落点移到**校准层**（标注集 + agreement 报告入库）。机械指标与判分层
 刻意正交：2026-11-13 的 effort-max 行机械绿但只交付过程叙述、a3-nl 机械红但

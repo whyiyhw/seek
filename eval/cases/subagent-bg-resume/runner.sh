@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# runner.sh — subagent-bg-resume (eval v2 E4, feature-eval-v2.md §2.2/:108,
+# runner.sh — subagent-bg-resume (eval v2 E4, archive/feature-eval-v2.md §2.2/:108,
 # card c_vollxv). Replaces the default harness invocation for the same
 # reason session-id-contract does: the default passes -no-save, and in
 # --no-save seek skips subagent wiring entirely (cmd/seek: "the `agent`

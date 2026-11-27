@@ -41,6 +41,44 @@ func TestParsePermissionOutcome(t *testing.T) {
 	}
 }
 
+// TestParsePermissionSelection is the ask_user fallback's decoder (card
+// c_7bqiq5): unlike ParsePermissionOutcome it must NOT interpret the id
+// against the approval vocabulary, because the ids on the wire are the
+// question's own rows ("user", "project", …). The load-bearing row is the
+// first one: "user" would be an unknown echo under the approval decoder
+// (→ deny) and is a perfectly good answer here.
+func TestParsePermissionSelection(t *testing.T) {
+	cases := []struct {
+		name   string
+		raw    string
+		wantID string
+		wantOK bool
+		note   string
+	}{
+		{"question row id", `{"outcome":{"outcome":"selected","optionId":"user"}}`, "user", true, "the whole point: ids outside the approval vocabulary are answers, not denials"},
+		{"skip row id", `{"outcome":{"outcome":"selected","optionId":"seek:skip"}}`, "seek:skip", true, "callers recognise the sentinel themselves"},
+		{"legacy bare string", `{"outcome":"project"}`, "project", true, "pre-1.0 draft shape still decodes"},
+		{"cancelled", `{"outcome":{"outcome":"cancelled"}}`, "", false, ""},
+		{"selected with empty id", `{"outcome":{"outcome":"selected"}}`, "", false, ""},
+		{"junk json", `not json`, "", false, ""},
+		{"empty body", `{}`, "", false, ""},
+	}
+	for _, c := range cases {
+		id, ok := ParsePermissionSelection([]byte(c.raw))
+		if id != c.wantID || ok != c.wantOK {
+			t.Errorf("%s: ParsePermissionSelection(%s) = (%q, %v), want (%q, %v) %s", c.name, c.raw, id, ok, c.wantID, c.wantOK, c.note)
+		}
+	}
+}
+
+// TestMethodRequestPermission pins the wire spelling the ask_user fallback
+// shares with the approval lane — one constant, so the two can't drift.
+func TestMethodRequestPermission(t *testing.T) {
+	if MethodRequestPermission != "session/request_permission" {
+		t.Errorf("MethodRequestPermission = %q, want session/request_permission", MethodRequestPermission)
+	}
+}
+
 // startCallServer wires a Server over pipes and hands back BOTH sides,
 // so a test can drive agent→client Calls and script the client replies.
 func startCallServer(t *testing.T) (*Server, *json.Encoder, *json.Decoder) {

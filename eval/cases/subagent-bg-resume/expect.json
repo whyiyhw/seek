@@ -1,5 +1,5 @@
 {
-  "description": "承重轴 E4（feature-eval-v2.md §2.2 / :108，c_vollxv）：后台子代理全生命周期——run_in_background 子代理完成、完成通知进主会话流（notified 事件 + <context> 消息双面）、-resume 续话后 session_id 续话 run 带 resumed_from 血统、子代理产物落在预期路径。runner.sh 链式两次调用（fresh 存会话 → -resume 同会话），盘面断言走 runner_fact（check/value）通道，流面断言看 agent 工具调用的参数形状。防假红：只断言事件形状与字段（event 种类、sub_sid 联接、[agent: background done sub-sid=<full>] wire 前缀），不断言任何散文措辞。Release lane 成员资格：在册（c_3xyt7w，2026-11-25，eval/lane-release.txt）——gate 0.6 @ 5 轮是 doctrine 下限，真 key baseline 仍属发版道人工动作。",
+  "description": "承重轴 E4（archive/feature-eval-v2.md §2.2 / :108，c_vollxv）：后台子代理全生命周期——run_in_background 子代理完成、完成通知进主会话流（notified 事件 + <context> 消息双面）、-resume 续话后 session_id 续话 run 带 resumed_from 血统、子代理产物落在预期路径。runner.sh 链式两次调用（fresh 存会话 → -resume 同会话），盘面断言走 runner_fact（check/value）通道，流面断言看 agent 工具调用的参数形状。防假红：只断言事件形状与字段（event 种类、sub_sid 联接、[agent: background done sub-sid=<full>] wire 前缀），不断言任何散文措辞。Release lane 成员资格：在册（c_3xyt7w，2026-11-25，eval/lane-release.txt）——gate 0.6 @ 5 轮是 doctrine 下限，真 key baseline 仍属发版道人工动作。",
   "max_turns": 8,
   "min_agent_bg_calls": 1,
   "min_agent_continue_calls": 1,

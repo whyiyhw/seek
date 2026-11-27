@@ -1,5 +1,5 @@
 # eval/lane-core.txt — nightly core lane case list (eval v2 E6, card
-# c_rkoeiy; docs/prd/feature-eval-v2.md §2.3 "约 8 例低成本"). Consumed
+# c_rkoeiy; docs/prd/archive/feature-eval-v2.md §2.3 "约 8 例低成本"). Consumed
 # by: eval/run.sh --lane core — in CI via the eval-nightly schedule job
 # (.github/workflows/ci.yml, --rounds 2) and ad-hoc.
 #
