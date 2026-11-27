@@ -10,7 +10,7 @@
 //            每个钮的右缘不越轨、中心点 hit-test 命中它自己（返工轮补——
 //            overflow 溢出轨压到中栏时，会话详情页的 ⟩ 被「💬 聊天」盖住，
 //            rect 断言看不见，只有 elementFromPoint 会红）；
-//   按钮组 → #bar wrap 后每个按钮完整在视口内（offsetRight ≤ 390、
+//   视图钮（#side-nav，W6-2 从 #bar 搬进侧栏）→ 展开抽屉内完整在视口内（
 //            无自身横向裁切），/cancel 全文可见；
 //   ellipsis → 每个面 documentElement.scrollWidth ≤ innerWidth
 //            （页面级零横向溢出）；设置面板 .set-row 纵向堆叠
@@ -160,7 +160,7 @@ const RAIL_JS = `(() => {
   const side = document.getElementById('side');
   const sr = side.getBoundingClientRect();
   const bad = [];
-  for (const b of document.querySelectorAll('#side-head button')) {
+  for (const b of document.querySelectorAll('#side-head button, #side-new, #side-sec button, #side-nav button')) {
     const r = b.getBoundingClientRect();
     if (r.width === 0 || r.height === 0) { bad.push(b.id + '(不可见)'); continue; }
     if (r.right > sr.right + 1 || r.left < sr.left - 1)
@@ -188,7 +188,7 @@ for (const theme of ['dark', 'light']) {
   ck(`${theme} 聊天面无裁切元素`, o1.clipped.length === 0, o1.clipped.join('；'));
   const barFit = await evalJS(`(() => {
     const bad = [];
-    for (const b of document.querySelectorAll('#bar button')) {
+    for (const b of document.querySelectorAll('#side-nav button, #side-new')) {
       const r = b.getBoundingClientRect();
       if (r.right > window.innerWidth + 1) bad.push(b.id + '→' + Math.round(r.right));
       if (b.scrollWidth > b.clientWidth + 1) bad.push(b.id + '(裁' + (b.scrollWidth - b.clientWidth) + 'px)');
