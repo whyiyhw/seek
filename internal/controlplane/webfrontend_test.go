@@ -1220,14 +1220,14 @@ func TestWeb_PageChatFlowW63(t *testing.T) {
 		t.Error("page still emits the 'tool · ' role label — W6-3 retired it (results merge into the call row)")
 	}
 	for _, need := range []string{
-		"max-width: 768px",             // the reading column
-		"var(--seek-user-bubble)",      // user bubble rides a themed token, not a bare hex
-		"--seek-user-bubble:#1f2a44",   // dark value pinned
-		"--seek-user-bubble:#edf3fe",   // light value pinned
-		".tcall",                       // the one tool-call row shape (live + history)
-		"function histTurn",            // history renderer rides the same forms
-		"turn-meta",                    // per-turn hover copy affordance
-		"dataset.mi",                   // message-index stamp (blocks ≠ messages now)
+		"max-width: 768px",           // the reading column
+		"var(--seek-user-bubble)",    // user bubble rides a themed token, not a bare hex
+		"--seek-user-bubble:#1f2a44", // dark value pinned
+		"--seek-user-bubble:#edf3fe", // light value pinned
+		".tcall",                     // the one tool-call row shape (live + history)
+		"function histTurn",          // history renderer rides the same forms
+		"turn-meta",                  // per-turn hover copy affordance
+		"dataset.mi",                 // message-index stamp (blocks ≠ messages now)
 	} {
 		if !strings.Contains(page, need) {
 			t.Errorf("embedded page lost the W6-3 chat-flow piece %q (c_ovly6d)", need)
