@@ -1,6 +1,6 @@
 # serve-web-stream
 
-**Probes**: eval v2 三条承重轴之一（[`docs/prd/archive/feature-eval-v2.md`](../../docs/prd/archive/feature-eval-v2.md)
+**Probes**: eval v2 三条承重轴之一（[`docs/prd/archive/feature-eval-v2.md`](../../../docs/prd/archive/feature-eval-v2.md)
 §2.2 / §三-E5）——`seek serve --frontend=web` 平面的**端到端线契约**：
 `/msg /bind` → 执行器派生真 seek 子进程跑一轮 → W1.4 SSE 事件族 →
 `/rpc session/list` 落盘可读。这是 2026-11-20/21 W5 组（流事件族 /
