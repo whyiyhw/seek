@@ -81,6 +81,13 @@ func startACPChild(t *testing.T, backendURL, workDir string, extraEnv ...string)
 		"ANTHROPIC_API_KEY=",
 		"OPENAI_API_KEY=",
 		"GEMINI_API_KEY=",
+		// The startup catalogue gate now keys off the CREDENTIAL, not the
+		// launch lane (c_nfeloo): an ambient OPENCODE_API_KEY in the
+		// developer's shell would otherwise make these children read the
+		// catalogue cache and refresh from opencode.ai. SEEK_HOME/HOME
+		// already isolate the stored browser login; this closes the env
+		// half of the same seam.
+		"OPENCODE_API_KEY=",
 		"SEEK_NO_WEBFETCH=1",
 		"SEEK_NO_WEBSEARCH=1",
 		"SEEK_AUTO_DISTILL=0",

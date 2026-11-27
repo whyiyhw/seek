@@ -151,6 +151,7 @@ cd "$LAUNCH" || fail "cd launch dir"
 env SEEK_HOME="$SMOKE_HOME" \
     DEEPSEEK_API_KEY=selftest-dummy \
     ANTHROPIC_API_KEY= OPENAI_API_KEY= GEMINI_API_KEY= GLM_API_KEY= \
+    OPENCODE_API_KEY= OPENDESIGN_API_KEY= \
     "$SANDBOX/seek" acp < "$FIFO" > "$OUT" 2> "$SMOKE_ERR" &
 SEEKPID=$!
 exec 3> "$FIFO"   # hold the writer end open across requests

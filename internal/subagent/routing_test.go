@@ -64,6 +64,38 @@ func TestResolveRoute(t *testing.T) {
 			wantRoute: Route{Provider: ProviderOpenCode, Model: pricing.ModelOpenCodeV41Flash},
 		},
 		{
+			// c_tnzudu ①: the Go entry is the lane's MENU now, not a
+			// one-row allow-list. The picker offers kimi-k2.7-code, so a
+			// spawn naming it must resolve — before this the only way to
+			// reach it was via the OpenDesign lane (or an outright refusal).
+			name:      "opencode + Go menu id accepted",
+			provider:  ProviderOpenCode,
+			model:     "kimi-k2.7-code",
+			wantRoute: Route{Provider: ProviderOpenCode, Model: "kimi-k2.7-code"},
+		},
+		{
+			// c_tnzudu ②: deepseek-v4-pro is on the official API's own
+			// supported-name list — "The supported API model names are
+			// deepseek-flash, deepseek-v4-pro" — and modelcap.LaneOf
+			// resolves the id to THIS lane, so the first-tier entry must
+			// carry it. Without it the cross-lane refusal for e.g.
+			// (glm, v4-pro) said "pass provider=deepseek" and that pair
+			// was refused again.
+			name:      "deepseek + v4-pro accepted",
+			provider:  ProviderDeepSeek,
+			model:     pricing.ModelV4Pro,
+			wantRoute: Route{Provider: ProviderDeepSeek, Model: pricing.ModelV4Pro},
+		},
+		{
+			// ...and model-only v4-pro lands on the lane that owns its
+			// rate card (LaneOf's sharedFirstTier tie-break), not on
+			// whichever gateway also lists it.
+			name:      "model only v4-pro infers deepseek",
+			provider:  "",
+			model:     pricing.ModelV4Pro,
+			wantRoute: Route{Provider: ProviderDeepSeek, Model: pricing.ModelV4Pro},
+		},
+		{
 			name:      "model only opencode id (distinct from direct deepseek-flash)",
 			provider:  "",
 			model:     "deepseek-v4.1-flash",
@@ -369,11 +401,131 @@ func TestResolveRoute_ModelOnlyAgreesWithLaneOf(t *testing.T) {
 		}
 		check(row.ID)
 	}
+	// The OpenDesign menu too — its exclusive rows (the eco id, flashx,
+	// claude-haiku-5.5, gpt-6-luna) are exactly the ones that only LaneOf
+	// can place, so a menu row appearing there without a matching LaneOf
+	// answer would be invisible to the loop above.
+	for _, row := range pricing.OpenDesignModels {
+		check(row.ID)
+	}
 	check(pricing.ModelGLM53)
 	check(pricing.ModelV4Pro)
 	check(deepseek.ModelV41Flash)
 	check("deepseek-v4.1-flash-eco")
 	check(pricing.ModelOpenDesignV41Flash)
+}
+
+// TestResolveRoute_NoDeadEndHints is acceptance ③ of c_tnzudu: every
+// refusal that advises "pass provider=X" must be a step the caller can
+// actually take — following it and retrying the SAME model must resolve.
+// A hint that leads to another refusal is worse than no hint: the model
+// (or the human) burns a turn on it and has no way to tell an advice
+// problem from a routing problem.
+//
+// The sweep is exhaustive over the routing table minus nothing: every
+// (lane, id) pair in the cross-product of providerOrder × all known ids,
+// plus first-tier freeform ids that only LaneOf's prefix fallback
+// recognises (the retired deepseek-v4-flash family, unfetched vendor
+// defaults), plus ids no lane knows. Where the advice is emitted, it must
+// work; where it would not work, it must not be emitted.
+func TestResolveRoute_NoDeadEndHints(t *testing.T) {
+	ids := map[string]bool{
+		deepseek.ModelV41Flash: true,
+		pricing.ModelV4Pro:     true,
+		// Freeform first-tier ids: LaneOf resolves these by vendor prefix
+		// but NO routing entry lists them, so "pass provider=deepseek"
+		// would be a lie.
+		"deepseek-v4-flash": true,
+		"deepseek-reasoner": true,
+		"glm-5.3-flashx2":   true,
+		// Second-tier lanes this process cannot route at all.
+		"claude-opus-9":    true,
+		"gpt-4o":           true,
+		"gemini-2.0-flash": true,
+		// Nothing knows this one.
+		"totally-unknown": true,
+	}
+	for _, lane := range providerOrder {
+		for _, m := range knownModels[lane] {
+			ids[m] = true
+		}
+	}
+	for id := range ids {
+		for _, provider := range providerOrder {
+			if _, err := ResolveRoute(provider, id); err != nil {
+				advice := passProviderAdvice(err.Error())
+				if advice == "" {
+					continue
+				}
+				if _, retryErr := ResolveRoute(advice, id); retryErr != nil {
+					t.Errorf("dead-end hint: ResolveRoute(%q,%q) says pass provider=%q, but following it fails: %v",
+						provider, id, advice, retryErr)
+				}
+			}
+		}
+	}
+}
+
+// passProviderAdvice pulls the lane name out of a "pass provider=%q"
+// hint ("" when the refusal carries no advice). Substring-anchored rather
+// than a full regexp: the surrounding prose is free to change, the quoted
+// lane name is the part callers act on.
+func passProviderAdvice(msg string) string {
+	const marker = `pass provider="`
+	i := strings.Index(msg, marker)
+	if i < 0 {
+		return ""
+	}
+	rest := msg[i+len(marker):]
+	if j := strings.IndexByte(rest, '"'); j >= 0 {
+		return rest[:j]
+	}
+	return ""
+}
+
+// TestResolveRoute_MenusAreRoutable is acceptance ①/④ of c_tnzudu: a lane's
+// entry IS its menu, so every id either subscription surface offers must be
+// spawnable on that lane — and, because the agent tool's description tells
+// the model to "pass both when the gateway matters", every id BOTH gateway
+// menus carry must resolve under both entries. The enum in the tool schema
+// and the menus in pricing are the inputs; the routing table must accept
+// their cross-product without a second table drifting away from them.
+func TestResolveRoute_MenusAreRoutable(t *testing.T) {
+	for _, lane := range []string{ProviderOpenCode, ProviderOpenDesign} {
+		for _, row := range knownModels[lane] {
+			if _, err := ResolveRoute(lane, row); err != nil {
+				t.Errorf("ResolveRoute(%q,%q) refused a row of that lane's own menu: %v", lane, row, err)
+			}
+		}
+	}
+
+	// The overlap is what "pass both" is FOR: a shared id must be routable
+	// on whichever gateway the caller names.
+	for _, menu := range [][]pricing.LaneModel{pricing.OpenCodeGoModels, pricing.OpenDesignModels} {
+		for _, row := range menu {
+			for _, lane := range []string{ProviderOpenCode, ProviderOpenDesign} {
+				if !modelcap.Serves(lane, row.ID) {
+					continue // that gateway's plan does not carry it
+				}
+				if _, err := ResolveRoute(lane, row.ID); err != nil {
+					t.Errorf("shared menu id %q refused on %q although modelcap.Serves says yes: %v", row.ID, lane, err)
+				}
+			}
+		}
+	}
+
+	// And the default is still the lane's own row-0 model, so a
+	// provider-only spawn keeps its documented meaning.
+	for _, lane := range providerOrder {
+		got, err := ResolveRoute(lane, "")
+		if err != nil {
+			t.Errorf("ResolveRoute(%q,\"\") = %v", lane, err)
+			continue
+		}
+		if got.Model != knownModels[lane][0] {
+			t.Errorf("lane default for %q = %q, want table row 0 %q", lane, got.Model, knownModels[lane][0])
+		}
+	}
 }
 
 // TestResolveRoute_ModelOnlyStaysBounded pins the EDGE of the LaneOf-first

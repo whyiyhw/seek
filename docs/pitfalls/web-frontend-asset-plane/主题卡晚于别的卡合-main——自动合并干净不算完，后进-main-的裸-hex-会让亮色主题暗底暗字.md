@@ -1,6 +1,6 @@
 ### 主题卡晚于别的卡合 main——自动合并干净不算完，后进 main 的裸 hex 会让亮色主题暗底暗字
-- **Saw**: c_ni7mzw（主题 token 化）`git merge main` 时，`webfrontend.html` 只有三处文本冲突；另外三块（附件的 `#tray/.chip`、子代理的 `.ag-badge.st-*`、ctxmeter 的 `#conn/#ctx`）**自动合并成功**，各自带着 c_56yrcj/c_4doebx/c_oyp2qf 的暗色谱裸 hex——合并后跑 `TestWeb_PageThemeSettings` 的裸色检查立刻红，不跑就是亮色主题下暗底暗字 + 对比度 ~2:1。
-- **Why**: 主题 token 化是「扫一遍页面把所有 hex 换成 var()」的**一次性全量改写**，它对「之后新写的 hex」没有任何约束力；主题卡的分支越久，自动合并带进来的裸 hex 越多。三条冲突里 `AG_STATUS` 那条更隐蔽：HEAD 版是 JS 里直接给 `var(--seek-*)`，main 版改成「类名承载、颜色回 CSS」，两侧都在，挑任一都错（挑 HEAD 会删掉 c_4doebx 的三态结构，挑 main 会把颜色留在 CSS 的 hex 上）。
-- **Fix**: 解冲突时对每个新进 main 的样式块**逐块做 token 改写**（`#conn/#ctx`、附件托盘、徽标三态、`.ag-field`），断线条单开 `--seek-warn-bg`（底色与前景必须分开成对，否则亮色主题下只有一头能调）；`AG_STATUS` 取 main 的结构 + 在注释里写明色源仍在 CSS token 层。判据不是「冲突解完了」，是**裸色检查 + 两主题无头对比度全绿**（`bash scripts/selftest.sh web-theme-manual`）。
-- **Lesson**: 全量改写类卡（token 化、格式化、API 迁移）的验收必须包含「合完 main 再跑一遍」，因为它的不变式由**全库扫描**维持、而合并只会往里加新东西；`git diff --check`/无冲突标记的机械闸对这种腐化一无所知。冲突解完先跑那条全库不变的测试，再谈提交。
-- **Refs**: `internal/controlplane/webfrontend.html`（`--seek-warn-bg`、`#conn/#ctx`、`.ag-badge.st-*`）；`internal/controlplane/webfrontend_test.go` `TestWeb_PageThemeSettings`（裸色检查）；`scripts/web-theme-headless.mjs`（两主题 × 九面对比度）。
+- **Saw**: c_ni7mzw（token 化）`git merge main`：`webfrontend.html` 只三处文本冲突；附件 `#tray/.chip`、`.ag-badge.st-*`、`#conn/#ctx` 三块自动合并、各带 c_56yrcj/c_4doebx/c_oyp2qf 暗色裸 hex——`TestWeb_PageThemeSettings` 裸色检查即红，不跑则亮色暗底暗字 + 对比度 ~2:1。
+- **Why**: token 化把全页 hex 一次性换 var()，对之后新写的 hex 无约束，分支越久合并带进的裸 hex 越多；`AG_STATUS` 冲突两侧都错——HEAD 在 JS 给 `var(--seek-*)`（丢 c_4doebx 三态），main 类名承载颜色回 CSS（颜色留 hex）。
+- **Fix**: 每个新进 main 样式块逐块 token 改写（`#conn/#ctx`、附件托盘、徽标三态、`.ag-field`），断线条单开 `--seek-warn-bg`（底色前景必须成对）；`AG_STATUS` 取 main 结构、色源留 CSS token 层注释。判据=裸色检查+两主题无头对比度全绿（`bash scripts/selftest.sh web-theme-manual`）。
+- **Lesson**: 全量改写类卡（token 化/迁移）验收必须含「合完 main 再跑一遍」——不变式靠全库扫描维持，合并只往里加新东西，`git diff --check` 抓不住。
+- **Refs**: `internal/controlplane/webfrontend.html`；`internal/controlplane/webfrontend_test.go` `TestWeb_PageThemeSettings`；`scripts/web-theme-headless.mjs`。

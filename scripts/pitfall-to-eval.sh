@@ -41,11 +41,14 @@ cases_dir="$repo_root/eval/cases"
 # section directory name. Scoring = model-behaviour likelihood heuristic
 # (title + body behavioural signals, unchanged from the single-file era).
 parse_entries() {
-  local files
-  files=$(find "$pitfalls" -name '*.md' ! -name README.md ! -path '*/absorbed/*' 2>/dev/null | sort)
-  [ -n "$files" ] || return 0
-  # shellcheck disable=SC2086
-  awk -v OFS='\t' '
+  local list prog
+  list=$(mktemp) || return 0
+  # -print0 + xargs -0: entry filenames contain spaces ("体积记账的 delta 锚点 …"),
+  # so splitting a newline-separated list into awk's argv truncated paths.
+  find "$pitfalls" -name '*.md' ! -name README.md ! -path '*/absorbed/*' -print0 2>/dev/null \
+    | sort -z >"$list"
+  if [ ! -s "$list" ]; then rm -f "$list"; return 0; fi
+  prog='
     FNR == 1 {
       if (title != "") print path, cat, title, saw, why, fix, lesson, refs, score
       title = saw = why = fix = lesson = refs = ""; score = 0
@@ -83,7 +86,9 @@ parse_entries() {
     /^- \*\*Lesson\*\*: / { lesson = $0; sub(/^- \*\*Lesson\*\*: /, "", lesson); gsub(/\t/, " ", lesson); next }
     /^- \*\*Refs\*\*: /   { refs = $0;   sub(/^- \*\*Refs\*\*: /, "", refs); gsub(/\t/, " ", refs); next }
     END { if (title != "") print path, cat, title, saw, why, fix, lesson, refs, score }
-  ' $files
+  '
+  xargs -0 awk -v OFS='\t' "$prog" <"$list"
+  rm -f "$list"
 }
 
 slugify() {

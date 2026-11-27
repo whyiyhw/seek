@@ -488,7 +488,7 @@ func cmdModel(m *Model, args string) cmdResult {
 	// an id — no curated model is named "refresh".
 	if strings.EqualFold(strings.TrimSpace(args), "refresh") {
 		if m.opts.RefreshOpenCodeModels == nil {
-			return cmdResult{text: styleMuted.Render("model refresh: no live model catalogue on this lane (only --provider=opencode has one)")}
+			return cmdResult{text: styleMuted.Render("model refresh: no live model catalogue wired into this session (needs an OpenCode credential on this machine — key or `seek auth opencode`)")}
 		}
 		return cmdResult{
 			text:  styleMuted.Render("model refresh: fetching the OpenCode catalogue…"),
