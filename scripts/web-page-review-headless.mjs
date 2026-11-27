@@ -237,7 +237,7 @@ async function backToChat() {
         return;
       }
     }
-    if (cl.contains('viewing')) evalJS('viewLive()');
+    if (cl.contains('viewing')) viewLive();   // 页面上下文：直接调页面函数
   })()`);
   await delay(150);
 }
@@ -279,7 +279,7 @@ async function navigate(panel) {
     await until(`面板类 ${panel.cls}`, `document.body.classList.contains('${panel.cls}')`, 2500);
   } catch {
     await evalJS(`(() => {
-      evalJS('closePanes()');
+      closePanes();   // 页面上下文：直接调页面函数
       document.body.classList.add('${panel.cls}', 'browsing');
       ${panel.loadFn}();
     })()`);

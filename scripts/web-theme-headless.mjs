@@ -239,7 +239,7 @@ const ensureChat = async () => {
   if (await until('已是聊天面', isChat, 400)) return true;
   await evalJS(`(() => {
     if (document.body.classList.contains('viewing')) {
-      evalJS('viewLive()'); return;
+      viewLive(); return;   // 页面上下文：直接调页面函数，别套 Node 侧的 evalJS
     }
     for (const id of ['set-btn','mem-btn','stat-btn','agents-btn']) {
       const b = document.getElementById(id);
