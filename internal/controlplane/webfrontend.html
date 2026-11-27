@@ -350,7 +350,7 @@
   #ctx { flex: none; display: flex; align-items: center; gap: 6px;
          white-space: nowrap; color: var(--seek-fg-dim); }
   #ctx[hidden] { display: none; }
-  #ctx .bar { width: 56px; height: 5px; flex: none; background: var(--seek-line);
+  #ctx .bar { width: 56px; height: 4px; flex: none; background: var(--seek-line);
               border-radius: 999px; overflow: hidden; }
   #ctx .bar i { display: block; height: 100%; width: 0; background: var(--seek-ok); }
   #ctx.warn { color: var(--seek-warn); }
@@ -474,21 +474,43 @@
           color: var(--seek-fg-soft); }
   /* 中断收口标注（c_5m3fm6）：保留的半截气泡尾部一行灰字，流状态可见地终止 */
   .msg .cut { color: var(--seek-fg-dim); font-size: 13px; padding-top: 2px; }
-  /* 输入区底对齐（c_7lsngm）：按钮跟到多行输入的底边；position:relative
-     是候选弹层的定位父级——贴表单上沿、宽度跟表单（窄屏自然满宽）。 */
-  form { position: relative; display: flex; gap: 8px; align-items: flex-end;
-         padding: 10px 14px; background: var(--seek-panel);
-         border-top: 1px solid var(--seek-line); }
+  /* composer 卡片（W6-4，notes §0⑥/§1/§2）：宽同阅读列（外框 774）、居中、
+     r=22、l2 边框 + §2 阴影；textarea 无自己的边框、增到 200px 后滚动，下行
+     操作条高 42。position:relative 是候选弹层的定位父级（贴卡片上沿）。 */
+  form { position: relative; display: flex; flex-direction: column;
+         align-self: center; width: 100%; max-width: 774px;
+         margin: 6px 0 10px; background: var(--seek-panel);
+         border: 1px solid var(--seek-line-2); border-radius: 22px;
+         box-shadow: 0 4px 12px rgba(0,0,0,.02), 0 0 1px rgba(0,0,0,.08); }
   /* 多行输入（c_7lsngm）：Enter 发送 / Shift+Enter 换行——textarea 才有
-     换行；高度按内容长（grow() 写 style.height），上限 CSS 兜底滚动 */
-  #input { flex: 1; background: var(--seek-inset); color: inherit; border: 1px solid var(--seek-line);
-           border-radius: 12px; padding: 8px 10px; font: inherit; outline: none;
-           resize: none; line-height: 24px; min-height: 40px; max-height: 40vh;
+     换行；高度按内容长（grow() 写 style.height），上限 200px 后滚动（W6-4）*/
+  #input { background: transparent; color: inherit; border: 0; outline: none;
+           resize: none; font: inherit; line-height: 24px;
+           padding: 10px 16px 2px; min-height: 36px; max-height: 200px;
            overflow-y: auto; }
   #input:focus { border-color: var(--seek-line-focus); }
+  .frow { display: flex; align-items: center; gap: 6px; height: 42px;
+          padding: 2px 8px 6px; }
+  .frow .sp { flex: 1; }
+  #attach-btn, #mic { width: 28px; height: 28px; border-radius: 999px;
+                      background: var(--seek-soft); display: inline-flex;
+                      align-items: center; justify-content: center; padding: 0; }
+  #attach-btn .ic, #mic .ic { width: 15px; height: 15px; }
+  #ws-chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px;
+             border-radius: 999px; background: var(--seek-soft);
+             color: var(--seek-fg-soft); font-size: 13px; max-width: 40%; }
+  #ws-chip > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #ws-chip .caret { width: 12px; height: 12px; flex: none; }
+  #ws-chip.pick { color: var(--seek-cta); box-shadow: inset 0 0 0 1px var(--seek-cta); }
+  #model-tag { color: var(--seek-fg-soft); font-size: 13px; font-weight: 500;
+               white-space: nowrap; }
+  #send { width: 34px; height: 34px; border-radius: 999px; padding: 0;
+          display: inline-flex; align-items: center; justify-content: center; }
+  #send .ic { width: 16px; height: 16px; }
+  #send:disabled { opacity: .4; }
   /* ---- 输入增强弹层（c_7lsngm）：'/' 指令补全 + '@' 会话引用 ----
      绝对定位贴在表单上沿（form 是定位父级），文档流不位移。 */
-  #menu { position: absolute; left: 14px; right: 14px; bottom: 100%;
+  #menu { position: absolute; left: 8px; right: 8px; bottom: 100%;
           margin-bottom: 2px; max-height: 46vh; overflow-y: auto;
           background: var(--seek-panel); border: 1px solid var(--seek-line); border-radius: 12px;
           box-shadow: 0 -6px 18px rgba(0,0,0,.35); }
@@ -573,7 +595,7 @@
   #mic.rec { background: var(--seek-rec); color: var(--seek-rec-fg); }
   /* 发送钮（W6-1）：品牌蓝实底——全页唯一被允许用品牌色的按钮（dsh 同款
      口径：蓝只出现在「业务态」）。#id 选择器压过 .btn-primary，无需 !important。 */
-  #send { background: var(--seek-cta); color: var(--seek-cta-fg); }
+  #send { background: var(--seek-cta); color: var(--seek-cta-fg); flex: none; }
   /* 停止键态（c_5m3fm6）：生成中 #send 变停止键——与录音态共用同一对
      --seek-rec token（同色系 + 两主题都过对比度，见上条注释） */
   #send.stop { background: var(--seek-rec); color: var(--seek-rec-fg); }
@@ -606,7 +628,7 @@
      merge main（2026-11-20）落进本卡时色值改走 token（原样留 hex 会让亮色
      主题下托盘/缩略图底仍是暗色，裸色检查也会红）。附件/麦克风两个
      图标钮的尺寸与底色统一在按钮三档块（c_25d2ey）。 */
-  #tray { display: none; gap: 8px; flex-wrap: wrap; padding: 8px 14px;
+  #tray { display: none; gap: 8px; flex-wrap: wrap; padding: 8px 12px 0;
           background: var(--seek-panel); border-top: 1px solid var(--seek-line); }
   #tray.has { display: flex; }
   body.browsing #tray { display: none; }
@@ -740,9 +762,10 @@
   #conv-proj span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   /* 计量行（W6-2 搬家 / W6-4 定样式）：#ctx 上下文余量条与 #usage 会话计量
      从 #status 横栏挪到 composer 下方的元信息行，id 与更新器原样。 */
-  #composer-meta { flex: none; display: flex; align-items: center; gap: 14px;
-                   padding: 4px 28px 8px 20px; color: var(--seek-fg-dim);
-                   font-size: 12px; }
+  #composer-meta { flex: none; display: flex; align-items: center; justify-content: center;
+                   gap: 14px; padding: 0 28px 10px; color: var(--seek-fg-dim);
+                   font-size: 13px; }
+  #composer-meta:empty { display: none; }
   /* 会话正文（主区）：点侧栏一条即亮，聊天面/输入框让位；聊天钮收回。
      三个资产面板（记忆/统计/后台）同一个「中栏一个面」口径：browsing 时
      聊天面也让位。 */
@@ -941,16 +964,52 @@
      未绑定/新会话时主区原本整片空白：给一块居中的引导（标题 + 一行操作
      说明 + 未绑定时一个点选按钮）。只在 #list 真的空着时出场——消息落地
      即摘除（JS dropChatEmpty），不占消息列表的任何选择器口径。 */
+  /* 空态 Hero（W6-4，notes §1 空态行 / dsh-07）：Hero + 芯片行 + composer
+     作为一组垂直居中——body.chat-empty-on 让 #center 纵向居中、#list 不再
+     撑满、conv-head 绝对化让位（不参与居中也不消失——顶上仍有一条头）。
+     首条消息落地（dropChatEmpty）摘类即落回底部；淡出 0.3s，
+     reduced-motion 关停。 */
+  /* 绝对定位的会话头以主栏为包含块：#center 不定位时 left/right 落到页面两端，
+     会话头横穿侧栏、盖住品牌行（W6-4 首版缺陷，2026-11-27 返工）。 */
+  body.chat-empty-on #center { justify-content: center; position: relative; }
+  body.chat-empty-on #conv-head { position: absolute; top: 0; left: 0; right: 0; }
+  /* 面板打开也是内容态，空态布局不跟进：聊天面整体让位（含 composer 下的计量行），
+     会话头回文档流、内容顶对齐。 */
+  body.browsing #composer-meta { display: none; }
+  body.browsing.chat-empty-on #center { justify-content: flex-start; }
+  body.browsing.chat-empty-on #conv-head { position: static; }
+  /* 只读浏览器（sess-detail）同是内容态：空态判定只看实时 #list，点开一条历史
+     时它还挂着——会话头不回文档流就盖在 #browser-head 上。 */
+  body.sess-detail.chat-empty-on #center { justify-content: flex-start; }
+  body.sess-detail.chat-empty-on #conv-head { position: static; }
+  body.chat-empty-on #list { flex: 0 0 auto; }
+  body.chat-empty-on #composer-meta { display: none; }   /* 空态无计量，别垫高 */
+  /* composer 在组底，裸居中会让它的中心落在视口中线下 60px——底下垫
+     一段呼吸边距把组重心抬回 dsh 的观感（验收②：卡中心 y ∈ 380–520）。 */
+  body.chat-empty-on form { margin-bottom: 64px; }
   .chat-empty { display: flex; flex-direction: column; align-items: center;
-                justify-content: center; gap: 10px; min-height: 100%;
-                padding: 24px 16px; text-align: center; }
-  .chat-empty .ce-t { color: var(--seek-fg-soft); font-size: 21px; line-height: 30px; font-weight: 600; }
+                gap: 10px; padding: 0 16px 12px; text-align: center;
+                opacity: 1; transition: opacity .3s; }
+  .chat-empty .hero { display: flex; align-items: baseline; gap: 8px; }
+  .chat-empty .hero-mark { width: 36px; height: 36px; align-self: center;
+                           color: var(--seek-fg); }
+  .chat-empty .hero-t { font-size: 24px; line-height: 32px; font-weight: 600; }
+  .chat-empty .hero-ver { color: var(--seek-fg-dim); font-size: 12px; }
+  .chat-empty .ce-chips { display: flex; gap: 8px; margin-top: 4px; }
+  .chat-empty .ce-chip { display: inline-flex; align-items: center; gap: 6px;
+                         padding: 6px 14px; border-radius: 999px;
+                         background: var(--seek-soft); color: var(--seek-fg-soft);
+                         font-size: 14px; }
+  .chat-empty .ce-chip .ic { width: 15px; height: 15px; }
+  .chat-empty .ce-chip.pick { color: var(--seek-cta);
+                              box-shadow: inset 0 0 0 1px var(--seek-cta); }
   .chat-empty .ce-x { color: var(--seek-fg-dim); font-size: 13px; line-height: 20px;
                       max-width: 46ch; }
   .chat-empty .ce-x code { background: var(--seek-panel); border: 1px solid var(--seek-line);
                            border-radius: 8px; padding: 0 4px; color: var(--seek-fg-soft); }
-  .chat-empty .ce-acts { margin-top: 2px; }
-  .chat-empty .ce-acts button { font-size: 13px; padding: 6px 14px; }
+  @media (prefers-reduced-motion: reduce) {
+    .chat-empty { transition: none; }
+  }
 
   /* ---- 跨会话趋势图（W5 卡 c_6xktw4）----
      三条曲线共用一条 x 轴，但各自归一到自己那一行；颜色全部走
@@ -1045,6 +1104,9 @@
     /* 视图入口随 #side-nav 进了侧栏抽屉（W6-2），窄屏不再有 #bar 换行
        问题；计量行在窄屏给 composer 让位（padding 收窄）。 */
     #composer-meta { padding: 4px 16px 8px 12px; }
+    #ws-chip { max-width: 44vw; }
+    #model-tag { display: none; }
+    form { margin: 4px 10px 8px; }
     /* 双栏→单栏：展开态抽屉化（脱离文档流覆盖中栏），收起态 44px 轨
        保持原样；遮罩同态翻出（基线 display:none） */
     #shell { position: relative; }
@@ -1252,23 +1314,30 @@
       <div id="hk-log"></div>
     </section>
     <form id="form">
-      <!-- 多行输入（c_7lsngm）：Enter 发送、Shift+Enter 换行；#menu 是 '/' 指令补全、
-           '@' 会话引用与项目点选（c_lnsdvu）共用的候选弹层（一行 DOM，三种候源），
-           贴着表单上沿。 -->
+      <!-- composer 卡片（W6-4，notes §0⑥/§1）：上行 textarea（自动增高到
+           200px 后滚动），下行操作条；#tray 附件条在卡内 textarea 上方；
+           #menu 候选弹层仍贴卡片上沿（'/' 指令、'@' 引用与项目点选共用）。 -->
+      <div id="tray"></div>
       <textarea id="input" autocomplete="off" rows="1" spellcheck="false"
                 placeholder="直接发消息；/ 看指令，@ 引用历史会话" autofocus></textarea>
       <div id="menu" role="listbox" aria-label="候选" hidden></div>
       <input id="file" type="file" multiple hidden
              accept=".png,.jpg,.jpeg,.webp,.gif,.pdf,.doc,.docx,.ppt,.pptx">
-      <button id="attach-btn" class="btn-icon" type="button" title="添加附件（也可直接拖入或粘贴）" aria-label="添加附件"><svg class="ic" aria-hidden="true"><use href="#i-paperclip"/></svg></button>
-      <button id="mic" class="btn-icon" type="button" title="按住说话，松开发送（≤120 秒）" aria-label="按住说话"><svg class="ic" aria-hidden="true"><use href="#i-mic"/></svg></button>
-      <!-- 发送键缺省禁用（c_jf3grt）：空草稿无可发送——禁用属性写在
-           静态标记上，首帧就不会出现「可点的空发送」；syncSend 随
-           输入/附件/流态改写。生成中它是停止键，恒可点。 -->
-      <button id="send" class="btn-primary" disabled>发送</button>
+      <div class="frow">
+        <button id="attach-btn" type="button" title="添加附件（也可直接拖入或粘贴）" aria-label="添加附件"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg></button>
+        <button id="mic" type="button" title="按住说话，松开发送（≤120 秒）" aria-label="按住说话"><svg class="ic" aria-hidden="true"><use href="#i-mic"/></svg></button>
+        <button id="ws-chip" type="button" title="选择/切换工作区"><svg class="ic" aria-hidden="true"><use href="#i-folder"/></svg><span id="ws-chip-n">选择工作区</span><svg class="ic caret" aria-hidden="true"><use href="#i-chevron-down"/></svg></button>
+        <span class="sp"></span>
+        <span id="model-tag" hidden></span>
+        <!-- 发送键缺省禁用（c_jf3grt）：空草稿无可发送——禁用属性写在
+             静态标记上，首帧就不会出现「可点的空发送」；syncSend 随
+             输入/附件/流态改写。生成中它是停止键，恒可点（W6-4 起圆形
+             图标钮：arrow-up 发送 / square 停止，语义在 aria-label 与
+             title，无文字——web-stop 断言随迁见 commit body）。 -->
+        <button id="send" disabled aria-label="发送"><svg class="ic" aria-hidden="true"><use href="#i-arrow-up"/></svg></button>
+      </div>
     </form>
     <div id="composer-meta"><span id="ctx" hidden><span id="ctx-m"></span><span class="bar"><i></i></span><span id="ctx-p"></span></span><span id="usage"></span></div>
-    <div id="tray"></div>
   </div>
 </div>
 <!-- 审批卡片栈（W5 卡 c_n37tnr）：悬浮层不进任何面板闸——权限决定要在
@@ -1436,6 +1505,8 @@ function fmtTok(n) {
 function renderCtx() {
   if (!ctx.model || !ctx.limit) { ctxEl.hidden = true; return; }
   ctxEl.hidden = false;
+  modelTag.textContent = ctx.model || '';
+  modelTag.hidden = !ctx.model;
   ctxM.textContent = ctx.model + (ctx.lane ? ' · ' + ctx.lane : '');
   const frac = Math.min(ctx.used / ctx.limit, 1);
   ctxFill.style.width = (frac * 100).toFixed(1) + '%';
@@ -1706,38 +1777,67 @@ function dropChatEmpty() {
   const old = list.querySelector('.chat-empty');
   if (old) old.remove();
   chatEmptyKind = '';
+  document.body.classList.remove('chat-empty-on');   // composer 落回底部（W6-4）
 }
 
+// 空态 Hero（W6-4，notes §1 空态行 / dsh-07）：标识 + 「seek」24/600 +
+// 版本徽标 + 芯片行（工作区芯片放大版）+ 一行提示；body.chat-empty-on 让
+// Hero+composer 作为一组垂直居中（conv-head 绝对化让位，见样式表）。
 function renderChatEmpty() {
-  if (list.children.length) { chatEmptyKind = ''; return; }
+  // 「有内容」的判据是消息（.msg/.tcall）：空态盒子自己是 #list 的 child，
+  // 按裸 children.length 判会把刚挂上的 chat-empty-on 当场摘掉。W6-4。
+  if (list.children.length && !list.querySelector('.chat-empty')) {
+    chatEmptyKind = '';
+    document.body.classList.remove('chat-empty-on');
+    return;
+  }
   const kind = boundProject ? 'bound' : 'unbound';
   if (chatEmptyKind === kind) return;   // 同形态已在场：不重建（免闪）
   list.replaceChildren();
+  document.body.classList.add('chat-empty-on');
   const box = document.createElement('div');
-  box.className = 'chat-empty';
-  const t = document.createElement('div');
-  t.className = 'ce-t';
+  box.className = 'chat-empty' + (boundProject ? '' : ' unbound');
+  const hero = document.createElement('div');
+  hero.className = 'hero';
+  const mark = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  mark.setAttribute('viewBox', '0 0 20 20');
+  mark.setAttribute('class', 'hero-mark');
+  mark.setAttribute('aria-hidden', 'true');
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  path.setAttribute('d', 'M10 1.6 18.4 10 10 18.4 1.6 10Z');
+  path.setAttribute('fill', 'currentColor');
+  mark.appendChild(path);
+  hero.appendChild(mark);
+  const t = document.createElement('span');
+  t.className = 'hero-t';
+  t.textContent = 'seek';
+  hero.appendChild(t);
+  if (!sideVer.hidden) {
+    const v = document.createElement('span');
+    v.className = 'hero-ver';
+    v.textContent = sideVer.textContent;
+    hero.appendChild(v);
+  }
+  box.appendChild(hero);
+  const chips = document.createElement('div');
+  chips.className = 'ce-chips';
+  const chip = document.createElement('button');
+  chip.type = 'button';
+  chip.className = 'ce-chip' + (boundProject ? '' : ' pick');
+  chip.appendChild(iconEl('folder'));
+  const cn = document.createElement('span');
+  cn.textContent = boundProject ? baseOf(boundProject) : '选择工作区';
+  chip.appendChild(cn);
+  chip.title = boundProject || '选择一个工作区开始（打开目录浏览器）';
+  chip.addEventListener('click', () => openDirPicker());
+  chips.appendChild(chip);
+  box.appendChild(chips);
   const x = document.createElement('div');
   x.className = 'ce-x';
-  if (!boundProject) {
-    t.textContent = '还没有工作区';
-    x.textContent = '点左栏头的「新建」选一个目录：绑定后这里就能开始对话。左栏也会自动列出你已经用过的工作区。';
-    const acts = document.createElement('div');
-    acts.className = 'ce-acts';
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.textContent = '选择目录…';
-    b.addEventListener('click', () => openDirPicker());
-    acts.appendChild(b);
-    box.appendChild(t);
-    box.appendChild(x);
-    box.appendChild(acts);
-  } else {
-    t.textContent = '开始新的对话';
-    x.textContent = '直接输入消息开始；输入 / 看指令，@ 引用历史会话。';
-    box.appendChild(t);
-    box.appendChild(x);
-  }
+  x.textContent = boundProject
+    ? '直接输入消息开始；输入 / 看指令，@ 引用历史会话。'
+    : '选一个目录绑定后，这里就能开始对话；左栏也会列出你用过的工作区。';
+  box.appendChild(x);
   list.appendChild(box);
   chatEmptyKind = kind;
 }
@@ -1767,6 +1867,7 @@ async function refreshState() {
     if (lastSeenProject !== undefined && lastSeenProject !== boundProject) { bindData = null; loadProjects(); }
     lastSeenProject = boundProject;
     renderChatEmpty();               // 空态跟随绑定态（未绑定 / 已绑定欢迎语）
+    applyWsChip();                   // composer 芯片/占位符跟随绑定态（W6-4）
     return true;
   } catch (e) { setStatus('连不上 /state：' + e, false); return false; }
 }
@@ -1805,11 +1906,12 @@ function syncSend() {
 }
 function renderSend() {
   const busy = runs.size > 0;
-  // 文案不带 emoji/字符图标（c_25d2ey）：主操作档不加图标，红底 .stop
-  // 即停止态；文字由 web-stop-headless 钉住（「停止」/「发送」）。
-  send.textContent = busy ? '停止' : '发送';
+  // 圆形图标钮（W6-4）：arrow-up=发送、square=停止；语义在 aria-label 与
+  // title（icon-only button 必须 aria-label），文字「停止/发送」由这两个属性承载。
+  swapIcon(send, busy ? 'square' : 'arrow-up');
+  send.setAttribute('aria-label', busy ? '停止' : '发送');
+  send.title = busy ? '中断当前生成（等同 /cancel）' : '发送';
   send.classList.toggle('stop', busy);
-  send.title = busy ? '中断当前生成（等同 /cancel）' : '';
   syncSend();
 }
 
@@ -2229,6 +2331,14 @@ async function sendText(text, fromInput, atts) {
   const tokens = refs.map(a => '@' + a.path).join('\n');
   const body = text ? (tokens ? text + '\n' + tokens : text) : tokens;
   if (!body) return;
+  // 未绑定直发普通文本（W6-4 ④）：不发给服务端吃「未绑定」报错，就地打开
+  // 目录浏览器把人带到正确的第一步；/ 指令（/bind 等）照常可发。
+  if (!boundProject && !body.trim().startsWith('/')) {
+    addMsg('hint', '（先选一个工作区——已为你打开目录浏览器）');
+    openDirPicker();
+    if (fromInput) input.value = '';
+    return;
+  }
   // /cancel（停止键、顶栏按钮、手打三入口同此一条）：武装被中断的 run——
   // 它的 run-bearing ack 走保留式收口而非权威替换（c_5m3fm6）。无活跃 run
   // 时无从武装，ack 自会以普通消息路径给出「当前没有正在运行的任务。」。
@@ -3027,6 +3137,26 @@ sideFind.addEventListener('click', () => {
   sideFind.setAttribute('aria-pressed', String(open));
   if (open && !sideCollapsed) sideSearch.focus();
 });
+// composer 工作区芯片（W6-4）：绑定=目录名（title=完整路径），未绑定=
+// 「选择工作区」高亮；点击开目录浏览器（换绑/首绑同一条路）。
+const wsChip = document.getElementById('ws-chip');
+const wsChipN = document.getElementById('ws-chip-n');
+const modelTag = document.getElementById('model-tag');
+function applyWsChip() {
+  if (boundProject) {
+    wsChipN.textContent = baseOf(boundProject);
+    wsChip.title = boundProject;
+    wsChip.classList.remove('pick');
+    input.placeholder = '直接发消息；/ 看指令，@ 引用历史会话';
+  } else {
+    wsChipN.textContent = '选择工作区';
+    wsChip.title = '选择一个工作区开始（打开目录浏览器）';
+    wsChip.classList.add('pick');
+    input.placeholder = '选择一个工作区开始';
+  }
+}
+wsChip.addEventListener('click', () => { openDirPicker(); drawerClose(); });
+applyWsChip();   // 初渲染（W6-4；refreshState 会随后纠正）——放在声明后防 TDZ
 // 品牌行版本小字（W6-2）：settings/get 的快照里带 serve 版本——一次性
 // 拉取填 #side-ver，失败静默隐藏（读不到版本不该影响页面）。
 async function loadVersion() {

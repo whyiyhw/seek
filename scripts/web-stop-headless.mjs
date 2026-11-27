@@ -129,7 +129,7 @@ const snapshot = () => evalJS(`(() => ({
     txt: el.textContent,
   })),
   nstream: document.querySelectorAll('.msg.streaming').length,
-  sendLabel: document.getElementById('send').textContent,
+  sendLabel: document.getElementById('send').getAttribute('aria-label') || document.getElementById('send').title,
   sendStop: document.getElementById('send').classList.contains('stop'),
   sendDisabled: document.getElementById('send').disabled,
   draft: document.getElementById('input').value,
