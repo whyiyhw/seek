@@ -6,10 +6,10 @@
 // headless Chrome，只量不点（点也只点面板钮/会话行这类视图开关）。量四组：
 //   ① 空态：composer 卡片中心 y ∈ [380,520]、宽 774±2、左右边距差 ≤2px；
 //   ② 有消息：卡片底距视口底 ≤40px；
-//   ③ 会话头只在主栏里（左缘 ≥ 侧栏右缘）——空态、只读浏览器、看历史、面板打开各态都量；
-//   ④ 面板打开时聊天面整体让位（#list / form / #composer-meta，有 #hist 则一并）；
-//   ⑤ 空态 + 只读浏览器（W6-5 前的 #browser）：会话头在文档流、不压 #browser-head。
-// 有 #hist（W6-5 起）时另量「看历史」一态，没有 #browser 就跳过 ⑤；跳过不算失败。
+//   ③ 会话头只在主栏里（左缘 ≥ 侧栏右缘）——空态、看历史、面板打开各态都量；
+//   ④ 面板打开时聊天面整体让位（#list / #hist / form / #composer-meta）。
+// 看历史一态（#hist，W6-5 起把历史渲进主转录区）量：会话头在文档流、输入卡片
+// 可见且贴底。只读浏览器已随 W6-5 退役，这里不再有它的景。
 //
 // 用法：web-composer-headless.mjs <pageUrl> <projDir> <sid> [--chrome path] [--dbg-port N]
 // 退出码：0 全过；1 有不过的量测（stderr 不吐 DOM，stdout 每条 ok/FAIL 带实测值）。
@@ -122,10 +122,9 @@ const geo = () => evalJS(`(() => {
     nmsgs: document.querySelectorAll('#list .msg').length,
     form: form && { x: form.x, w: form.w, cy: form.y + form.h / 2, bottomGap: innerHeight - form.y - form.h,
       lGap: form.x - center.x, rGap: (center.x + center.w) - (form.x + form.w) },
-    sideRight: side.x + side.w, headX: head.x, headBottom: head.y + head.h,
+    sideRight: side.x + side.w, headX: head.x,
     headPos: getComputedStyle(document.getElementById('conv-head')).position,
-    hasHist: !!document.getElementById('hist'), hasBrowser: !!document.getElementById('browser'),
-    bhTop: (r(document.getElementById('browser-head')) || { y: NaN }).y,
+    hasHist: !!document.getElementById('hist'),
     shown: { list: shown(document.getElementById('list')), hist: shown(document.getElementById('hist')),
       form: shown(f), meta: shown(document.getElementById('composer-meta')), pane: shown(document.getElementById('agents')) },
   }; })()`);
@@ -147,24 +146,6 @@ try {
   ck('空态 composer 水平居中（左右边距差 ≤2px）', Math.abs(g.form.lGap - g.form.rGap) <= 2,
     `lGap=${g.form.lGap} rGap=${g.form.rGap}`);
   ck('空态会话头在主栏内（左缘 ≥ 侧栏右缘）', inMain(g), `headX=${g.headX} sideRight=${g.sideRight} pos=${g.headPos}`);
-
-  // 空态 + 只读浏览器：空态布局只看实时 #list 判，点开一条历史它还挂着——
-  // 会话头若仍绝对定位就盖在浏览器自己的头行上（W6-4 二版缺陷，2026-11-27 返工）。
-  if (g.hasBrowser) {
-    const rowSel = `#sess-list .sess-row[data-sid="${sid}"]`;
-    await until('侧栏出现夹具会话行', () => evalJS(`!!document.querySelector(${JSON.stringify(rowSel)})`), 8000);
-    await evalJS(`document.querySelector(${JSON.stringify(rowSel)}).click()`);
-    await until('只读浏览器开', () => evalJS(`document.body.classList.contains('sess-detail')
-      && document.querySelectorAll('#sess-msgs .msg').length >= 1
-      && document.getElementById('browser-head').getBoundingClientRect().height > 0`), 8000);
-    g = await geo();
-    ck('空态 + 只读浏览器：聊天面与空态 Hero 让位', !g.shown.list && !g.shown.form && !g.shown.meta, JSON.stringify(g.shown));
-    ck('空态 + 只读浏览器：会话头在主栏内、在文档流', inMain(g) && g.headPos === 'static', `headX=${g.headX} sideRight=${g.sideRight} pos=${g.headPos}`);
-    ck('空态 + 只读浏览器：会话头不压浏览器头行', g.headBottom <= g.bhTop + 0.5,
-      `headBottom=${g.headBottom.toFixed(1)} browserHeadTop=${g.bhTop.toFixed(1)}`);
-    await evalJS(`document.getElementById('sess-back').click()`);
-    await until('只读浏览器收起', () => evalJS(`!document.body.classList.contains('sess-detail')`), 8000);
-  }
 
   // 空态 + 面板打开（实时列表为空时进面板）：最容易漏的组合——空态布局是
   // 只看 #list 判出来的，面板打开时它必须整体让位。

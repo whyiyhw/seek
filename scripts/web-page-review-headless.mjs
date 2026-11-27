@@ -271,7 +271,7 @@ async function navigate(panel) {
     if (!RICH_SID) throw new Error('未传 --rich-sid');
     await evalJS(`document.querySelector('.sess-row[data-sid="${RICH_SID}"]').click()`);
     // 就绪条件跟页面的对话流形态走：W6-3 起历史由 histTurn 渲染（.msg / .tcall），
-    // W6-5 起落在 #hist——驱动还等旧载体的类名/容器（.smsg、#sess-msgs）就是等
+    // W6-5 起落在 #hist——驱动还等旧载体的类名/容器（.smsg 与当时的会话正文容器）就是等
     // 8 秒超时后硬拍，「富会话」镜头全没走完导航（W6-3/W6-4 的证据即如此，
     // 2026-11-27 修）。
     await until('会话正文（W6-5 #hist）', `document.querySelectorAll('#hist .msg').length >= 4`);

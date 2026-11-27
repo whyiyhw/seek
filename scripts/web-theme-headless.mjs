@@ -231,7 +231,7 @@ const openSettings = async () => {
   return until('设置面板落定',
     `document.body.classList.contains('settings-view') && ${setCardsReady}`);
 };
-// 聊天面判定：无面板开（browsing）、无会话正文（sess-detail）。
+// 聊天面判定：无面板开（browsing）、无看历史（viewing）。
 const isChat = `!document.body.classList.contains('browsing') && !document.body.classList.contains('viewing')`;
 // 回聊天面（真实路径）：正文面点「⟵ 返回」，面板面点已开面板的按钮
 // （此时按钮文字已是「💬 聊天」，再点即收起）。

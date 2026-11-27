@@ -245,7 +245,7 @@ for (const theme of ['dark', 'light']) {
   ck(`${theme} 会话正文零横向溢出`, o3.doc <= 0, 'doc=' + o3.doc);
   ck(`${theme} 会话正文无裁切元素`, o3.clipped.length === 0, o3.clipped.join('；'));
   // 代码块协同：夹具正文带围栏长行——pre 自己当横滚容器（长行滚着看，
-  // 不越气泡被 #sess-msgs 硬裁）。首测这里靠目检抓到 .smsg pre 缺规则。
+  // 不越气泡被转录区硬裁）。首测这里靠目检抓到 .smsg pre 缺规则。
   const pre = await evalJS(`(() => {
     const p = document.querySelector('#hist .msg pre');
     return p ? { ox: getComputedStyle(p).overflowX,
