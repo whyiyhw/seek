@@ -974,6 +974,10 @@
   body.browsing #composer-meta { display: none; }
   body.browsing.chat-empty-on #center { justify-content: flex-start; }
   body.browsing.chat-empty-on #conv-head { position: static; }
+  /* 只读浏览器（sess-detail）同是内容态：空态判定只看实时 #list，点开一条历史
+     时它还挂着——会话头不回文档流就盖在 #browser-head 上。 */
+  body.sess-detail.chat-empty-on #center { justify-content: flex-start; }
+  body.sess-detail.chat-empty-on #conv-head { position: static; }
   body.chat-empty-on #list { flex: 0 0 auto; }
   body.chat-empty-on #composer-meta { display: none; }   /* 空态无计量，别垫高 */
   /* composer 在组底，裸居中会让它的中心落在视口中线下 60px——底下垫

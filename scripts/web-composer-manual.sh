@@ -8,12 +8,13 @@
 # `seek serve --frontend=web`，由 scripts/web-composer-headless.mjs 经 CDP 量：
 #   ① 空态：composer 卡片中心 y ∈ [380,520]、宽 774±2、左右边距差 ≤2px；
 #   ② 有消息：卡片底距视口底 ≤40px；
-#   ③ 会话头只在主栏里（左缘 ≥ 侧栏右缘），空态/看历史/面板三种状态都量；
-#   ④ 面板打开时聊天面整体让位（#list / #hist / form / #composer-meta 隐藏）。
+#   ③ 会话头只在主栏里（左缘 ≥ 侧栏右缘），空态/只读浏览器/看历史/面板打开都量；
+#   ④ 面板打开时聊天面整体让位（#list / #hist / form / #composer-meta 隐藏）；
+#   ⑤ 空态 + 只读浏览器：会话头在文档流、不压 #browser-head（W6-5 起无 #browser 则跳过）。
 # 全程不碰真实 ~/.seek 与生产 8790。
 #
 # 手测清单（Chrome/node 缺失时脚本原样打印）：打开脚本打印的 URL，
-# 1440×900 下用 DevTools 量上面四条。
+# 1440×900 下用 DevTools 量上面五条。
 #
 # Env:
 #   CHROME=<路径>   无头浏览器可执行文件（默认 macOS 标准位）
@@ -39,7 +40,7 @@ if [ "${DRY_RUN:-0}" = "1" ]; then
   echo "DRY_RUN: go build ./cmd/seek → \$TMP/seek"
   echo "DRY_RUN: 夹具会话 \$TMP/sessions/<sid>.jsonl（2 条消息）+ \$TMP/proj 桩项目"
   echo "DRY_RUN: SEEK_HOME=\$TMP \$TMP/seek serve --frontend=web &（抓 banner URL）"
-  echo "DRY_RUN: node scripts/web-composer-headless.mjs <URL> <proj> <sid> → 四组量测"
+  echo "DRY_RUN: node scripts/web-composer-headless.mjs <URL> <proj> <sid> → 五组量测"
   exit 0
 fi
 
@@ -142,8 +143,9 @@ cat <<EOF
   1440×900，DevTools 里量：
   1. 空态：#center > form 的中心 y ∈ [380,520]、宽 774±2、左右边距差 ≤2px
   2. 发一条消息后：form 底距视口底 ≤40px
-  3. #conv-head 左缘 ≥ 侧栏右缘（空态 / 看历史 / 面板打开 三种状态）
+  3. #conv-head 左缘 ≥ 侧栏右缘（空态 / 只读浏览器 / 看历史 / 面板打开 各态）
   4. 面板打开时 #list、#hist、form、#composer-meta 都是 display:none
+  5. 未绑定的空态点开侧栏一条历史：#conv-head 在文档流，它的底 ≤ #browser-head 的顶
 
 按 Enter 结束并清理（KEEP=1 保留现场）…
 EOF
