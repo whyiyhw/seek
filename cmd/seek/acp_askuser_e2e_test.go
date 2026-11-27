@@ -228,19 +228,64 @@ func TestACPElicitationE2E_TimeoutBecomesCancelled(t *testing.T) {
 	}
 }
 
-// TestACPElicitationE2E_NoCapabilityStaysDisabled is the gate's negative
-// side, at the wire level: the same fake backend, a client that declares
-// nothing, and NO elicitation/create frame may ever be sent — the tool
-// result is ErrDisabled, exactly as before this lane existed.
-func TestACPElicitationE2E_NoCapabilityStaysDisabled(t *testing.T) {
+// TestACPElicitationE2E_NoCapabilityFallsBackToPermission is the gate's
+// second channel, at the wire level (card c_7bqiq5): the same fake
+// backend, a client that declares NOTHING — like Paseo 0.17.4, which has
+// no elicitation handler at all — and the question arrives as a
+// `session/request_permission` popup instead. No elicitation frame may
+// ever be sent on this path.
+//
+// The answer must reach the model as a real chosen id: that is what makes
+// this a fallback rather than the old ErrDisabled dead end.
+func TestACPElicitationE2E_NoCapabilityFallsBackToPermission(t *testing.T) {
 	workDir := t.TempDir()
 	b := askBackendWithQuestion(t, scopeQuestionArgs)
 	c := startACPChild(t, b.URL, workDir)
 	sid := c.handshake(t, workDir) // no clientCapabilities
 
 	c.startPromptForAsk(t, sid)
-	c.awaitToolOutcome(t, "rephrase as a plain-text question")
 
+	frame := c.waitWhere(t, "session/request_permission (ask_user)", 60*time.Second, isPermissionRequest)
+
+	// The popup must be a CHOICE: every question row as allow_once, a
+	// trailing Skip as reject_once, the question text as the title, and
+	// toolKind "other" (not execute/edit — this is not a gated action).
+	var p struct {
+		SessionID string `json:"sessionId"`
+		ToolCall  struct {
+			Kind  string `json:"kind"`
+			Title string `json:"title"`
+		} `json:"toolCall"`
+		Options []struct {
+			OptionID string `json:"optionId"`
+			Kind     string `json:"kind"`
+		} `json:"options"`
+	}
+	if err := json.Unmarshal(frame["params"], &p); err != nil {
+		t.Fatalf("permission params: %v (%s)", err, frame["params"])
+	}
+	if p.SessionID != sid {
+		t.Errorf("sessionId = %q, want %s", p.SessionID, sid)
+	}
+	if p.ToolCall.Kind != "other" {
+		t.Errorf("toolCall.kind = %q, want other", p.ToolCall.Kind)
+	}
+	if p.ToolCall.Title != "Which scope?" {
+		t.Errorf("title = %q, want the question text", p.ToolCall.Title)
+	}
+	if len(p.Options) != 3 {
+		t.Fatalf("options = %+v, want user + project + Skip", p.Options)
+	}
+	if p.Options[0].OptionID != "user" || p.Options[0].Kind != "allow_once" {
+		t.Errorf("option 0 = %+v, want user/allow_once", p.Options[0])
+	}
+	if p.Options[2].Kind != "reject_once" {
+		t.Errorf("last option = %+v, want the Skip row as reject_once", p.Options[2])
+	}
+
+	c.answerPermission(t, frame, "project")
+
+	c.awaitToolOutcome(t, `"chosen_ids":["project"]`)
 	if reason := c.awaitTurnEnd(t); reason != "end_turn" {
 		t.Fatalf("stopReason = %q, want end_turn", reason)
 	}

@@ -24,9 +24,9 @@
 
 ### 1.1 端口已就位，第一个真实渠道已过最小回路
 
-control-plane 的 M1–M3+M6a/M7a 已进 main：`Frontend` 端口（`internal/controlplane/frontend.go`）、路由与指令（`router.go`）、子进程执行器（`executor.go`）、serve 生命周期（`serve.go`）、CLI 接线（`internal/servecli`）。飞书 adapter（M4/M5）撤销排期后，web MVP（卡 c_qucxtu）作为第一个真实渠道落地并已进 main：`frontends` 注册表是 `fake` + `web`，浏览器最小聊天回路（发消息、SSE 收回复、绑定状态行、token 鉴权）可跑通——PRD §6 末抽象验收（Telegram 纸面验证）的接缝已由真实消费者兑现过一次。
+control-plane 的 M1–M3+M6a/M7a 已进 main：`Frontend` 端口（`internal/controlplane/frontend.go`）、路由与指令（`router.go`）、子进程执行器（`executor.go`）、serve 生命周期（`serve.go`）、CLI 接线（`internal/servecli`）。飞书 adapter（M4/M5）撤销排期后，web MVP（卡 c_qucxtu）作为第一个真实渠道落地并进 main：`frontends` 注册表是 `fake` + `web`，最小聊天回路（发消息、SSE 收回复、绑定状态行、token 鉴权）已跑通——PRD §6 末抽象验收（Telegram 纸面验证）的接缝由真实消费者兑现过一次。
 
-但它止于最小回路（§1.4 逐项边界）：无流式渲染（跑完一次性收）、无 token/$ 状态栏、单固定会话、浏览器入口的 token 走 URL 查询参数（无 cookie 换票/CSRF 闸）。**本文的工作不是「从零造第一个渠道」，而是「把已落地的 MVP 演进到完整形态」**——流式 / 会话切换 UI / 状态栏，再到只有 web 接得住的可视化面（P2 任务面板 / P3 资产面；聊天渠道里做面板是逆势）。web 作为首渠道的先天优势不变：零外部依赖、单人自用天然（本机浏览器）。
+但它止于最小回路（§1.4 逐项边界）：无流式渲染（跑完一次性收）、无 token/$ 状态栏、单固定会话、token 走 URL 查询参数（无 cookie 换票/CSRF 闸）。**本文不是「从零造第一个渠道」，而是「把已落地的 MVP 演进到完整形态」**——流式 / 会话切换 UI / 状态栏，再到只有 web 接得住的可视化面（P2 任务面板 / P3 资产面；聊天渠道里做面板是逆势）。首渠道优势不变：零外部依赖、单人自用天然（本机浏览器）。
 
 ### 1.2 已就绪、直接复用（不重造）
 
@@ -49,21 +49,21 @@ control-plane 的 M1–M3+M6a/M7a 已进 main：`Frontend` 端口（`internal/co
 
 ### 1.4 与 c_qucxtu MVP 的关系（scope 边界——本文的地面基准）
 
-c_qucxtu 已交付并进 main：`internal/controlplane/webfrontend.go`（368 行，默认构建、纯 stdlib、无 build tag）+ go:embed 的 `webfrontend.html`（120 行单页）+ `webfrontend_test.go`（362 行 8 条测试）。**本文全部 W 卡是它之上的增量演进，不推倒、不另起实现**；每张卡的硬验收都含「现有测试家族零回归」。逐项边界：
+c_qucxtu 已交付进 main：`internal/controlplane/webfrontend.go`（368 行，默认构建、纯 stdlib、无 build tag）+ go:embed 的 `webfrontend.html`（120 行单页）+ `webfrontend_test.go`（362 行 8 条测试）。**本文全部 W 卡是其上的增量演进，不推倒、不另起实现**，每张卡硬验收含「现有测试家族零回归」。逐项边界：
 
 | 维度 | 现状（webfrontend.go，已交付） | 本文增量 |
 |---|---|---|
-| 代码位置 | `internal/controlplane` 包内三文件（.go/.html/_test.go），同包无 tag 是头注释里记下的有意决策 | **就地同包生长**，不迁移独立包（取舍结论见下） |
-| 注册 | `servecli.frontends["web"] = NewWeb(WebConfig{})`，零值 config 即生产形状 | 构造器携带 config（`--listen` 等 flag 注入，W1.1） |
-| 监听 | `DefaultWebAddr = "127.0.0.1:8790"` 固定口；`serve.web_addr` 可改，scope 闸只放行 loopback + tailnet CGNAT `100.64.0.0/10`（2026-11-15 拍板，已交付）；启动行印 `web: up: http://<addr>/?token=<t>` | 端口保持 8790 不改；原 W1.1「非 loopback bind 的 fail-closed 闸」已被更严的 scope 闸取代（`0.0.0.0` 一律拒，§4.4） |
-| 路由 | `GET /`（页面，不鉴权）/ `GET /events`（SSE：广播 + 15s 心跳 + `retry:3000`）/ `POST /msg`（`{"text"}`→Inbound，202）/ `GET /state`（`{bound,project,session}`） | 四个名字原样沿用；流式= `/events` 增事件类型（W1.4）；新端点（`/subagents`、`/rpc`）按同一无前缀风格命名（§2.5） |
-| 鉴权 | `?token=` 或 `Authorization: Bearer`，constant-time；token 首启生成 hex(24B) 写 `~/.seek/serve/web.token`（目录 0700/文件 0600） | 首跳 303 换票→HttpOnly cookie + URL 擦净、写面 CSRF 闸、Host 校验（W1.2） |
-| 会话 | 固定单会话 `web:default`（`webConvNative="default"`，所有 tab 同一会话，D-C5 取舍） | conv-uuid per 会话（D-W3，W1.3），旧绑定兼容 |
-| 下行 | 单一事件 envelope `{"conv","text"}` 广播全部订阅者；无订阅者即丢（MVP 文档化限制：seek 跑数秒、SSE 毫秒级连上，竞态可忽略） | `delta/tool/usage/reply` 事件族（W1.4）；历史回放到 P3 面板再补 |
-| 上游 Inbound | `Conv=web:default`、`EventID` 有意留空（浏览器不重投、平面契约空 id 永不去重）、`Sender="web"`、`DirectAt=true` | Conv 换 conv-uuid（W1.3）；其余语义保持 |
-| 页面 | `webfrontend.html`：消息列表、输入框（`/bind` 等指令纯文本透传）、`/state` 状态行、SSE 自动重连、textContent-only 渲染 | 流式气泡 / 指令快捷按钮 / token-$ 状态栏（W2） |
+| 代码位置 | `internal/controlplane` 包内三文件（.go/.html/_test.go），同包无 tag=有意决策 | **就地同包生长**，不迁移（结论见下） |
+| 注册 | `servecli.frontends["web"] = NewWeb(WebConfig{})`，零值 config 即生产形状 | 构造器携带 config（`--listen`，W1.1） |
+| 监听 | `DefaultWebAddr = "127.0.0.1:8790"`；`serve.web_addr` 可改，scope 闸只放行 loopback + `100.64.0.0/10`（2026-11-15）；启动行印 `web: up: http://<addr>/?token=<t>` | 端口仍 8790；W1.1 原 fail-closed 闸已被 scope 闸取代（`0.0.0.0` 拒，§4.4） |
+| 路由 | `GET /`（不鉴权）/ `GET /events`（SSE：广播 + 15s 心跳 + `retry:3000`）/ `POST /msg`（`{"text"}`→Inbound，202）/ `GET /state`（`{bound,project,session}`） | 四名沿用；`/events` 增事件类型（W1.4）；`/subagents`、`/rpc` 同无前缀风格（§2.5） |
+| 鉴权 | `?token=` 或 `Authorization: Bearer`，constant-time；首启生成 hex(24B) 写 `~/.seek/serve/web.token`（0700/0600） | 303 换票→HttpOnly cookie + URL 擦净、CSRF 闸、Host 校验（W1.2） |
+| 会话 | 固定 `web:default`（`webConvNative="default"`，全部 tab 同一会话，D-C5） | conv-uuid per 会话（D-W3，W1.3），旧绑定兼容 |
+| 下行 | 单 envelope `{"conv","text"}` 广播全部订阅者，无订阅者即丢 | `delta/tool/usage/reply` 事件族（W1.4）；历史回放 P3 再补 |
+| 上游 Inbound | `Conv=web:default`、`EventID` 留空（空 id 永不去重）、`Sender="web"`、`DirectAt=true` | Conv 换 conv-uuid（W1.3） |
+| 页面 | `webfrontend.html`：消息列表、输入框（`/bind` 等指令纯文本透传）、`/state` 状态行、SSE 自动重连、textContent-only | 流式气泡 / 指令按钮 / token-$ 状态栏（W2） |
 
-**包位置取舍结论（迁移独立包与否）**：**不迁移**——增量以 `webfrontend*.go` 文件族在 `internal/controlplane` 内就地生长。理由：① feishu 独立子包的成因是 build tag（SDK 隔离，D-F1），web 纯 stdlib 无此强制力，「adapter 必须子包」不是本仓通例，MVP 把同包无 tag 记为有意决策；② 搬家是零行为变化的纯 churn，与减法纪律相逆；③ 平面类型（`ConvID`/`Inbound`/`Frontend`/`BindingStore`）就在本包，同包零 import 跳数。重评触发条件：web 文件族超过 ~5 个文件、或出现第二个 build 维度时，一次性 `git mv` 到 `internal/controlplane/webfrontend/`（feishu 同款布局，历史保留）。**原稿规划的 `internal/webfrontend/` 顶层新包方案作废。**
+**不迁移**——增量以 `webfrontend*.go` 文件族就地生长：① feishu 子包源于 build tag（SDK 隔离，D-F1），web 纯 stdlib 无此强制力；② 搬家是零行为 churn，与减法纪律相逆；③ 平面类型（`ConvID`/`Inbound`/`Frontend`/`BindingStore`）就在本包，零 import 跳数。重评触发：文件族超 ~5 个或出现第二个 build 维度时一次性 `git mv` 到 `internal/controlplane/webfrontend/`。**原稿顶层 `internal/webfrontend/` 新包方案作废。**
 
 ## 2. ① 形态：seek serve + web Frontend
 
@@ -87,13 +87,13 @@ internal/controlplane/         # 就地，不迁移（§1.4 取舍结论）
 
 ### 2.2 D-W2 — 端口映射：Run=浏览器事件流下行进平面，Send=回复上行回浏览器
 
-Frontend 端口收发分离（D-C1）映射到 HTTP 形状（方向词取平面视角：**下行**=推进平面 inbound 队列，**上行**=平面把答复送回渠道）：
+Frontend 端口收发分离（D-C1）映射到 HTTP 形状（方向取平面视角：**下行**=推进平面 inbound 队列，**上行**=平面把答复送回渠道）：
 
 | 端口方法 | web 落点 | 说明 |
 |---|---|---|
 | `Name()` | `"web"`（已交付） | ConvID 前缀、日志、bindings 键 |
-| `Run(ctx, in chan<- Inbound)` | **拥有 `http.Server` 生命周期**（已交付）：起 listener、serve 到 ctx.Done、`Close()` 强断——SSE 长连接永不空闲，优雅 `Shutdown` 会永等（MVP 注释已论证，设计沿用）。浏览器 `POST /msg` → 归一化 `Inbound` → `in` channel（已交付，202） | HTTP server 就是「传输层」，Run 的「自管传输含重连」契约对 server 而言=监听到取消；浏览器侧重连由 EventSource `retry:3000` 自管（已交付） |
-| `Send(ctx, conv, Reply)` | 广播到该 conv 的 SSE 订阅者（现状：全部订阅者同属 `web:default`，per-conv 寻址是 W1.3 增量）；`reply` 事件携 authoritative 最终文本（现状 envelope `{"conv","text"}`，W1.4 扩事件族） | best-effort 语义同端口契约：无订阅者（页面关了）不报错——现状是**丢弃**（MVP 文档化的取舍：seek 跑数秒、SSE 毫秒级连上，竞态可忽略）；「重开页面补看」需历史回放，P3 面板（session/messages）落地后自然补上，W1 不做 |
+| `Run(ctx, in chan<- Inbound)` | **拥有 `http.Server` 生命周期**（已交付）：起 listener、serve 到 ctx.Done、`Close()` 强断——SSE 长连接永不空闲，优雅 `Shutdown` 会永等。`POST /msg` → 归一化 `Inbound` → `in`（已交付，202） | server 即传输层；浏览器侧重连由 EventSource `retry:3000` 自管 |
+| `Send(ctx, conv, Reply)` | 广播到该 conv 的 SSE 订阅者（现状全部订阅者同属 `web:default`，per-conv 寻址是 W1.3）；`reply` 携 authoritative 最终文本（现状 envelope `{"conv","text"}`，W1.4 扩） | best-effort：无订阅者不报错（现状**丢弃**）；重开补看需历史回放，P3 面板（session/messages）落地后自然补上 |
 
 `Inbound` 归一化（现状字段值，W1.3 只换 Conv）：
 
@@ -107,30 +107,29 @@ Inbound{
 }
 ```
 
-**为什么 POST 而非 WebSocket 上行**：端口契约本就不假设双工（§1.3 收发分离）；SSE 下行 + POST 上行是零依赖的经典组合（EventSource + fetch 都是浏览器原生），且让鉴权/CSRF 走标准 HTTP 语义（cookie/header），不必在 WS 帧协议里重造。dsh web app 用 WS（§7）——它的 UI 需要双向低延迟（编辑器协作形态），聊天场景不需要。
+**为什么 POST 而非 WebSocket 上行**：端口契约不假设双工（§1.3）；SSE 下行 + POST 上行是零依赖的经典组合（EventSource + fetch 皆浏览器原生），鉴权/CSRF 走标准 HTTP 语义（cookie/header），不必在 WS 帧协议里重造。dsh web app 用 WS（§7）——它的 UI 需要双向低延迟（编辑器协作形态），聊天不需要。
 
 ### 2.3 D-W3 — ConvID=会话键：从固定 `web:default` 演进到浏览器持有 uuid
 
-- **现状**：MVP 是固定单会话 `web:default`（`webConvNative = "default"`，所有 tab 同一会话）——单人单会话零状态的刻意取舍。bindings 表本就按 ConvID 键控，`web:default` 是一条普通绑定，演进不需要新存储。
-- **演进（W1.3）**：conv-uuid 由浏览器生成（crypto.randomUUID，localStorage 持久），首条消息起即随请求携带（`X-Seek-Conversation` 头）。`ConvID = "web:<uuid>"`。
-- **服务端零会话状态**（演进后依然成立）：会话↔项目绑定、session_id 续接全在既有 bindings 表（`~/.seek/serve/bindings.json`）——换设备/清 localStorage 只是换一个 conv（旧绑定还在表里，`/bind` 回同一路径即新开）。这是「ConvID=会话键」的全部含义：**web 渠道没有自己的会话存储**。
-- 浏览器 UI 提供「新对话」按钮 = 新 mint 一个 uuid（等价 `/new` 但连 binding 也换新）；`/bind` `/switch` 沿用平面指令（M2 已有），UI 只是快捷按钮发送同款指令文本（§3.1 MVP）。
-- **兼容**：存量 `web:default` 绑定不迁移不删除——演进后它退为「未带头请求」的默认 conv（或一次性收编，W1.3 实现卡定）；验收含旧绑定可见。
+- **现状**：固定单会话 `web:default`（`webConvNative = "default"`，所有 tab 同一会话）——单人单会话零状态的刻意取舍。bindings 表本就按 ConvID 键控，`web:default` 是一条普通绑定，演进不需要新存储。
+- **演进（W1.3）**：conv-uuid 由浏览器生成（crypto.randomUUID，localStorage 持久），首条消息起随请求携带（`X-Seek-Conversation` 头）。`ConvID = "web:<uuid>"`。
+- **服务端零会话状态**（演进后依然成立）：会话↔项目绑定、session_id 续接全在既有 bindings 表（`~/.seek/serve/bindings.json`）——换设备/清 localStorage 只是换一个 conv（旧绑定还在表里，`/bind` 回同一路径即新开）。**web 渠道没有自己的会话存储**。
+- UI「新对话」= 新 mint 一个 uuid（等价 `/new` 但连 binding 也换新）；`/bind` `/switch` 沿用平面指令（M2 已有），UI 只是快捷按钮发同款指令文本（§3.1）。
+- **兼容**：存量 `web:default` 绑定不迁移不删除——演进后退为「未带头请求」的默认 conv（或一次性收编，W1.3 卡定）；验收含旧绑定可见。
 
 ### 2.4 D-W4 — 流式渲染：sibling 接口 + 执行器流式 seam，两个零破坏缝
 
-MVP 要求「消息收发流式渲染」，但端口 v1 是「一条 Inbound 一条 Reply」（跑完一次性发）。两条缝，全部走本仓既有的 sibling-interface 纪律（AGENTS.md「Sink interfaces」条；propose 工具四个 sibling 接口的先例）：
+端口 v1 是「一条 Inbound 一条 Reply」（跑完一次性发）。两条缝全走既有 sibling-interface 纪律（AGENTS.md「Sink interfaces」条；propose 工具四个 sibling 接口先例）：
 
 **缝 1（Frontend 侧）**——可选流式扩展，端口 3 方法不动：
 
 ```go
 // StreamSender is the OPTIONAL streaming extension of Frontend.
-// The router upcasts at the send site: frontends that don't
-// implement it keep the exact one-reply-per-inbound behaviour.
+// The router upcasts at the send site; frontends without it keep
+// the exact one-reply-per-inbound behaviour.
 type StreamSender interface {
-    // SendStream forwards one live run event (the seek -p --json
-    // JSONL contract, §2.5) to the conversation. Best-effort, same
-    // posture as Send.
+    // SendStream forwards one live run event (seek -p --json JSONL
+    // contract, §2.5). Best-effort, same posture as Send.
     SendStream(ctx context.Context, conv ConvID, ev RunEvent) error
 }
 ```
@@ -139,20 +138,18 @@ type StreamSender interface {
 
 ```go
 // RunEvent is one line of the stable `seek -p --json` JSONL contract
-// (cmd/seek jsonLine). Named + exported so frontends can render the
-// stream without re-parsing raw bytes; the field set mirrors jsonLine.
+// (cmd/seek jsonLine); the field set mirrors jsonLine.
 type RunEvent struct { … }
 
 // RunStream is Run with an optional per-line observer. Run delegates:
-// Run(req) ≡ RunStream(ctx, req, nil). The observer sees each parseable
-// JSONL line AS IT ARRIVES (line-buffered stdout read), before the
-// process exits.
+// Run(req) ≡ RunStream(ctx, req, nil). Observer sees each parseable
+// JSONL line as it arrives (line-buffered stdout), before exit.
 func (e *Executor) RunStream(ctx context.Context, req ExecRequest, emit func(RunEvent)) (ExecResult, error)
 ```
 
-现状 `attempt` 用 `lockedBuf` 收完 stdout 再整体 parse；`RunStream` 把 stdout 换成 bufio 行级读 + 逐行 parse + `emit` 回调，末态聚合逻辑（sawAgentEnd/sessionID/自愈重跑）不变。**emit 的事件是完整 jsonLine 契约**（含 `tool_start/tool_end/turn_end/agent_end`），不是只有 text_delta——这是状态栏与 P2 面板的共同数据源。
+现状 `attempt` 用 `lockedBuf` 收完 stdout 再整体 parse；`RunStream` 换成 bufio 行级读 + 逐行 parse + `emit` 回调，末态聚合（sawAgentEnd/sessionID/自愈重跑）不变。**emit 的是完整 jsonLine 契约**（含 `tool_start/tool_end/turn_end/agent_end`），不只 text_delta——状态栏与 P2 面板的共同数据源。
 
-**router 接线**：`Handle` 里执行前 upcast `if ss, ok := r.fronts[conv.FrontendName()].(StreamSender); ok`，命中则走 `RunStream` 并把事件转 `SendStream`；未命中走 `Run`——**fake/feishu 路径字节不变**。最终 Reply 照旧经 `Send` 下发（流式渲染的 bubble 由 `reply` 事件收口替换，客户端按 run 幂等）。
+**router 接线**：`Handle` 执行前 upcast `if ss, ok := r.fronts[conv.FrontendName()].(StreamSender); ok`，命中走 `RunStream` 并把事件转 `SendStream`，未命中走 `Run`——**fake/feishu 路径字节不变**。最终 Reply 照旧经 `Send` 下发（流式 bubble 由 `reply` 事件收口替换，客户端按 run 幂等）。
 
 ### 2.5 事件与 API 面（沿用 MVP 路由名，增量全部是加法）
 
@@ -164,31 +161,31 @@ GET  /state              → 绑定状态 {bound,project,session}（已交付；
 GET  /?token=<t>         303 → / + HttpOnly cookie（URL 擦净，§5；已交付 W1.2 c_w5lidm）
 ```
 
-新端点（P2 的 `/subagents`、P3 的 `/rpc`）沿用同一**无前缀**命名风格——现状四路由已无前缀，再引入 `/api/` 前缀就是两套风格并存。
+新端点（P2 的 `/subagents`、P3 的 `/rpc`）沿用同一**无前缀**风格——现状四路由已无前缀，再引入 `/api/` 就是两套并存。
 
-SSE 事件（webfrontend 自有 envelope，`data:` 为 JSON；`delta/tool/usage/reply` 均为 W1.4 在 `/events` 上新增的事件类型，`{"conv","text"}` 现状形态保持兼容）：
+SSE 事件（webfrontend 自有 envelope，`data:` 为 JSON；`delta/tool/usage/reply` 均为 W1.4 在 `/events` 上新增，`{"conv","text"}` 形态保持兼容）：
 
 | 事件 | 载荷 | 源 |
 |---|---|---|
 | `delta` | `{run, text}` | RunEvent `text_delta`（reasoning_delta 不进 MVP UI，见 §6.4） |
-| `tool` | `{run, id, name, phase: start\|end, ok}` | RunEvent `tool_start`/`tool_end`（折叠形态，args/result 不下发——UI 显示工具名+状态即可；`tool_end.result` 可能很大，MVP 不传） |
-| `usage` | `{run, prompt, completion, cache_hit, cost_usd}` | RunEvent `turn_end`；**cost 由服务端算**（webfrontend import `internal/pricing`，含 off-peak tier），客户端不算钱 |
+| `tool` | `{run, id, name, phase: start\|end, ok}` | RunEvent `tool_start`/`tool_end`（折叠形态，args/result 不下发——UI 只需工具名+状态；`tool_end.result` 可能很大） |
+| `usage` | `{run, prompt, completion, cache_hit, cost_usd}` | RunEvent `turn_end`；**cost 由服务端算**（import `internal/pricing`，含 off-peak tier），客户端不算钱 |
 | `reply` | `{run, text, session_id}` | 平面 `Send`（authoritative 最终文本 + session_id） |
 | `approval` | `{id, conv, run, kind, summary, command, diff, state, decision}` | 审批 hub（W5 c_n37tnr，`webfrontend_approval.go`）：state=pending 弹卡 / resolved\|cancelled 撤卡回执；决定上行走 `/rpc approval/decide`（不是事件） |
 | `notice` | `{text}` | 平面指令应答（`/bind` 结果等也走 Send→reply；notice 留给鉴权/连接层提示） |
 
-run id = server-minted uuid（SSE envelope 自带字段；**不是** `Inbound.EventID`——后者现状有意留空，见 §2.2）。客户端按 run 聚合：deltas 累积成流式气泡 → `reply` 到达时替换收口（服务端权威，去重天然成立）。
+run id = server-minted uuid（**不是** `Inbound.EventID`——后者有意留空，见 §2.2）。客户端按 run 聚合：deltas 累积成流式气泡 → `reply` 到达替换收口（服务端权威，去重天然成立）。
 
-**补一条 seek 侧 additive 字段**：`agent_start` 事件增加顶层 `model` 字段（jsonLine 注释声明字段集稳定、新增为非破坏——同「result 字段新增永远 OK」的 registry 纪律）。usage 的 $ 计算需要 model；stdout 是输出面不进 prompt，prefix-cache 零影响。
+**seek 侧 additive 字段**：`agent_start` 增顶层 `model`（jsonLine 字段集稳定、新增为非破坏——同「result 字段新增永远 OK」的 registry 纪律）。usage 的 $ 需要 model；stdout 是输出面不进 prompt，prefix-cache 零影响。
 
 ### 2.6 非目标（MVP 明确不做；2026-11-19 W5 增补后口径见各条注，§13）
 
-- ❌ **WebSocket**（维持非目标）——SSE+POST 够用（§2.2）；W5 的全部新增交互仍是「下行=事件流、上行=POST」形状（审批决定/附件上传都是 POST、面板数据是 GET+SSE），未出现双向低延迟帧需求；WS 留给未来若出现「编辑器协作」类需求（§13.2）。
-- ❌ **多用户/发言人隔离**（维持非目标）——单人自用，token 即边界（D-C5 同款立场）。W5 审批卡片把决定权送到浏览器，但决定者仍是同一 token 持有者——单人立场不变，`Sender` 继续休眠（§13.2）。
-- ✅ **交互审批 UI**（权限 y/N 弹窗）——**翻案入 W5**（2026-11-19，原列 v2+）：卡 c_n37tnr（§13.1）。print 模式 `ErrDenied` 工具结果仍是默认兜底体验（§6 已验证②），远程审批卡片是其上的人机闸——父 PRD §8 杀手锏项的首次落地。
-- ✅ **图片粘贴/上传**——**翻案入 W5**（2026-11-19，原「等真实需求」）：卡 c_56yrcj（§13.1）。能力面已就位（modelcap.Vision 判定 + `llm.Message.Images` 透传，124b6f4），TUI/print/ACP 三入口已有，web 反而是缺口；`POST /voice` 二进制上传 seam（c_f6ayyg）是现成先例。
+- ❌ **WebSocket**（维持）——SSE+POST 够用（§2.2）；W5 的新增交互仍是「下行=事件流、上行=POST」（审批决定/附件上传都是 POST、面板数据是 GET+SSE），无双向低延迟帧需求；WS 留给未来的「编辑器协作」类需求（§13.2）。
+- ❌ **多用户/发言人隔离**（维持）——单人自用，token 即边界（D-C5）。W5 审批卡片把决定权送到浏览器，但决定者仍是同一 token 持有者——`Sender` 继续休眠（§13.2）。
+- ✅ **交互审批 UI**（权限 y/N 弹窗）——**翻案入 W5**（2026-11-19，原列 v2+）：卡 c_n37tnr（§13.1）。print 模式 `ErrDenied` 工具结果仍是默认兜底（§6 ②），远程审批卡片是其上的人机闸——父 PRD §8 杀手锏项的首次落地。
+- ✅ **图片粘贴/上传**——**翻案入 W5**（2026-11-19，原「等真实需求」）：卡 c_56yrcj（§13.1）。能力面已就位（modelcap.Vision + `llm.Message.Images`，124b6f4），TUI/print/ACP 三入口已有，web 反而是缺口；`POST /voice` 上传 seam（c_f6ayyg）是现成先例。
 - ✅ **markdown 渲染**——**翻案入 W5**（2026-11-19，原「P3 资产面再评估」）：卡 c_x2au4t（§13.1）。最小渲染（围栏+行内码，c_iha3fr）已验证 DOM 纪律可行；vendor 单文件渲染器 ≤25KB 按 §4.2 checked-in 先例进（配额见 §13.3）。
-- ❌ **改 `pkg/agent` / 平面核心语义**（维持非目标）——两条缝（§2.4）之外零改动；这是父 PRD「零核心破坏」的延续。W5 的新缝（附件通道、审批回注）沿用 W0 同款纪律：sibling 接口 + additive 事件字段，fake/feishu 路径字节不变（§13.1 各行）。
+- ❌ **改 `pkg/agent` / 平面核心语义**（维持）——两条缝（§2.4）之外零改动，父 PRD「零核心破坏」的延续。W5 新缝（附件通道、审批回注）沿用 W0 纪律：sibling 接口 + additive 事件字段，fake/feishu 路径字节不变（§13.1）。
 
 ## 3. ② 分期：MVP → P2 任务面板 → P3 资产面
 
@@ -211,23 +208,23 @@ run id = server-minted uuid（SSE envelope 自带字段；**不是** `Inbound.Ev
 
 ### 3.3 P3——资产面：**并入 feature-inspect-rpc 的数据面**（结论）
 
-**结论：并入（吸收），且替代其两部分。** 具体拆到部件：
+**结论：并入（吸收），且替代其两部分。** 拆到部件：
 
 | inspect-rpc 部件 | 处置 | 理由 |
 |---|---|---|
-| §3.1 method 集（session/memory/project/stats…）+ §3.5 错误码 + 命名稳定性纪律 | **原样并入本文 P3**（搬运，不改名） | 契约纪律是那份 PRD 的核心价值；method 集设计已对齐「5 个想定 app 视图」回路 |
-| §3.3 HTTP+SSE transport | **并入但换宿主**：从「TUI 进程 `--rpc-listen`」迁到 serve 进程（`POST /rpc`，SSE 并入既有 `/events` 流新增 topic——与聊天面同源同鉴权同命名风格，§2.5） | ① serve 常驻，SSE 天然有宿主；TUI 进程挂 HTTP 要求「面板开着=TUI 开着」，而资产浏览的典型场景恰是**TUI 没开时看看昨晚的会话**。② 面板与聊天同 origin，cookie/token/静态资产一套。③ inspect-rpc 自己的 §1 就预言「应用是同一份契约的另一类消费者」——web frontend 就是那个消费者 |
-| §4.1 独立 tarball 面板 | **取消（替代）**：静态资产 go:embed 进单二进制 | tarball 的存在理由是「保 CLI 单二进制卖点」；§4 取舍后 embed 净增 ~100–150KB 且守住 CI 体积 gate，用户零安装步骤（下载 tarball→解压→打开 是三步摩擦） |
-| stdio transport + §3.2 Registry 重构 | **不动；IDE 线已关闭（2026-11-16，c_np5gzu）**——`-rpc` 已有用户故三 method 冻结保留；`internal/rpc/server.go` 照旧、永不挂 registry | method 实现放 transport-agnostic 的位置（`internal/rpc/methods/`，已按此落地）；HTTP 单侧挂载即为终态——stdio 冻结不挂（IDE 驱动归 ACP，见 feature-acp.md） |
+| §3.1 method 集（session/memory/project/stats…）+ §3.5 错误码 + 命名稳定性纪律 | **原样并入本文 P3**（搬运，不改名） | 契约纪律是那份 PRD 的核心价值；method 集已对齐「5 个想定 app 视图」回路 |
+| §3.3 HTTP+SSE transport | **并入但换宿主**：从「TUI 进程 `--rpc-listen`」迁到 serve 进程（`POST /rpc`，SSE 并入既有 `/events` 新 topic——同源同鉴权同命名，§2.5） | ① serve 常驻，SSE 天然有宿主，资产浏览恰是 TUI 没开的场景；② 面板与聊天同 origin，cookie/token/静态资产一套；③ inspect-rpc §1 已预言「应用是同一份契约的另一类消费者」 |
+| §4.1 独立 tarball 面板 | **取消（替代）**：静态资产 go:embed 进单二进制 | tarball 只为「保 CLI 单二进制卖点」；embed 净增 ~100–150KB 且守 CI 体积 gate，用户零安装步骤 |
+| stdio transport + §3.2 Registry 重构 | **不动；IDE 线已关闭（2026-11-16，c_np5gzu）**——`-rpc` 已有用户故三 method 冻结保留；`internal/rpc/server.go` 照旧、永不挂 registry | method 实现放 transport-agnostic 位置（`internal/rpc/methods/`，已落地）；HTTP 单侧挂载即终态（IDE 驱动归 ACP，见 feature-acp.md） |
 | M12.1/M12.2（subagent/worktree/checkpoint/cron method） | 保留为 P3/P2 的后续 method 增量 | 依赖面不变 |
 
-**并入后的 caveat（如实记录）**：serve 进程没有 TUI 进程的内存态（live hooks 事件、当前 turn 实时 usage）。P3 资产面全部从盘读：session JSONL（append-only，tail 读不锁，避开 inspect-rpc §3.4 的 RWMutex 改造——那是 TUI 进程内并发读写才需要解的问题；serve 进程与写 session 的 seek 子进程天然是两个进程，文件系统 append 语义 + 行级 parse 已够）、memory 文件、skillstats JSONL。「实时观察正在跑的 TUI 会话」降级为「读已落盘部分」——每个 `turn_end` 后 `saveTurn` 已落盘（main.go runJSON），粒度是 per-turn，对资产浏览足够。
+**caveat（如实记录）**：serve 进程没有 TUI 进程的内存态（live hooks 事件、当前 turn 实时 usage）。P3 资产面全部从盘读：session JSONL（append-only，tail 读不锁，避开 inspect-rpc §3.4 的 RWMutex 改造——那是 TUI 进程内并发读写才需要的）、memory 文件、skillstats JSONL。「实时观察正在跑的 TUI 会话」降级为「读已落盘部分」——每个 `turn_end` 后 `saveTurn` 已落盘（main.go runJSON），per-turn 粒度对资产浏览足够。
 
-**两份 PRD 的状态处理**：本文 P3 章节即数据面的权威设计延续；feature-inspect-rpc.md 状态头加注「HTTP+SSE transport 与 tarball 面板已被 feature-web-frontend.md P3 吸收/替代，stdio/registry 归 IDE 线」——避免两份活设计打架（本次文档卡顺手落，见提交）。后记 2026-11-16（c_np5gzu）：IDE 线关闭，inspect-rpc.md 整体转入归档态，数据面权威独归本文 P3。
+**两份 PRD 的状态处理**：本文 P3 即数据面的权威设计延续；feature-inspect-rpc.md 状态头加注「HTTP+SSE transport 与 tarball 面板已被 feature-web-frontend.md P3 吸收/替代，stdio/registry 归 IDE 线」，避免两份活设计打架。后记 2026-11-16（c_np5gzu）：IDE 线关闭，inspect-rpc.md 转入归档态，数据面权威独归本文 P3。
 
 ### 3.4 后续（非本期）
 
-- 资产面只读边界打破（`session/branch` 等写 method）——对齐 inspect-rpc §9，应用阶段再议。（注：W5 c_n37tnr 的 `approval/decide` 已开了第一个**交互控制面**写 method——它不是资产面写，是审批回执；资产面只读边界不变。）
+- 资产面只读边界打破（`session/branch` 等写 method）——对齐 inspect-rpc §9，应用阶段再议。（注：W5 c_n37tnr 的 `approval/decide` 已开第一个**交互控制面**写 method——它不是资产面写，是审批回执；资产面只读边界不变。）
 - ~~远程审批卡片（权限 y/N 进 web UI）——父 PRD §8 的杀手锏项。~~ **W5 已落地全链**（c_n37tnr，2026-11-20）：web 半边（SSE `approval` 事件族 + 卡片 UI + `/rpc approval/decide|list` + 顶栏未决角标）+ **子进程半边**（`seek -p … --json --approval-stdin`：askFn → `approval_request` jsonLine → stdin 决定行回读；平面 `ApprovalRouter` 缝把 hub 的决定写回子进程 stdin，run 终止撤卡）。详见 §13.1 c_n37tnr 行。
 - 跨项目聚合视图（inspect-rpc §9 cross-project）。
 
@@ -273,16 +270,16 @@ butler `/today`（2026-11-13 上线，卡 c_clvtsp）验证过的形态，原样
 
 ### 5.2 与 `/today` 的关键差异：本渠道能驱动执行 → 写面加 CSRF 闸
 
-`/today` 只读，cookie 单独够用；web frontend 的 `POST /msg` 会驱动 seek 执行——**cookie 单独不得过写面**（闸已交付，W1.2 c_w5lidm：仅对 cookie 凭证生效——查询参数/Bearer 形态自带 token 即自带 CSRF 免疫，不经此闸，curl 面零感知）：
+`/today` 只读，cookie 单独够用；web frontend 的 `POST /msg` 会驱动 seek 执行——**cookie 单独不得过写面**（闸已交付 W1.2 c_w5lidm：仅对 cookie 凭证生效——查询参数/Bearer 自带 token 即自带 CSRF 免疫，curl 面零感知）：
 
-- 写面（POST）二选一：同源 `Origin` 头校验（允许集=自身 origin）**或** `X-Seek-Token` 头。跨站页面即使带上了 cookie（Samesite=Lax 已挡大半 POST），Origin 不匹配即 403。
-- **`POST /rpc` 同吃此闸（c_n37tnr，2026-11-20）**。/rpc 交付时是纯只读数据面，只带 token 门；`approval/decide` 是它上面**第一个状态变更型 method**（浏览器的 y/N/a 回答移动的是执行放行权），所以「cookie 单独不得驱动执行」必须对这个承载决定的 route 成立，不只是聊天 route。闸加在 route 级而非逐 method 判写：method 写集是第二份真相表，添 method 忘登记的那天就腐了。浏览器每次 POST 都带 Origin、页面自身 fetch 同源，浏览器面零感知；query/Bearer 调用方自带 token，与 /msg 同款免闸。
+- 写面（POST）二选一：同源 `Origin` 头校验（允许集=自身 origin）**或** `X-Seek-Token` 头。跨站页面即使带上 cookie（Samesite=Lax 已挡大半 POST），Origin 不匹配即 403。
+- **`POST /rpc` 同吃此闸（c_n37tnr，2026-11-20）**。`approval/decide` 是 /rpc 上**第一个状态变更型 method**（y/N/a 移动的是执行放行权），所以「cookie 单独不得驱动执行」必须对这个 route 成立。闸加在 route 级而非逐 method：method 写集是第二份真相表，忘登记那天就腐了。浏览器面零感知（POST 带 Origin、fetch 同源）；query/Bearer 调用方自带 token，与 /msg 同款免闸。
 - 读面（GET 静态/SSE）：cookie 足矣。
 - Cookie 属性：`HttpOnly; Secure(若 TLS); SameSite=Lax; Path=/`。
 
 ### 5.3 DNS rebinding 与 Host 校验
 
-loopback 服务的标准威胁：攻击者页面把 `attacker.com` 解析到 127.0.0.1。防线：Host 头允许集 = {bind 地址, `localhost[:port]`, `127.0.0.1[:port]`}，不匹配 403。**token 才是真闸**（rebinding 页面拿不到 token），Host 校验是纵深防御。（已交付 c_w5lidm，实现取 host 部分：`localhost`（不分大小写）或 loopback/尾网 CGNAT 任一 **IP 字面量**即过、端口不比对——字面量无法被 DNS rebinding，而严格比对 bind 地址会把 §5.4 的尾网转发姿势（Host=尾网 IP）与 httptest 随机端口一并 403；名字（`attacker.com`、`127.0.0.1.evil.com`）一律拒。）
+loopback 的标准威胁：攻击者页面把 `attacker.com` 解析到 127.0.0.1。防线：Host 头允许集 = {bind 地址, `localhost[:port]`, `127.0.0.1[:port]`}，不匹配 403。**token 才是真闸**（rebinding 页面拿不到 token），Host 校验是纵深防御。（已交付 c_w5lidm，实现取 host 部分：`localhost` 或 loopback/尾网 CGNAT 任一 **IP 字面量**即过、端口不比对——字面量无法被 rebinding，而严格比对 bind 地址会把 §5.4 的尾网转发姿势（Host=尾网 IP）与 httptest 随机端口一并 403；名字（`attacker.com`、`127.0.0.1.evil.com`）一律拒。）
 
 ### 5.4 三种网络场景
 
@@ -306,22 +303,20 @@ loopback 服务的标准威胁：攻击者页面把 `attacker.com` 解析到 127
 
 **结论：web 走平面（M3 子进程执行器），不走 acpBackend 的 in-process 会话栈。**
 
-两条外部驱动面的现状：
-
 | | ACP（`seek acp`，v7 柱 P） | control-plane（`seek serve`） |
 |---|---|---|
 | 驱动方 | 编辑器（Zed）/ paseo（ACP client） | 任意聊天渠道 / 浏览器 |
 | agent 形态 | **in-process**：`acpBackend.ag.Prompt` 事件流直转 | **子进程**：`exec seek -p --json`，稳定 JSONL 契约 |
-| 会话数/进程 | **一进程一 session**（MVP，feature-acp backlog ③「多 session」未做） | 多会话并发，per-Conv 串行 + 全局上限 |
-| cwd 锚定 | `acp.AnchorSession`：**chdir 整个进程** + 共享 `Policy.Reanchor`（per-session cwd 先例，D-1） | `cmd.Dir=绑定目录`，每消息一进程 |
+| 会话数/进程 | **一进程一 session**（MVP，feature-acp backlog ③ 未做） | 多会话并发，per-Conv 串行 + 全局上限 |
+| cwd 锚定 | `acp.AnchorSession`：**chdir 整个进程** + 共享 `Policy.Reanchor`（D-1） | `cmd.Dir=绑定目录`，每消息一进程 |
 
 不复用的理由：
 
-1. **per-session cwd 先例的前提在 web 场景不成立**。`AnchorSession` 靠进程级 chdir + 重锚共享 Policy——「one seek process = one ACP session」才安全。serve 进程同时服务多个 conv、各 binding 不同项目目录，进程级 chdir 会互相串台；要安全就得 per-session 进程，那就回到了子进程形态。
-2. **in-process 会破坏平面铁律**。「平面只 exec seek，`pkg/agent`/permission 零改动」（父 PRD §2.1 目标 6）是 control-plane 的立足点；in-process 意味着 serve 进程内跑 agent loop，权限/审批/取消/超时全部重新接线——ACP 路径当前还**没有 per-action 审批门**（feature-acp backlog ①，直通工作区），把这套搬进 serve 是把已知缺口放大到远程。
-3. **子进程形态白拿的资产**：D-C5 权限姿势、per-Conv 串行、resume 自愈、全局并发上限、超时 kill 进程树、`--no-cron-tick` 隔离——M2/M3 全部现成（卡片①的要求「复用 M2 会话绑定路由与 M3 执行器」正是此意）。
-4. **spawn 开销可接受**：每消息一个 seek 进程（config/AGENTS.md/skills 装配 ~几百 ms）相对 LLM turn 时长是噪声；若未来成为体感瓶颈，正路是编排层 P1 成熟后的 in-process 多 agent 面（§9 开放问题），不是现在预支。
-5. **真正共享的是「事件流形状」而非代码**：webfrontend 的 SSE 映射对齐 `acpUpdate` 的语义取舍（reasoning 不外泄为正文；工具调用 start/in_progress→completed|failed 三态）——作为形状参考写进实现卡的注意事项，不抽公共层（两处各 ~40 行 switch，抽层是伪 DRY）。
+1. **per-session cwd 的前提在 web 不成立**。`AnchorSession` 靠进程级 chdir + 重锚共享 Policy，只有「one seek process = one ACP session」才安全。serve 同时服务多 conv、各 binding 不同目录，进程级 chdir 会串台；要安全就得分进程，即回到子进程形态。
+2. **in-process 破坏平面铁律**。「平面只 exec seek，`pkg/agent`/permission 零改动」（父 PRD §2.1 目标 6）是 control-plane 立足点；in-process 要在 serve 内跑 agent loop，权限/审批/取消/超时全得重接线——ACP 路径当前还**没有 per-action 审批门**（feature-acp backlog ①），搬进 serve 是把已知缺口放大到远程。
+3. **子进程形态白拿的资产**：D-C5 权限姿势、per-Conv 串行、resume 自愈、全局并发上限、超时 kill 进程树、`--no-cron-tick` 隔离——M2/M3 现成。
+4. **spawn 开销可接受**：每消息一进程（config/AGENTS.md/skills 装配 ~几百 ms）相对 LLM turn 是噪声；若成瓶颈，正路是编排层 P1 成熟后的 in-process 多 agent 面（§9 开放问题）。
+5. **共享的只是「事件流形状」而非代码**：SSE 映射对齐 `acpUpdate` 语义（reasoning 不外泄为正文；工具调用 start/in_progress→completed|failed 三态）——只作形状参考，不抽公共层（两处各 ~40 行 switch，抽层是伪 DRY）。
 
 ## 7. ⑥ dsh web app：参考形态，不抄运行时
 
@@ -337,13 +332,13 @@ dsh-analysis §7：`apps/web`（React 18）+ `packages/web/*` 30+ 个 `ui-*` Cor
 
 httptest + fake seek 桩（脚本吐分批 JSONL 行）+ 真实 controlplane 组件（Router/Executor 用真实现，seek 二进制用桩）——**零真实 API key**。**基线**：`webfrontend_test.go` 现有 8 条（页面 embed / token 必需 / Inbound 推送 / 坏 body / SSE 回复 / 无订阅者丢弃 / `/state` 绑定 / Run 生命周期）全程零回归，是每张 W 卡验收的一部分：
 
-- **鉴权全路径**（前半已交付有测试，后半 W1.2 已交付 c_w5lidm——`webfrontend_auth_test.go` 表驱动）：无 token 401 / 错 token 401 / Bearer 过 / `?token=` 过（既有家族）∥ cookie 过 / `?token=` 303+Set-Cookie+Location 无 token / 写面无 Origin 无 X-Token 头 403 / `/rpc` 同款（`TestWeb_RPCWriteGate`，c_n37tnr） / Host 不匹配 403 / `0.0.0.0` bind 一律拒启动（scope 闸已交付，取代旧「缺 token 拒启动」——`TestWeb_AddrScope`/`TestWeb_RunForbiddenAddr`/`TestServePlane_BadWebAddrFails`）。
+- **鉴权全路径**（W1.2 c_w5lidm，`webfrontend_auth_test.go` 表驱动）：无 token 401 / 错 token 401 / Bearer 过 / `?token=` 过（既有家族）∥ cookie 过 / `?token=` 303+Set-Cookie+Location 无 token / 写面无 Origin 无 X-Token 头 403 / `/rpc` 同款（`TestWeb_RPCWriteGate`，c_n37tnr）/ Host 不匹配 403 / `0.0.0.0` bind 拒启动（`TestWeb_AddrScope`/`TestWeb_RunForbiddenAddr`/`TestServePlane_BadWebAddrFails`）。
 - **流式**：桩 seek 分批吐行（含延迟）→ SSE 按序收到 delta/tool/usage/reply；进程 kill（/cancel）→ 流以错误事件收口不挂起。
 - **SSE 生命周期**：客户端断开 → hub 注销 + goroutine 退出（leaktest）；多 tab 扇出一致；hub 满丢老不阻塞 executor。
-- **并发**（`-race`）：同 conv 两 POST 串行（复用 M3 语义，回归）；不同 conv 并行；emit 回调在 executor goroutine 上调用而 SendStream 在 hub 锁内——锁序测试。
-- **malformed**：坏 JSON 行跳过（复用 parseSeekJSONL 语义在流式版的保持）；超长行截断；POST body 非 JSON 400 不崩。
+- **并发**（`-race`）：同 conv 两 POST 串行（M3 语义回归）；不同 conv 并行；emit 在 executor goroutine 而 SendStream 在 hub 锁内——锁序测试。
+- **malformed**：坏 JSON 行跳过（parseSeekJSONL 语义在流式版保持）；超长行截断；POST body 非 JSON 400 不崩。
 - **Run 委托回归**：`Run(req)` 与 `RunStream(ctx, req, nil)` 结果字节一致；现有 executor/router 测试零修改通过。
-- **持久化**：serve 重启后同 conv-uuid 续接（bindings 表 round-trip，复用既有测试面 + web 层一条 e2e）。
+- **持久化**：serve 重启后同 conv-uuid 续接（bindings round-trip + web 层一条 e2e）。
 - **embed**：静态资产 hash 进测试（防手改部署态漂移）；CSP 头存在；无外链断言。
 - **体积 gate**：CI binary-size diff <200KB；repo 无 package.json。
 
@@ -362,21 +357,20 @@ httptest + fake seek 桩（脚本吐分批 JSONL 行）+ 真实 controlplane 组
 ### Phase MVP-后端（W1，~5 卡；全部= 在 webfrontend.go 之上就地演进，§1.4）
 
 | 卡 | 内容 | 验收 |
-|---|---|---|
-| **W1.1** | 配置面：servecli 构造器携带 config（**已交付** `serve.web_addr`，b769535；CLI `--listen` flag **已交付**，c_jxhkbr——`effectiveServe` 折 flag > config）+ web_addr scope 闸（**已交付**，76ed883——原「非 loopback 强制 token」闸被 2026-11-15 拍板取代为更严的限段拒启，§4.4）。**不建新包、不搬家**（§2.1） | 默认口 8790 行为零回归（已钉 `TestWeb_DefaultAddrPinned`）；`0.0.0.0`/LAN IP 拒启动 exit-2（已钉 `TestServePlane_BadWebAddrFails`）；`seek serve --frontend=web` 冒烟；现有测试家族零回归 |
-| **W1.2** | 鉴权演进（§5.1–5.3；token 生成/0600/Bearer/constant-time **已交付不动**）：`?token=` 首跳 303 换票 + HttpOnly cookie + URL 擦净、写面 Origin/X-Token 闸、Host 校验（**已交付**，c_w5lidm——`webfrontend_auth.go`：`authKind` cookie 第三凭证、`writeGate` 仅卡 cookie 凭证（curl 面零感知）、`gateHost` host 部分白名单；页面改探测式启动吃 cookie） | §8 鉴权增量表驱动测试；现有 token 用例（`TestWeb_MsgRequiresToken` 等）零回归 |
-| **W1.3** | per-conv 演进：`X-Seek-Conversation` 头 conv-uuid（D-W3；现状固定 `web:default`）、SSE hub per-conv 订阅（现状全 tab 一张订阅表）、`Send` 按 conv 寻址、`/state` per-conv、存量 `web:default` 绑定兼容 | 双 conv 隔离 + 多 tab 同 conv 扇出一致；leaktest；未鉴权 SSE 401 零回归 |
-| **W1.4** | 流式接线（§2.4 缝落地）：router SendStream→`/events` SSE `delta`/`tool`/`usage` 事件族（服务端 pricing 算 $）/run 生命周期；`reply` 收口带 session_id（envelope 自 `{"conv","text"}` 扩展，纯加法）（**已交付**，c_qcmul4——`webfrontend_stream.go`：run id 服务端铸造、named event 不打扰旧页 onmessage、usage $ 走 `internal/pricing` 与 CLI 同卡、`X-Accel-Buffering:no`+逐事件 flush；`RunEvent` 补 `model` 镜像） | 桩 seek 流式 e2e（§8 流式条目，`TestWeb_StreamE2EEventFamily` 按序+活性+二 run 换 id）；/cancel 收口（`TestWeb_StreamCancelClosesRun`） |
-| **W1.5** | 页面资产管线：沿单文件 `webfrontend.html` 生长（膨胀再拆 static/，§4.3）、CSP 头、gzip handler、CI 检查（无 package.json + 体积 gate）（**已交付**，c_ph2zax——`webfrontend_static.go`：CSP 以 sha256 钉内联块（§5.5 落地口径）+ gzip 惰性中间件（SSE 永不压缩，保逐事件 flush）；`scripts/web-gate.sh` + CI `web-gate` job：repo 根无 node 链断言 + linux/amd64 体积对 `scripts/web-size-baseline.txt` 净增 <200KB） | 资产 hash 测试；`curl /` 得 CSP 头 |
+| **W1.1** | 配置面：servecli 构造器携带 config（**已交付** `serve.web_addr` b769535；`--listen` **已交付** c_jxhkbr，`effectiveServe` 折 flag > config）+ web_addr scope 闸（**已交付** 76ed883，原「非 loopback 强制 token」被 2026-11-15 取代为限段拒启，§4.4）。不建新包、不搬家（§2.1） | 默认口 8790 零回归（`TestWeb_DefaultAddrPinned`）；`0.0.0.0`/LAN IP 拒启 exit-2（`TestServePlane_BadWebAddrFails`）；`seek serve --frontend=web` 冒烟 |
+| **W1.2** | 鉴权演进（§5.1–5.3；token/0600/Bearer/constant-time **已交付不动**）：`?token=` 首跳 303 换票 + HttpOnly cookie + URL 擦净、写面 Origin/X-Token 闸、Host 校验（**已交付** c_w5lidm——`webfrontend_auth.go`：`authKind` cookie 第三凭证、`writeGate` 仅卡 cookie（curl 零感知）、`gateHost` 白名单；页面探测式启动吃 cookie） | §8 鉴权增量表驱动测试；`TestWeb_MsgRequiresToken` 等零回归 |
+| **W1.3** | per-conv 演进：`X-Seek-Conversation` 头 conv-uuid（D-W3）、SSE hub per-conv 订阅、`Send` 按 conv 寻址、`/state` per-conv、存量 `web:default` 兼容 | 双 conv 隔离 + 多 tab 同 conv 扇出一致；leaktest；未鉴权 SSE 401 零回归 |
+| **W1.4** | 流式接线（§2.4 缝）：router SendStream→`/events` `delta`/`tool`/`usage` 事件族（服务端 pricing 算 $）/run 生命周期；`reply` 带 session_id（**已交付** c_qcmul4——`webfrontend_stream.go`：run id 服务端铸造、named event 不扰旧页 onmessage、usage $ 走 `internal/pricing`、`X-Accel-Buffering:no`+逐事件 flush；`RunEvent` 补 `model`） | 桩 seek 流式 e2e（§8，`TestWeb_StreamE2EEventFamily` 按序+活性+二 run 换 id）；/cancel 收口（`TestWeb_StreamCancelClosesRun`） |
+| **W1.5** | 页面资产管线：沿单文件 `webfrontend.html` 生长（膨胀再拆 static/，§4.3）、CSP 头、gzip handler、CI 检查（无 package.json + 体积 gate）（**已交付** c_ph2zax——`webfrontend_static.go`：CSP 以 sha256 钉内联块（§5.5）+ gzip 惰性中间件（SSE 永不压缩）；`scripts/web-gate.sh` + CI `web-gate` job：无 node 链断言 + linux/amd64 对 `scripts/web-size-baseline.txt` 净增 <200KB） | 资产 hash 测试；`curl /` 得 CSP 头 |
 
 ### Phase MVP-前端（W2，依赖 W1.3/W1.5，~4 卡）
 
 | 卡 | 内容 | 验收 |
 |---|---|---|
-| **W2.1** | 聊天 UI 增量（消息列表/输入框/SSE 自动重连/textContent 渲染**已交付**）：流式气泡 delta 累积→reply 替换、工具行折叠、conv-uuid localStorage（**已交付**，c_5xtm74——页面折 W1.4 命名事件族：delta 按 run 累积成文本块+`⚙ read …` 单行折叠工具行交错上屏、带 run 的 reply 整泡替换成权威终文本（丢帧 run-less 回退普通消息路径，幂等）、rAF 合帧渲、贴底跟随只在本来贴底时；conv-uuid localStorage 属 W1.3 已交付面不在本卡增量） | 手测脚本（浏览器/headless）（`scripts/web-stream-manual.sh` + `web-stream-headless.mjs`：curl 自检 SSE 族序/§2.5 过滤 + Chrome CDP 无头断言流式过程态/收口替换/XSS 不执行/cancel 收口）；XSS 用例（模型吐 `<script>` 转义——现状 textContent 纪律保持，`TestWeb_PageStreamingBubble` + 静态 sink 检查钉住） |
-| **W2.2** | 会话指令 UI：/bind /projects /switch /new /cancel 快捷按钮（纯文本透传**已交付**）+ 绑定状态常显（`GET /state` **已交付**，升级为指令后即时刷新）（**已交付**，c_evbzyh——顶栏五个指令按钮：零参直发、带参（/bind /switch）预填输入框，全部走同一条 sendText 透传；指令 POST 成功即刷 /state、SSE 重连恢复绑定常显；e2e=`TestWeb_CommandE2E` 真 Router+桩 seek） | 指令 e2e（真 Router + 桩 seek） |
-| **W2.3** | 状态栏：turn_end 实时 tokens 累积 + $（usage 事件）+ agent_end 终值/session_id 短显（**已交付**，c_npafpi——`webfrontend.html` 状态栏双段化：右段 `#usage` 计量，usage 命名事件逐 turn 累计（$ 恒为服务端 cost_usd 直加、客户端永不算价）、reply 收口带 session_id 短显 `sid xxxxxxxx`；口径=本页生命周期会话累计（与 CLI footer 同向，刷新重计——回放留给 P3）；顺手修正 `#status .ok/.warn` 死选择器（c_qucxtu 起 JS 设的是 header 自身 class，旧选择器从未命中）；多 turn 桩 `web_multi_turn` + `TestWeb_MultiTurnUsageAccumulates` 数值累积断言 + `TestWeb_PageUsageMeter` 页面契约） | 桩 seek 多 turn e2e 断言数值 |
-| **W2.4** | 文档收尾：guide-serve.md §web（启动/token/tailnet/安全清单）+ README 一行 + 体积 gate 上线（**已交付**，c_mn2wdp——guide-serve 新 §5「Web frontend」收拢启动/token/tailnet/安全清单（§2.1 的 web 专属段并入，76ed883 限段口径逐字保留不回退；Telegram 纸面节顺移 §6，两 PRD 的跨文档引用同步）；README/README.zh 控制面行能力括号刷新为工作台口径（限段句不动）；`web-size-baseline` 棘轮至 W 线完工面 30246587B——W1.5 钉 30216797 后 W2.1–W4.6 增量 29790B，gate 对完工 binary delta 归零，后续增长从完工地基起量） | 文档 review |
+| **W2.1** | 聊天 UI 增量：流式气泡 delta 累积→reply 替换、工具行折叠、conv-uuid localStorage（**已交付** c_5xtm74——delta 按 run 累积 + `⚙ read …` 单行折叠行、带 run 的 reply 整泡替换（丢帧回退普通消息），rAF 合帧、贴底跟随；conv-uuid 属 W1.3 不在本卡） | `scripts/web-stream-manual.sh` + `web-stream-headless.mjs`（SSE 族序/§2.5 过滤 + CDP 断言流式态/收口/XSS 不执行/cancel）；XSS 用例 `<script>` 转义（`TestWeb_PageStreamingBubble` + 静态 sink 检查） |
+| **W2.2** | 会话指令 UI：/bind /projects /switch /new /cancel 按钮 + 绑定状态常显（`GET /state`）（**已交付** c_evbzyh——零参直发、带参预填，同一 sendText；POST 成功即刷 /state、SSE 重连恢复） | 指令 e2e（`TestWeb_CommandE2E` 真 Router + 桩 seek） |
+| **W2.3** | 状态栏：turn_end tokens 累积 + $（usage）+ agent_end 终值/session_id 短显（**已交付** c_npafpi——`#usage` 逐 turn 累计，$ 恒为服务端 cost_usd、客户端不算价；`sid xxxxxxxx`；顺手修 `#status .ok/.warn` 死选择器） | 桩 seek 多 turn e2e 数值断言（`TestWeb_MultiTurnUsageAccumulates` + `TestWeb_PageUsageMeter`） |
+| **W2.4** | 文档收尾：guide-serve.md §web（启动/token/tailnet/安全清单）+ README 一行 + 体积 gate 上线（**已交付** c_mn2wdp——guide-serve 新 §5「Web frontend」（76ed883 限段口径保留，Telegram 顺移 §6）；README/README.zh 控制面行刷新；`web-size-baseline` 棘轮至 30246587B——W1.5 钉 30216797 后 W2.1–W4.6 增 29790B） | 文档 review |
 
 ### Phase P2 — 任务面板（依赖 orchestration P1，~3 卡）
 
@@ -384,7 +378,7 @@ httptest + fake seek 桩（脚本吐分批 JSONL 行）+ 真实 controlplane 组
 |---|---|---|
 | **W3.1** | `subagents.jsonl` 只读 reader（fold 状态投影）+ `GET /subagents?parent=` | 手造 jsonl 的表驱动测试（含柱 G 现有事件 + D1/D3 新事件形状前瞻） |
 | **W3.2** | SSE topic `subagents`（tail-follow + 推送，hub 满丢老） | follow 断开注销测试 |
-| **W3.3** | 任务面板 UI（后台子列表/状态/tokens + 详情读子 transcript 末条）+ orchestration 落地后事件形状核对（**已交付**，c_ujgmpu——`webfrontend.html` 面板互斥 + 面板专用 topic 连接只听命名事件；`GET /subagents?sub=` 详情 + `subagent.LastAssistant` transcript 尾读；e2e `TestWeb_PanelE2EBackgroundSpawn` = 真 Manager(stub Runner) → SSE 实时条目 + 原始事件行形状核对。详情未走 `session/messages`：子 transcript 在项目树不在平铺 store（W4.2 落地时的既定分流），`?sub=` 是同一只读 reader 的详情面。合并注 2026-11-16：吸收 main 的 W4.5 后任务面板并入其四面板 togglePane 闸（`agents-view` 类），面板进出/换绑的 topic 订阅开合改挂在闸末尾的 `syncTopicStream`） | e2e：spawn background 子（stub Runner）→面板实时出条目 |
+| **W3.3** | 任务面板 UI（后台子列表/状态/tokens + 详情读子 transcript 末条）+ orchestration 落地后事件形状核对（**已交付** c_ujgmpu——面板互斥 + 专属 topic 只听命名事件；`GET /subagents?sub=` 详情 + `subagent.LastAssistant` 尾读；e2e `TestWeb_PanelE2EBackgroundSpawn` 真 Manager(stub Runner)。详情不走 `session/messages`：子 transcript 在项目树不在平铺 store，`?sub=` 是同一只读 reader 的详情面。合并注 2026-11-16：并入 W4.5 四面板 togglePane 闸（`agents-view`），topic 订阅开合挂 `syncTopicStream`） | e2e：spawn background 子（stub Runner）→面板实时出条目 |
 
 ### Phase P3 — 资产面（并入 inspect-rpc 数据面，~5 卡）
 
@@ -393,9 +387,9 @@ httptest + fake seek 桩（脚本吐分批 JSONL 行）+ 真实 controlplane 组
 | **W4.1** | `POST /rpc` JSON-RPC 2.0 envelope + method registry（inspect-rpc §3.2 形状）+ 错误码（§3.5） | envelope 表驱动测试；未知 method -32601 |
 | **W4.2** | session method 集：`session/list`/`session/get`/`session/messages`（cursor 分页、tail 读不锁） | 分页遍历=全文件顺序（inspect-rpc §6.4 验收口径） |
 | **W4.3** | memory/projects/stats method 集（`memory/list|get|projects`、`project/list|get`、`stats/cache`） | 临时 SEEK_HOME 夹具表驱动 |
-| **W4.4** | 资产面 UI·一：sessions 浏览器（列表 + 消息 cursor 分页浏览）（**已交付**，c_hinacy——`webfrontend.html` master-detail：session/list 列表面（标题=首条用户消息首行）+ session/get 元信息行 + session/messages 沿 next_cursor 50/页「加载更多」，DOM 只装已翻进的页、工具结果 CSS 限高，textContent-only 纪律同聊天面；c_n63pat 补验收无头半边——`scripts/web-sessions-headless.mjs` Chrome CDP 断言（进面板让位/首页恰 50/翻页走完 1234 页界连续/切换无串台/XSS 不执行/回聊天零回归），manual 脚本短会话夹具加 XSS 载荷、接无头-人工分发，兑现 c_hinacy 合并时保留的「真浏览器长分页手测」合并后动作） | 手测脚本（`scripts/web-sessions-manual.sh` + `web-sessions-headless.mjs`：curl 自检 /rpc 分页契约 + 无头断言全绿，翻页 max 106ms/页）；长 transcript 分页不卡（虚拟滚动级量级） |
-| **W4.5** | 资产面 UI·二：memory 浏览器 + stats 视图（cache/cost）（**已交付**，c_wno3o3——ed9bb04，2026-11-16 进 main：🧠 记忆/📊 统计双面板挂 W4.4 泛化的 browsing gate（聊天与会话浏览器按 class 隐藏、恰一 pane 点亮，均不卸载，§1.4 加法纪律）；memory=projects 选择器（LastSeen 新者先）+ 条目列表（📌 pinned / ⚠ stale 直显——浏览面必须显示 GC 将回收什么）+ `memory/get` 详情走 chat markdown-lite 渲染器；stats=session 选择器（复用 W4.2 `session/list`）+ `stats/cache` 卡片（hit/miss tokens、hit_ratio 双色条 width 走 CSSOM——CSP style-src 不卡、累计 tokens、$）；`rpc/methods/stats.go` additive `cost_usd`：查询时点 tier 服务端估价（跨 tier 累计是估计值），客户端永不算价（§2.5）；`TestWeb_PageMemoryStats` 钉 method 名/双选择器/cost_usd/无计价词汇规则；`scripts/web-memory-manual.sh` 手测脚本。gate 复核 +12753B 预算内、未棘轮（W4.4 先例）；浏览器清单人工项按无人值守车道规矩留人工（commit body 记录在案）。标注核对补齐：c_zdkwoa 2026-11-19——W3.3 合并注「吸收 main 的 W4.5」即此卡） | 手测脚本 + 体积 gate 复核 |
-| **W4.6** | hooks/audit 只读 + `hooks/list`；feature-inspect-rpc.md 状态注记核对（本卡 §3.3 已预写）（**已交付**，c_igze7m——`internal/rpc/methods/hooks.go`：`hooks/list` 合并 project+user 两层 hooks.toml 按 dispatch 序（只读面不跑 trust gate / 不跑 bash -n，静态跳过经 audit tail 的 static-skip 行呈现）；`hooks/audit/tail` 一次性读全局 audit JSONL——`from_ts` RFC3339 截断（坏 ts 条目按 CLI 同规保留）、`limit` 加参默认 100/上限 1000 tail 语义、`project_id` 经 session header CWD 归属（fork 计入；失联/越权形状 sid 降级为不可归属、不失败）、`follow:true` 明确 -32602 拒（SSE hooks topic 未做，§6 #6/#7 仍开放）；inspect-rpc.md 状态头 + §3.1/§6 已按 W4.1–W4.6 实况逐条注记） | inspect-rpc §6 对应验收项搬运核对（已核 #2/#4/#8(口径替代)/#9/#10(取消替代)/#13/#14/#15；开放 #1/#3/#5(口径替代)/#6/#7/#11/#12，详见其 §6 注记块） |
+| **W4.4** | 资产面 UI·一：sessions 浏览器（列表 + 消息 cursor 分页）（**已交付** c_hinacy——master-detail：`session/list` 列表面（标题=首条用户消息首行）+ `session/get` 元信息 + `session/messages` next_cursor 50/页「加载更多」，DOM 只装已翻页、工具结果 CSS 限高，textContent-only；c_n63pat 补无头半边 `scripts/web-sessions-headless.mjs`（进面板让位/首页恰 50/翻页 1234 页界连续/切换无串台/XSS 不执行/回聊天零回归）） | `scripts/web-sessions-manual.sh` + `web-sessions-headless.mjs`（curl 分页契约 + 无头全绿，翻页 max 106ms/页）；长 transcript 分页不卡 |
+| **W4.5** | 资产面 UI·二：memory 浏览器 + stats 视图（cache/cost）（**已交付** c_wno3o3 / ed9bb04，2026-11-16 进 main：🧠/📊 双面板挂 W4.4 browsing gate（class 隐藏、恰一 pane 点亮，均不卸载）；memory=projects 选择器（LastSeen 新者先）+ 条目列表（📌 pinned / ⚠ stale）+ `memory/get` 走 markdown-lite；stats=session 选择器（复用 W4.2）+ `stats/cache` 卡片（hit/miss、hit_ratio 双色条 width 走 CSSOM、累计 tokens、$）；`rpc/methods/stats.go` additive `cost_usd`（查询时点 tier 估价，客户端不算价，§2.5）；`TestWeb_PageMemoryStats` 钉 method 名/双选择器/cost_usd；gate +12753B 预算内。标注核对 c_zdkwoa 2026-11-19） | `scripts/web-memory-manual.sh` + 体积 gate 复核 |
+| **W4.6** | hooks/audit 只读 + `hooks/list`；feature-inspect-rpc.md 状态注记核对（本卡 §3.3 已预写）（**已交付** c_igze7m——`internal/rpc/methods/hooks.go`：`hooks/list` 合并 project+user 两层 hooks.toml 按 dispatch 序（只读面不跑 trust gate / bash -n，static-skip 经 audit tail 呈现）；`hooks/audit/tail` 读全局 audit JSONL——`from_ts` RFC3339 截断（坏 ts 保留）、`limit` 缺省 100/上限 1000、`project_id` 经 session header CWD 归属（fork 计入；失联降级不失败）、`follow:true` -32602 拒；inspect-rpc.md 状态头 + §3.1/§6 已按 W4.1–W4.6 逐条注记） | inspect-rpc §6 搬运核对（已核 #2/#4/#8(口径替代)/#9/#10(取消替代)/#13/#14/#15；开放 #1/#3/#5(口径替代)/#6/#7/#11/#12） |
 
 **估时合计**：Phase 0 ~1 天 · MVP ~3 天 · P2 ~1.5 天 · P3 ~3 天。
 
@@ -441,26 +435,23 @@ httptest + fake seek 桩（脚本吐分批 JSONL 行）+ 真实 controlplane 组
 
 ### 13.1 能力映射表（13 张实现卡 × dsh 对应包 × seek 现状 × W5 增量口径）
 
-seek 现状一律指 W4 完工面（本卡开工时 main 的实况）；「精确对应」= dsh 包描述与卡片能力同题。
-
-| 卡·能力 | dsh 侧对应包（packages/client） | seek 现状 | W5 增量口径 |
-|---|---|---|---|
-| **c_x2au4t** markdown 渲染 | `ui-renderer`（渲染 slot 装配 + 应用根）+ `ui-chat`（会话节点渲染器/细节面） | `renderBody`/`appendInline` 最小渲染已落（代码围栏 + 行内码，c_iha3fr）；DOM 全程 createElement/textContent，页面无 HTML 解析 sink（§5.5 纪律） | checked-in vendor 单文件渲染器 ≤25KB（§4.2 先例）；渲染输出仍走 DOM-api 白名单构造（不 innerHTML），XSS 面不扩；**static/ 拆分随本卡落**（§4.3 预写路径，渲染器为第一个非内联资产，CSP 退回裸 `'self'` 的条件就位） |
-| **c_ux7lvk** 工具调用树 | `ui-tool`（tool call-tree 渲染器 + 按 tool key 的展示 slot——**精确对应**） | 直播流单行折叠工具行（W2.1 `⚙ read …`）；`tool` SSE 事件只带 name/phase/ok（§2.5 刻意不传 args/result——`tool_end.result` 可能很大）；sessions 浏览器 tool_calls 平铺显示 | 服务端 `tool` 事件载荷 additive 扩展（args 摘要 + result 截断，钉输出上限——工具输出限额在工具侧的既有纪律）+ 可展开调用树 UI；W2.1 折叠行为保持兼容（默认仍单行，展开是加法） |
-| **c_5m3fm6** 停止按钮 | `ui-conversation`（composer/queue/view 导航承载停止控制——dsh 无独立 stop 包） | `/cancel` 顶栏按钮已有（W2.2，平面指令→执行器 kill，含流收口 W1.4 `TestWeb_StreamCancelClosesRun`） | 输入区运行态切换：有活跃 run 时「发送」变「停止」直发 /cancel——客户端已知 run 生命周期（W1.4 run id），纯 UX 增量、零服务端改动。**本卡已交付（2026-11-20）**：键态跟 `runs` 表走（首个流事件翻、收口复位）；分岔在 click 层（submitter 区分不了按钮点击与回车，见 pitfalls）；中断收口改保留式——不整泡替换 ack，半截气泡留 + 「—— 已中断 ——」标注；html 净增 +4072B（§13.3 配额 ≤3KB 超约 1KB，记账见下）；验收 `scripts/web-stop-manual.sh` + `-headless.mjs`（沙盒实跑全绿，已退出 selftest 排除表、非 TTY 退 3）。**跟进卡 c_6mbjfq 已交付**：SSE 不回放时收口帧丢会让键永久停在 ⏹，改由 run-less 的 /cancel 应答自愈（−16B） |
-| **c_7lsngm** 输入增强 | `ui-input-trigger`（'/'与'@' 触发管线 + 候选菜单 + pick 路由）+ `ui-commands`（命令面三种 UI 形态——**精确对应**） | 纯文本输入框 + 五个指令快捷按钮（W2.2，全部走同一条 sendText 透传）；无补全无历史 | **已交付**（2026-11-20）：`#input` 换 textarea（Enter 发送 / Shift+Enter 原生换行，`grow()` 自长高、CSS max-height 兜滚动）；`/` 弹命令面板（候源=页面内 `CMDS` 注册表：/bind /projects /switch /new /cancel /resume，注册表驱动可扩展），↑↓ 移高亮 / Tab·Enter 补全（带参指令落「/cmd 」留空格）/ Esc 关闭；`@` 弹最近会话（`/rpc session/list` 现成只读 method，不另立协议），选中原位换 `@<sid>` 并自动发 `/resume <sid>`——「切换语义」就是平面新增的 `/resume` 指令（见 §13.1 下方注）。两个候源共用 ONE 弹层（`#menu` 一行 DOM），导航键全挂 `#input` 的 keydown，页面**不新增全局 keydown 监听**（关着时 Esc 完全放行，不劫持）。窄屏 ≤640px 降级：弹层满宽、条目换行、输入 16px（防 iOS 聚焦缩放）。**文件引用（dsh `ui-reference` 的 @file 半边）仍列远期**——本卡只做会话引用 |
-| **c_56yrcj** 附件上传 | `ui-attachment`（输入区/消息/轨迹三处图片 slot——**精确对应**） | 能力面已就位：`internal/modelcap.Vision` 判定 + `llm.Message.Images` 透传（124b6f4），TUI/print/ACP 三入口已有；web 二进制上传 seam 有现成先例（`POST /voice` + 自定义头，c_f6ayyg） | 图片粘贴/拖入/选择 → data URL → 上行（/voice 同款二进制端点或 /msg 扩展，实现卡定）→ **平面缝**：Inbound 可选附件字段（sibling 加法）+ 执行器转发 CLI vision 入口；非图片文件维持「不透传」提示（CHANGELOG 既有口径） |
-| **c_txz6vz** 会话侧栏 | `ui-sidebar`（会话多级树/搜索/分组/状态点）+ `ui-session`（Session Controller 适配）——**精确对应** | 四面板 togglePane 全屏覆盖（sessions/memory/stats/agents，W4.4/W4.5/W3.3）；会话切换=conv-uuid localStorage（W1.3）+ `/new`；sessions 浏览器能看不能切。**已交付**（c_txz6vz，drive/c_txz6vz）——侧栏常驻化 | 常驻可折叠左栏：当前 web 会话（conv 列表）+ 从 sessions 面板一键续接既有 session（`-resume` 语义走绑定面）；页面骨架重排——**后续三卡（重命名/主题/计量）的挂点**（§13.5） |
-| **c_rqcuaa** 重命名归档 | `ui-session`（session/title 事件面）+ `ui-sidebar`（树面入口）——dsh 重命名是事件溯源（`session/title` append 事件，不重写日志） | 无重命名/归档写面；sessions 列表标题=首条用户消息首行（派生，W4.4）；session JSONL 由子进程 seek 拥有（serve 只读） | **已交付**（2026-11-20）：`/rpc session/rename\|archive` 两写 method + `session/list` 增 `include_archived` 参与 `archived` 字段（标题覆盖/归档过滤都走单源 list）。**存储决策**：`internal/sessmeta` 新包（bindings 同族纪律——`~/.seek/serve/sessions-meta.json` 原子重写 + `sessions-meta-audit.jsonl` 追加审计，只记已落库的变更；并发=进程内互斥锁 read-modify-write，归档幂等 changed=false 不写不记）；serve 全程不碰子进程 session JSONL（transcript 归属钉死）。UI：侧栏行 div 化（行内装钮的合法嵌套）+ hover ✏/🗄（改名=行内输入框 Enter/Esc）+ 头部 🗄 归档可见切换（localStorage 记忆、归档行沉底变淡带 ⤴）。验收：sessmeta/methods/路由三层 Go 测试（正常/并发 -race/幂等/无权限 cookie-only 403 且不落库）+ 沙盒 E2E 双脚本（`scripts/web-rename-manual.sh` + `-headless.mjs`：curl 16 项自检 + 无头五景全绿，c_txz6vz 旧 E2E 复跑零回归）；web-gate 过（go1.25.8 口径净增 +53096B，超 ≤8KB 配额——两 method 写面+store 编译本体 ~44KB 为主，c_n37tnr 同款记账吃包内余量，基线棘轮至 30571003） |
-| **c_4doebx** 子代理面板 | `ui-subagent`（子代理会话目录/续跑路由/@ 引用源） | W3.3 已交付基础面：列表/状态/tokens + transcript 尾读详情（c_ujgmpu）；`notified` 读面就绪（W4.6 核对，写面仍属未做的 M-O1.3）。**本卡已交付（2026-11-20）**：徽标三态（running/done/error 类名承载）+ 详情字段表（与 `?sub=` 同信息量）+ 定时（10s ticker，面板开+已绑定才跑）/事件（subagents topic）双路刷新；数据源切 /rpc `subagent/list`/`get`（inspect-rpc §6 #12 收口），`GET /subagents` 留作兼容口；html 净增 4.9KB（§13.3 配额 ≤8KB 内） | 面上增量：多 run 聚合；续跑路由与 @ 引用（dsh 形态）列远期不在本卡 |
-| **c_xz2bey** hooks 审计 | **无直接对应**——dsh 的 hooks 即 Cordis 插件本身（dsh-analysis §1），无独立审计面；形状参考 `ui-trajectory`（事件台账 fold，pure-consumer 无服务） | 服务端已全：`hooks/list`（两层 hooks.toml 按 dispatch 序合并）+ `hooks/audit/tail`（from_ts/limit/project_id，W4.6 c_igze7m）；SSE hooks topic 未做（inspect-rpc §6 #6/#7 开放） | **已交付**（2026-11-20）：**SSE topic 化随卡纳入**（卡面把 §13.1 原「维持开放、不在本卡」口径翻案——inspect-rpc §6 #6/#7 就此收口）：`/events` 增 `hooks` topic（`webfrontend_hookstopic.go`——全局审计 JSONL tail-follow，`hooksconfig.AuditFollower` 同 subagent.Follower 形；**无需 /bind**（审计日志全局，subagents topic 的绑定是选索引文件的手段，此处没有对应物）；帧=审计行 **verbatim**（v3 §3.6 wire 格式即载荷，与 `hooks/audit/tail` 返回行字节同形，页面一条合并路径；无 `{"topic":…}` 信封——事件名 `hooks` 即 topic 记号）；满丢老/refcount/断连退出与 subagents 同栈 `pushFollow`/`dropTopicSub`）。+ 审计面板 UI（🪝 第四中栏面板 `hooks-view`：快照=`hooks/audit/tail` limit 500 先订阅后取；**滚动追加**=贴底自动跟随、上翻不拽回+「N 新行」计数可点跳底；**暂停/恢复**=冻结渲染不冻结积累（hkFreeze 快照），恢复补齐贴底；**按 hook 名过滤**=大小写不敏感子串、shown/held 计数；**断线不丢行**=EventSource retry:3000 自动重连，onopen 重拉 tail 整窗重播+整行去重折叠（快照在途推送入队、落地补放——无洞无重；审计行无行内唯一 id，真·全同重复行会被误折，method 面契约边界）。hooks 定义表（hooks/list 呈现）未做——卡面验收只覆盖实时审计视图）。`follow:true` 仍 -32602 但指路 `/events?topic=hooks`。验收：Go（`webfrontend_hookstopic_test.go` 五测：verbatim 推送/空流含后建文件/未绑定可订/SSE 头 retry+no-buffering/conv 共存/共享 follow refcount+断连 leaktest；`hooksconfig/follow_test.go` 四测；全量 `-race` 绿）+ 沙盒 E2E 双脚本（`scripts/web-hooksaudit-manual.sh`：curl verbatim 帧+15s 心跳回环证据（§12 不回归的机器侧半边）+follow 指路 + `-headless.mjs` 无头六景：快照/滚动追加/过滤/暂停恢复/上翻/断线补拉）全绿；web-gate 过（净增记账见 §13.3）。tailscale --tcp 转发下的心跳实测属真网动作，留主会话（manual.sh 头部留了 curl 命令） |
-| **c_6xktw4** 统计趋势 | **无对应**——dsh 遥测外发（dsh-base telemetry），无本地趋势面；形状参考 `ui-trajectory` 的 interactive timing overview | W4.5 stats 视图=单会话 cache/cost 快照（c_wno3o3）；`#usage` 计量=本页生命周期会话累计（W2.3，刷新重计）。**本卡已交付（2026-11-20）**：`stats/trend` 读面 method（`{limit?}` 1..100，缺省 20；每点 = 一个会话的 header Usage 折叠——sid/at/model/tokens/cache 命中/`hit_ratio`/服务端算的 `cost_usd`，oldest first；空 store = `{"points":[]}` 空成功而非 -32001，单点原样返回）+ 页面手绘 SVG 三行小图（tok / $ / 缓存命中率各占一行、各自归一，共用 x 轴；零 vendor、零 canvas）+ 悬停 guide 线/tooltip + 10/20/50 会话窗口切换 + 空态与单点文案；`session/list` 加 per-session `cost_usd`（侧栏每行右贴绿色 $ 列）；`session.SessionInfo` 增 `Usage`（loadMeta 本就解码整行 header，趋势与 cost 列都零第二次读盘） | 跨会话趋势：fold 各 session JSONL 的 `turn_end` usage 行（/rpc 读面 method 增量或复用 W4.2 reader）+ 无依赖 SVG/canvas 手绘图（零 vendor） |
-| **c_n37tnr** 审批卡片 | `ui-approval`（composer takeover，挂 Remote Event waterfall——**精确对应**）+ `ui-user-questions`（ask_user/plan review 面，远期参考） | print 模式 `ErrDenied` 工具结果即默认体验（§6 已验证②）；无远程审批通道——`askFn` 只在 TUI 进程内，平面无审批事件 | **web 半边已交付**（2026-11-20）：审批 hub（`webfrontend_approval.go`，pending 表 + 终态 FIFO 留存供幂等复读）+ SSE `approval` 事件族（conv 流命名事件——**不是** `?topic=` 维度：卡片要在任何视图弹出，主 `/events` 连接是常开载体，voice 先例）+ `/rpc approval/decide|list`（decide 是平面首个状态变更型 method：交互控制面，与只读资产面分立）+ 卡片 UI（描述+命令摘要+y/N/a，对齐 `permission.Policy` 语义；a=always-allow，Denial 仍是工具结果）+ 顶栏未决角标 + 空态零侵入（角标 hidden/卡栈 :empty）。幂等结构性成立：决定回调每 id 恰好一次、复读 applied=false、生产者重试同 id 不复活卡。验收：Go 测试（全流转/幂等/空态/conv 隔离/流翻译）+ 沙盒 E2E 双脚本（`scripts/web-approval-manual.sh` + `-headless.mjs`：curl 服务端三项 + 无头浏览器卡片/角标/防抖/双发）全绿；web-gate 过（钉 GOTOOLCHAIN 口径净增 ~46KB，超 §13.3 配额 25KB——注释瘦身仅省 200B，余为功能编译本体；gate 余量 1.25MB，W5 包合计 ~60KB/175KB 仍在包内，如实记账不棘轮）。**子进程半边已交付**（2026-11-20，同卡续做，承接本行）：`--approval-stdin` 是 opt-in（不加 flag 子进程 argv 逐字节不变）、只对 `--json` 有效、需要 `-p`；PrefAsk 在 `initialPref` 单点解析（系统提示 Mode 标签与门禁同源）；平面缝是兄弟接口 `ApprovalRouter`（`Route`/`Cancel`，`Frontend` 端口零改动，router 对实现 `ApprovalFrontend` 的前端按 run 铸路由），executor 的 attempt 持 `os.Pipe` 作子进程 stdin、在 **emit 之前**登记 req_id 的 delivery 闭包、attempt 结束（成功/失败/超时/取消）一律 `Cancel()`；决定迟到或 stdin EOF 都按拒绝（Diff 上限/摘要仍由 hub 裁）。契约按下列实现（原文保留作对照）：①`seek -p` 增 askFn 路径，吐 additive jsonLine `{"type":"approval_request","req_id":"<子进程铸>","kind":"bash","summary":"…","command":"…","diff":"…"}` 后**阻塞读 stdin**，决定行 `{"type":"approval_decision","req_id":"…","decision":"y\|n\|a"}` 回读（`a` → allow + SetAlwaysAllow(Kind)；denial 走工具结果）；run 中止吐 `{"type":"approval_cancel","req_id":"…"}`；②平面侧：executor 事件面已就绪（RunEvent 增 req_id/kind/summary/command/diff 字段，`SendStream` 已翻进 hub），要补的只是 decide 回调 → 子进程 stdin 写回的管道（executor attempt 持 stdin writer、按 req_id 路由）+ run 终止时 hub 撤卡（`CancelApproval` 已备）；③卡片超时/会话期 always-allow 状态落点随该卡定 |
-| **c_ni7mzw** 主题设置 | `ui-theme`（light/dark/system 三态 ThemeRuntime + `--dsw-*` token 体系 + Appearance 设置行——**精确对应**） | 单一暗色硬编码 hex（#14161a 等），无 CSS 自定义属性、无主题态、无设置面。**已交付**（c_ni7mzw，drive/c_ni7mzw）——亮/暗/跟随系统三态 + 设置面板（只读）+ 关于区 | **已交付**（2026-11-20）：`--seek-*` token 两套（亮/暗）改写既有样式，单属性 `data-theme` 开关 + 三态（localStorage 持久；`system` 态实时跟随 `prefers-color-scheme`）；`<head>` 内联 bootstrap 在样式表之前同步落 `data-theme` 防首屏闪烁（CSP 三个内联块 sha256 由 `webfrontend_static.go` 从同一份 embed 现算）；设置面板**只读**——`/rpc settings/get`（挂在 frontend 上，同 `approval/*` 先例：token 半属于前端自有状态）投影 serve 启动时生效的配置 + 默认值解析（并发/web_addr/自动压缩/候选项目），面板写明改法（编辑 `~/.seek/config.json` 后重启），写口需配置写入 + 重启路径、超本卡配额故不做；关于区＝版本（`VersionString` 迁至 `internal/buildinfo`，TUI 薄委托）+ 入口 token 后 6 位（完整 token 不出服务端）。服务端增量：`settings/get`、`internal/buildinfo`、`servecli SetSettings`——**不是零服务端改动**（原口径已按实况改写）。merge main（2026-11-20）时把后进 main 的三块面板裸 hex（ctxmeter 的 `#conn/#ctx`、附件的 `#tray/.chip`、子代理的 `.ag-badge.st-*`）一并收进 token 层，断线条单开 `--seek-warn-bg`——本卡的两主题验收因此覆盖到全页面，不只是本卡自己改过的样式 |
-| **c_oyp2qf** 顶栏 ContextMeter | **无常驻 context 计量条**；最接近 `ui-conversation` 的 request/header\|context 检查面（ConversationPromptSnapshot——请求级快照回放，非实时计量） | `#usage` 计量=会话累计 tokens/$（W2.3，usage 命名事件）；无 context 窗口占用显示 | **已交付**（2026-11-20，骨架=drive/c_txz6vz 分支直接并入本卡分支——c_ni7mzw 先例，main 合并时序见卡片写回）：顶栏计量条=末轮 `turn_end` prompt+completion 占用代理（TUI formatBudget 同口径，非累计）/ 窗口上限 `budget.Limit` 同源；usage 事件 additive 扩 `model`/`lane`/`ctx_limit` 三字段（model-less 桩帧形不变）；车道判定=**`modelcap.LaneOf`**（新：按 wire id 归车道——Go 池取 `pricing.OpenCodeGoModels` 单源、共享 id 按 directLaneIDs 语义归一线车道、二线默认按前缀；中文人读 label 服务端直显，页面不自建表）；色阶=budget Classify 同阈值 0.60/0.75 三档；同卡收尾：SSE 断线状态灯（断黄/连绿）+ 断线提示条 + 手动重连钮（listen 幂等收口旧连），旧 onerror 占位绑定行行为退役。验收：Go（两车道样例 wire 与后端判定一致/页面契约/modelcap 表）+ 沙盒 E2E 双脚本（`scripts/web-ctxmeter-manual.sh` + `-headless.mjs`：curl 两车道三件自检 + 无头杀 serve 演练灯切换/手动重连/自动恢复续流，26 断言）全绿；web-gate 过（go1.25.8 口径净增 +14891B，超 ≤6KB 配额——吃 W5 包余量、c_n37tnr 同款记账；基线棘轮至 30517907） |
-| **c_lnsdvu** 项目点选 | 无直接对应——dsh 项目切换内联在 `ui-commands` 的命令面；形状复用本页 `ui-input-trigger` 同款候源管线（第三个 #menu 候源） | /bind /switch 只预填输入框（W2.2「同款指令文本快捷方式」）；/projects 候选只在聊天文本 bullet 里（cmdProjects），页面无点选入口、也无只读 fs method 可下钻 | **已交付**（2026-11-22，W5 组后增卡）：候选 = `/rpc project/list` 的 root（含会话数）∪ `/rpc settings/get` 的 projects（config serve.projects 配了但 seek 尚未打开过的目录），clean 后绝对路径去重；`#cmd-bind`/`#cmd-projects` 两钮从预填/直发改为开此弹层，点行 = 发同款 `/bind <root>` 指令文本（已绑定态也合法且总重置会话 = D-C2「start over here」，统一走 /bind 不引 /switch 分叉）；弹层头行固定「点选会重置当前会话（/bind 语义）；路径也可手打」；当前绑定行标「当前」；label = basename（同名补父目录尾段）、desc = 绝对路径 + N 个会话/未开过；两来源空/任一失败各一行提示（atErr 同形状）；键盘 ↑↓/Enter/Esc 走输入框既有事件线，零新增全局监听。**零新 method、零写面、cmdProjects 零改动**（/projects 聊天文本回复字节不变）。不做 fs/list 类任意目录下钻——新只读 method 要过 inspect-rpc 的 method 纪律，另开卡再议；点选行不预检目录存在性（页面无 stat，root 是 manifest last_seen 位置可能已移动/删除——点了拿 Router「绑定失败：目录不存在」应答如实透传）。验收：页面钉子显式改写（新 wiring/文案钉 + 旧 `wireCmd('cmd-bind'…)` 形状 banned）+ 沙盒 E2E 双脚本（curl 字节钉 /projects 回复 + 无头七景含键盘点选与空态）全绿；净增 +8200B（§13.3 表尾）。机制预算：**不退役**——纯前端 + 复用两个既有只读 method，零新常驻机制（候源状态是页面内变量，随页面生死；无新后台任务/定时器/常驻连接），无可退役对象；架构页同步不适用（本仓无 docs/architecture.html，本卡不触 internal/drive \| internal/cron） |
-| **c_heffj3** /bind 目录浏览器（W5 后增补卡，非原 13 张） | `ui-conversation` 的项目/目录选择路径（dsh 走 filesystem 浏览器；seek 侧自建） | 页面无任何目录列举口——`internal/rpc/methods` 六族（session/memory/project/stats/hooks/subagent）全无 fs 面，`/bind` 任意路径只能手打（W2.2 把指令 UI 定成「同款指令文本」是设计口径） | **已交付**（2026-11-22）：新增只读 method `fs/list`（registry 族纪律，`internal/rpc/methods/fs.go`）+ 页面目录浏览器。**能力**=目录下钻：params `{path?, show_hidden?, limit?}`（path 缺省=首个可浏览根，页面自描述、无需知服务端 HOME）、result `{path, parent?, entries:[{name,path,is_dir}], truncated}`，名字+类型 only、绝不读文件内容、depth 固定 1（逐级下钻即导航）；limit 默认 200/上限 1000、超置 truncated；名字排序稳定。**安全面=根集收敛**：可浏览根 = `serve.project_roots`（本卡新增可选配置）∪ `serve.projects` ∪ `memory.ListProjects()` 每 root，`project_roots` 为空时并入 HOME；判定双侧 EvalSymlinks + 分隔符前缀，先判根集再 stat（根外无存在性预言、不落 ReadDir）；根外 → -32602 带明写逃生口（「编辑 ~/.seek/config.json 的 serve.project_roots」）。**权限等价性论证**：`/bind` 本就能校验任意路径并回显存在性，本口不新增「碰文件系统」的权限，新增的只是枚举信息面，故收紧到根集；已有项目根始终可达=现有用法不锁死，/srv 类部署加一行配置即扩。页面：`/bind ` 参数期弹「浏览目录…」入口（folder sprite + 文字）（片 1 c_lnsdvu 候选行的插队点已注明），目录模式复用同一 #menu 弹层与 ↑↓/Enter/Esc/Tab 导航（层头=路径左省略+「上一级」arrow-up sprite+选这个目录+过滤框；**不新增全局键盘监听**，pin 钉住）；失败在弹层内一行提示。验收：`fs_test.go` 表驱动（缺省回首根/~ 展开/不存在/是文件/根外含 ../ 逃逸与符号链接逃逸/hidden/limit/排序/parent 收敛）+ 页面钉子（`rpc('fs/list'`、入口文案、`sendText('/bind ' + path, false)`、`setBtn(up, 'arrow-up', '上一级')`、错误分支、无全局 keydown）+ 沙盒 E2E 双脚本 `scripts/web-dirpick-manual.sh`/`-headless.mjs`（curl 契约 + 无头七景含 /state 绑定断言与目录消失错误）全绿；web-gate 见 §13.3 记账（trip 点是 main 既有欠棘轮，非本卡）。**不做**（留结论）：`fs/read` 文件内容读口（另一信任级）、写/删/新建、递归整树 |
-| **c_25d2ey** 图标/按钮体系统一（W5 组后补卡，非原 13 张） | 无直接对应——dsh 的图标集/按钮层级内嵌在 `ui-*` 包的设计语言里，本卡只对齐视觉口径 | 旧面：UI 图标 emoji+文字符号混排（🧠📊🐚⚙⚖🗄✏ 等）、同屏 4~5 套按钮样式、连接状态是裸色点无标签、侧栏头部三钮间距失衡 | **已交付**（2026-11-23）：全页 UI 图标 = 内联 `<symbol>` sprite + `<use>` 复用（每图标定义一次、无内联 path 副本）；path vendored 自 Lucide（ISC，文件头注释记来源/许可证，沿 2026-11-18「搬开源片段记来源」口径），零运行时图标库/CDN/图标字体（CSP `default-src 'self'` + 单文件零构建 + 离线三约束）。覆盖：顶栏五入口（记忆/统计/后台/设置/审计）、侧栏 新建/归档/折叠、会话行 改名/归档、附件/麦克风、发送（主操作不加图标）、主题三选（sun/moon/monitor）、记忆 pin/alert、审批卡（shield-check + 允许/拒绝/总是允许）、子代理通知徽标；「后台」= tasks（jobs 语义，替掉语义错位的贝壳）；正文消息里的 emoji 不动（用户/模型内容）。按钮三档：`.btn-primary`（#send/#reconn/审批「允许」，每屏唯一主 CTA）/ 缺省次操作 soft（顶栏指令组与视图组同档、主题钮去描边、加载更多…）/ `.btn-icon`（26×26 图标钮，`.sm`=22×22 行内档）；输入区附件/麦克风 36×36 与 textarea 对齐。`#conn` = 8px CSS 圆点 + 可见文字标签 + title/aria-label（颜色不单独承载语义）。验收：`scripts/web-theme-manual.sh` 无头全绿（新增 sprite≥24 符号 / UI 无 emoji / 图标线性轮廓与 currentColor / 文字≥4.5:1·图标≥3:1 采样；32 张亮暗×1440/390 截图走 `web-page-review.sh`）+ `go test ./...` 绿 + `web-gate.sh` 过（本卡页面源 +4993B，无 Go 变更，不棘轮）。 |
+seek 现状=W4 完工面（本卡开工时 main）；「精确对应」= dsh 包描述与卡片能力同题。
+| **c_x2au4t** markdown 渲染 | `ui-renderer`（slot 装配+应用根）+`ui-chat`（会话节点渲染） | `renderBody`/`appendInline` 最小渲染（围栏+行内码，c_iha3fr）；textContent-only，无 HTML sink（§5.5） | vendor 单文件渲染器 ≤25KB（§4.2）+ static/ 拆分随卡（§4.3，CSP 裸 `'self'`） |
+| **c_ux7lvk** 工具调用树 | `ui-tool`（call-tree + tool key slot——**精确对应**） | 单行折叠工具行（W2.1 `⚙ read …`）；`tool` SSE 只带 name/phase/ok（§2.5；`tool_end.result` 可能很大） | args 摘要 + result 截断 + 可展开树；默认单行 |
+| **c_5m3fm6** 停止按钮 | `ui-conversation`（composer/queue/view；无独立 stop 包） | `/cancel` 顶栏按钮（W2.2；`TestWeb_StreamCancelClosesRun`） | **已交付 2026-11-20**：「发送」→「停止」（跟 `runs` 表）；半截气泡「—— 已中断 ——」；html +4072B（配额 ≤3KB，超 1KB）；`scripts/web-stop-manual.sh`/`-headless.mjs`；跟进 c_6mbjfq −16B |
+| **c_7lsngm** 输入增强 | `ui-input-trigger`（'/'·'@' 触发+候选）+`ui-commands`（命令面——**精确对应**） | 纯文本输入框 + 五指令按钮（W2.2）；无补全无历史 | **已交付 2026-11-20**：`#input` 换 textarea（`grow()`）；`/` 面板（`CMDS`+新增 `/resume`）+ ↑↓/Tab/Esc；`@` 会话（`@<sid>` + `/resume <sid>`，源 `/rpc session/list`）；复用 `#menu`；≤640px 16px；@file 远期（`ui-reference`） |
+| **c_56yrcj** 附件上传 | `ui-attachment`（输入区/消息/轨迹三处图片 slot——**精确对应**） | `internal/modelcap.Vision`+`llm.Message.Images` 已就位（124b6f4）；先例 `POST /voice`（c_f6ayyg） | data URL 上行；**平面缝**：Inbound 附件字段（sibling 加法）+ 转发 vision；非图片「不透传」（CHANGELOG） |
+| **c_txz6vz** 会话侧栏 | `ui-sidebar`+`ui-session`（**精确对应**） | 四面板 togglePane（W4.4/W4.5/W3.3）；conv-uuid localStorage（W1.3）+ `/new` | **已交付**（drive/c_txz6vz）：可折叠左栏 + `-resume` 续接；后续三卡挂点（§13.5） |
+| **c_rqcuaa** 重命名归档 | `ui-session`（`session/title` 事件面）+`ui-sidebar`（树面入口）——dsh 事件溯源 | 无写面；标题派生（W4.4）；JSONL 归子进程 seek | **已交付 2026-11-20**：`/rpc session/rename\|archive` + `session/list` 增 `include_archived`/`archived`；`internal/sessmeta`（`~/.seek/serve/sessions-meta.json` + `sessions-meta-audit.jsonl`，归档幂等）；UI ✏/🗄；三层 Go 测试（-race/幂等/cookie-only 403）+ `scripts/web-rename-manual.sh`/`-headless.mjs`（curl 16 项）；+53096B（超 ≤8KB，~44KB 编译本体；基线 30571003） |
+| **c_4doebx** 子代理面板 | `ui-subagent`（目录/续跑路由/@ 引用源） | W3.3 面（c_ujgmpu）+`notified` 读面（写面 M-O1.3 未做） | **已交付 2026-11-20**：徽标三态 + 详情表（`?sub=`）+ 10s ticker/事件双路；`/rpc subagent/list`/`get`（inspect-rpc §6 #12）+`GET /subagents`；html 4.9KB（≤8KB）；多 run 聚合远期 |
+| **c_xz2bey** hooks 审计 | **无直接对应**——dsh hooks 即 Cordis 插件（dsh-analysis §1）；参考 `ui-trajectory` | `hooks/list`（两层 hooks.toml 按 dispatch 序）+`hooks/audit/tail`（from_ts/limit/project_id，W4.6 c_igze7m） | **已交付 2026-11-20**（inspect-rpc §6 #6/#7）：`/events` 增 `hooks` topic（`hooksconfig/follow.go`+`webfrontend_hookstopic.go`，`hooksconfig.AuditFollower`；审计行 verbatim（v3 §3.6）、无信封；满丢老同 `pushFollow`/`dropTopicSub`）+ 🪝 `hooks-view`（tail 500；hkFreeze；retry:3000）；`follow:true` 仍 -32602 指路 `/events?topic=hooks`；无 `{"topic":…}` 信封。`webfrontend_hookstopic_test.go` 五测 + `hooksconfig/follow_test.go` 四测 + `-race` + `scripts/web-hooksaudit-manual.sh`/`-headless.mjs` 六景 |
+| **c_6xktw4** 统计趋势 | **无对应**（dsh 遥测外发；参考 `ui-trajectory`） | W4.5 stats 单会话快照（c_wno3o3）；`#usage` 本页累计（W2.3） | **已交付 2026-11-20**：`stats/trend`（`{limit?}` 1..100；点 sid/at/model/tokens/cache/`hit_ratio`/`cost_usd`；空=`{"points":[]}` 非 -32001）+ 手绘 SVG 三行图（零 vendor/零 canvas）+ 10/20/50 窗口；`session/list` 加 `cost_usd`；`session.SessionInfo` 增 `Usage` |
+| **c_n37tnr** 审批卡片 | `ui-approval`（composer takeover + Remote Event waterfall——**精确对应**）+`ui-user-questions`（远期） | print 模式 `ErrDenied` 即默认体验（§6 ②）；`askFn` 只在 TUI 进程内 | **已交付 2026-11-20（web + 子进程两半）**：web=`webfrontend_approval.go` hub + SSE `approval` 事件族（非 `?topic=`）+ `/rpc approval/decide\|list`（首个状态变更型 method）+ 卡片 UI（y/N/a 对齐 `permission.Policy`）；子进程=`--approval-stdin`（`--json`+`-p`），`initialPref` 单点解析，缝=`ApprovalRouter`（`Route`/`Cancel`，`Frontend` 零改动，对 `ApprovalFrontend` 铸路由；`os.Pipe` 作 stdin，结束 `Cancel()`=`CancelApproval`）；wire：`{"type":"approval_request","req_id":"<子进程铸>","kind":"bash","summary":"…","command":"…","diff":"…"}` → `{"type":"approval_decision","req_id":"…","decision":"y\|n\|a"}`，中止 `{"type":"approval_cancel","req_id":"…"}`；`approval_stdin.go` relay；`scripts/web-approval-manual.sh`/`-headless.mjs`；+~46KB（超 25KB，gate 余 1.25MB） |
+| **c_ni7mzw** 主题设置 | `ui-theme`（三态 ThemeRuntime+`--dsw-*` token——**精确对应**） | 单一暗色硬编码 hex（#14161a 等），无变量/主题态 | **已交付 2026-11-20**：`--seek-*` token 两套 + `data-theme` 三态（`system` 跟 `prefers-color-scheme`）；`<head>` bootstrap 防闪烁（sha256 由 `webfrontend_static.go` 现算）；设置**只读**——`/rpc settings/get`（同 `approval/*` 先例；改法=编辑 `~/.seek/config.json`）；增量 `settings/get`/`internal/buildinfo`/`servecli SetSettings`；版本=`VersionString` 迁 `internal/buildinfo`；merge main（2026-11-20）三块裸 hex（`#conn/#ctx`、`#tray/.chip`、`.ag-badge.st-*`）收进 token 层（`--seek-warn-bg`） |
+| **c_oyp2qf** 顶栏 ContextMeter | **无常驻计量条**；近 `ui-conversation` 的 request/header\|context 面 | `#usage` 会话累计（W2.3）；无 context 占用 | **已交付 2026-11-20（骨架 drive/c_txz6vz）**：末轮 `turn_end` 占用 / 上限 `budget.Limit`；usage 扩 `model`/`lane`/`ctx_limit`；车道=`modelcap.LaneOf`（`pricing.OpenCodeGoModels` 单源）；色阶 0.60/0.75；断线灯 + 重连钮。`scripts/web-ctxmeter-manual.sh`/`-headless.mjs`（26 断言）；+14891B（超 ≤6KB；基线 30517907） |
+| **c_lnsdvu** 项目点选 | 无直接对应（dsh 内联 `ui-commands`；复用 `ui-input-trigger` 候源） | /bind /switch 只预填（W2.2）；无只读 fs method | **已交付 2026-11-22（W5 后增卡）**：候选=`/rpc project/list`∪`/rpc settings/get` projects；`#cmd-bind`/`#cmd-projects` 弹层（第三个 `#menu`）→ `/bind <root>`（=D-C2）；**零新 method、零写面、cmdProjects 零改动**；页面钉子（`wireCmd('cmd-bind'…)` banned）+ 无头七景；+8200B；架构页同步不适用（无 docs/architecture.html） |
+| **c_heffj3** /bind 目录浏览器（W5 后增补） | `ui-conversation` 的项目/目录路径（dsh 走 filesystem 浏览器；seek 自建） | `internal/rpc/methods` 六族全无 fs 面 | **已交付 2026-11-22**：只读 `fs/list`（`internal/rpc/methods/fs.go`），`{path?, show_hidden?, limit?}` → `{path, parent?, entries:[{name,path,is_dir}], truncated}`，limit 200/上限 1000；根=`project_roots`（`serve.project_roots`，新增）∪`serve.projects`∪`memory.ListProjects()`；根外 -32602 + 逃生口（`~/.seek/config.json`）；页面 `/bind ` 弹「浏览目录…」（复用 `#menu`）。`fs_test.go` 表驱动 + 页面钉子（`rpc('fs/list'`、`sendText('/bind ' + path, false)`、`setBtn(up, 'arrow-up', '上一级')`）+ `scripts/web-dirpick-manual.sh`/`-headless.mjs`；gate 见 §13.3；**不做** `fs/read`/写/删/递归 |
+| **c_25d2ey** 图标/按钮体系统一（W5 后补卡，非原 13 张） | 无直接对应——dsh 图标内嵌 `ui-*` 设计语言 | 旧面：emoji 混排、4~5 套按钮样式、裸色点 | **已交付 2026-11-23**：内联 `<symbol>` sprite+`<use>`（vendored Lucide，ISC，沿 2026-11-18 口径），零图标库/CDN（CSP `default-src 'self'`）；三档 `.btn-primary`/soft/`.btn-icon`（26×26，`.sm`=22×22），附件 36×36；`#conn` 8px 圆点+文字标签。`scripts/web-theme-manual.sh` 全绿（sprite≥24 / 无 emoji / 文字≥4.5:1·图标≥3:1；32 截图走 `web-page-review.sh`）+ `go test ./...` + `web-gate.sh`（+4993B） |
 
 
 ### 13.2 范围翻案与维持（§2.6 已就地改注，此处记理由）
@@ -474,26 +465,26 @@ seek 现状一律指 W4 完工面（本卡开工时 main 的实况）；「精�
 
 ### 13.3 体积预算分配（<200KB gate；基线现值 30521979B）
 
-`scripts/web-size-baseline.txt` 现值 **30521979B**（自 c_f6ayyg 202ad58 的 30480715B 起按 delta 追加：c_x2au4t +14109B、c_txz6vz +8192B、c_oyp2qf +14891B、c_5m3fm6 +4072B、c_6mbjfq −16B；W2.4 的 30246587B 与 voice/W4.5/W4.6 增长已并入）。gate 口径不变（§4.3）：linux/amd64 构建对基线**净增 <200KB**。配额=该卡全部净增上限（含编译产物与 embed 资产，后者按源字节 1:1）：
+`scripts/web-size-baseline.txt` 现值 **30521979B**（自 c_f6ayyg 202ad58 的 30480715B 起按 delta 追加：c_x2au4t +14109B、c_txz6vz +8192B、c_oyp2qf +14891B、c_5m3fm6 +4072B、c_6mbjfq −16B；W2.4 的 30246587B 与 voice/W4.5/W4.6 增长已并入）。gate（§4.3）=linux/amd64 构建对基线**净增 <200KB**；配额=该卡全部净增上限（含编译产物与 embed 资产，后者按源字节 1:1）：
 
 | 卡 | 配额 | 备注 |
 |---|---|---|
-| c_x2au4t markdown 渲染 | ≤30KB | **大头先占位**：vendor 渲染器 ≤25KB + 接线/样式 ~5KB；static/ 拆分的目录/embed 骨架也计在本卡 |
-| c_ux7lvk 工具调用树 | ≤15KB | tool 事件载荷扩展（服务端）+ 树 UI |
-| c_5m3fm6 停止按钮 | ≤3KB | 纯 composer UX。**实际 +4072B**（go1.25.8 口径，2026-11-20 交付）：页面 CSS/JS/markup ~4.7KB source（键态渲染 + click 分岔 + 保留式中断收口）；超约 1KB，按 c_n37tnr/c_oyp2qf 先例吃 W5 包余量、超在记账不在 gate；跟进 c_6mbjfq −16B |
-| c_7lsngm 输入增强 | ≤10KB | '/' 触发候选菜单。**实际 ~13KB**（`-trimpath` 口径 +13195B，2026-11-20 交付时；同尺同路径量得）：页面 textarea+弹层/键盘线 12296B + 平面 `/resume` 缝 899B；超配额 ~3KB，吃包内余量、gate 余量 1.2MB 未棘轮（如实记账，同 c_n37tnr 口径） |
+| c_x2au4t markdown 渲染 | ≤30KB | 大头先占位：vendor 渲染器 ≤25KB + 接线/样式 ~5KB；static/ 拆分与 embed 骨架计本卡 |
+| c_ux7lvk 工具调用树 | ≤15KB | tool 载荷扩展（服务端）+ 树 UI |
+| c_5m3fm6 停止按钮 | ≤3KB | 纯 composer UX。**实际 +4072B**（go1.25.8，2026-11-20，页面 CSS/JS/markup ~4.7KB source）；超 ~1KB，按 c_n37tnr/c_oyp2qf 先例吃 W5 包余量；跟进 c_6mbjfq −16B |
+| c_7lsngm 输入增强 | ≤10KB | '/' 候选菜单。**实际 ~13KB**（`-trimpath` +13195B，2026-11-20 同尺同路径：页面 12296B + `/resume` 缝 899B）；超 ~3KB，gate 余 1.2MB 未棘轮 |
 | c_56yrcj 附件上传 | ≤20KB | 平面缝 + 前端预览 |
 | c_txz6vz 会话侧栏 | ≤20KB | 布局骨架 + 会话树 |
-| c_rqcuaa 重命名归档 | ≤8KB | 服务端小 method + 侧栏入口。**实际 ~52.9KB**（go1.25.8 口径，2026-11-20 交付）：UI embed ~6.7KB + 两 method 写面与 sessmeta store 的编译本体 ~44KB（c_n37tnr 同款形状：注释非杠杆、功能本体为主）；超配额吃包内余量（累计 ~127KB/175KB），gate 钉余 ~1.1MB——超在记账、不在 gate |
+| c_rqcuaa 重命名归档 | ≤8KB | 服务端小 method。**实际 ~52.9KB**（go1.25.8，2026-11-20：UI embed ~6.7KB + 两 method/sessmeta store 编译本体 ~44KB，注释非杠杆）；累计 ~127KB/175KB，gate 钉余 ~1.1MB——超在记账 |
 | c_4doebx 子代理面板 | ≤8KB | W3.3 面上增量 |
-| c_xz2bey hooks 审计 | ≤10KB | 审计面板（服务端 W4.6 已全）。**实际 ~23.7KB**（go1.25.8 口径，2026-11-20 交付）：SSE topic 随卡纳入（卡面翻案，§13.1 行）——hooksconfig/follow.go + webfrontend_hookstopic.go 编译本体 ~14KB + 面板 HTML/JS/CSS ~9KB（embed 源字节）；超配额吃包内余量（累计 ~107KB/175KB），gate 仍有 ~1.1MB 余量、未棘轮——超在记账、不在 gate |
-| c_6xktw4 统计趋势 | ≤12KB | usage fold + 无依赖图表。**终测 +26 664B**（go1.27.3 / linux-amd64 默认线，2026-11-21 二次吸收 main 后同树对照 main@1d921d45：31 501 923→31 528 587；首测 +17 520B，二次合并的 session.go→title.go 重构使跨包交互多 ~9KB、卡零新码）：页面三件 ~8.2KB embed（JS 6.6KB 手绘 SVG+悬停+窗口切换、CSS 1.1KB、标记 0.5KB）+ Go 侧 stats/trend 折叠 / session/list 计价 / SessionInfo.Usage 的编译本体。超 ≤12KB 配额 ~14.7KB——**B 案：超在记账、不在 gate**（主会话 2026-11-21 按 c_n37tnr/c_oyp2qf/c_rqcuaa/c_xz2bey 四先例代拍），不再为账面数字砍功能；gate 基线**不棘轮**（用户 2026-11-22 定 B 案：pin 留 31 332 461，另有 +169 462B 系 main 侧 35 commits 的未棘轮增长，不并入本卡账——谁涨的谁棘轮；闸门实测 31 528 587−31 332 461 = 196 126B / 204 800B，仍 PASS、余 8 674B，此后的合并需自行 `--update-baseline`） |
-| c_n37tnr 审批卡片 | ≤25KB | 平面缝 + 卡片 UI（本组最重）。**实际 ~46KB**（钉 GOTOOLCHAIN 口径，2026-11-20 交付时）：注释瘦身仅省 200B，余为 hub/RPC/UI 编译本体；超配额部分吃包内 25KB 余量（累计 ~60KB/175KB），gate 仍有 1.25MB 余量、未棘轮——超在记账、不在 gate。**子进程半边 +47 683B**（同口径复测 2026-11-20 收尾轮：031f099→终态 = 29 247 246→29 294 929B，approval_stdin.go 的 relay + executor 的 pipe/路由 + router 的 ApprovalFrontend upcast。上一会话记的 +52 059B 不可复现——以 a5b420f 为基点实测 +59 966B，其中 +12 283B 是 031f099 吸收的 c_idisqf/compact_rescue 等无关内容，不记本卡），累计本卡 ~94KB、W5 包 ~108KB/175KB，gate 余量仍 1.2MB |
-| c_oyp2qf 顶栏 ContextMeter | ≤6KB | 计量条。**实际 ~14.9KB**（go1.25.8 口径，2026-11-20 交付）：页面三件 ~4.4KB embed + modelcap 车道表/标签与 usage 三字段的编译本体；超配额吃包内余量，gate 仍余 ~1.16MB——超在记账、不在 gate |
-| c_heffj3 /bind 目录浏览器（W5 后增补） | 卡面预估页面 3~4KB + Go ~4KB | **实际 +38.0KB**（go1.27.3 线，2026-11-22 交付：main 269f682a 构建 31557849B → 本分支 31595882B）：页面 embed 源 +7878B（webfrontend.html 161590→169468B，目录模式 JS/CSS 为主、注释占大头）+ `fs.go`/config/servecli 编译本体；超卡面预估，按 c_xz2bey/c_rqcuaa 先例超在记账、不在 gate（method 注册与错误分支的编译放大是既有形状）。**gate 现况**：本分支跑 web-gate trip 于 +263421B，其中 +225388B 是 main 既有欠棘轮（c_o3osoh 紧钉 31332461 之后的主干合并未记账——本卡前 main 就 trip），本卡增量 +38KB 在 200KB 预算内；baseline 只加注释条目，棘轮取舍留合并时主会话定 |
-| **合计** | **175KB** | 名义余 25KB（12.5%，留给棘轮误差与测试夹具）。**已交付五卡实测 ≈120KB/175KB**，其中超各自配额 ~31KB；包内实余 ~55KB、剩余 8 卡名义配额 86KB——按实测收紧。（web-gate 另有 200KB 总闸，现值 29,395,228B 远低于基线，未棘轮。） |
-| c_lnsdvu 项目点选（W5 组后增卡，不入上列合计） | 卡面预估 +3~5KB | **实际 +8200B**（1.27.3 线 same-path 实测，2026-11-22 交付）：页面源 +6193B（第三候源 JS/头行/两钮改制 + CSS），无新 Go、零新 method；超预估 ~1.2~3KB——注释与固定文案占大头的形状，超在记账、不在 gate（c_xz2bey 先例）。gate 另有**先存未棘轮增长** +237996B（base 269f682a 对 pin 31332461B，c_qjaksw/eval/bash-grep 等合并卡声称余量未棘轮）——非本卡所致，棘轮与否留合并时主会话（web-size-baseline.txt 2026-11-22 注释条目记了同一结论与 same-path 测量口径 pitfall） |
-| c_25d2ey 图标/按钮体系统一（W5 组后补卡，不入上列合计） | 卡面预估页面 +8~15KB | **实际 +4993B**（webfrontend.html 205603→210596B：30 枚 Lucide `<symbol>` sprite + 按钮三档 CSS/状态类 + 动态面（托盘/审批/记忆/子代理/主题）图标接线；无新 Go、无新 method，验收脚本不进 embed）。在预估内；页面源 210596B 仍低于 §4.3 的 200KB 前端源触发线。`web-gate.sh` 过：对本分支 pin 31557490B 实测 built 31696345B = +138855B < 204800B（其中本卡 ~4.4KB，其余是分支既有的未棘轮合并债）——不棘轮，只记账。机制预算：**不适用**——纯前端资产替换（sprite 是静态 HTML 资产随页面加载，无运行时机制）+ 既有验收脚本的断言扩容，零新常驻机制（无新后台任务/定时器/常驻连接/method），无可退役对象 |
+| c_xz2bey hooks 审计 | ≤10KB | 审计面板（服务端 W4.6 已全）。**实际 ~23.7KB**（go1.25.8，2026-11-20：follow.go + hookstopic.go ~14KB + 面板 ~9KB）；累计 ~107KB/175KB，gate ~1.1MB 未棘轮——超在记账 |
+| c_6xktw4 统计趋势 | ≤12KB | usage fold + 无依赖图表。**终测 +26 664B**（go1.27.3/linux-amd64，2026-11-21 同树对照 main@1d921d45：31 501 923→31 528 587；首测 +17 520B，session.go→title.go 重构多 ~9KB、卡零新码）：页面三件 ~8.2KB（JS 6.6KB 手绘 SVG、CSS 1.1KB、标记 0.5KB）+ Go 编译本体。超 ~14.7KB——**B 案：超在记账**；基线**不棘轮**（2026-11-22：pin 31 332 461，+169 462B 系 main 35 commits 未棘轮；闸门 196 126B / 204 800B，PASS、余 8 674B，后续合并自行 `--update-baseline`） |
+| c_n37tnr 审批卡片 | ≤25KB | 平面缝 + 卡片 UI（本组最重）。**实际 ~46KB**（钉 GOTOOLCHAIN，2026-11-20：注释仅省 200B，余为 hub/RPC/UI 编译本体）；累计 ~60KB/175KB，gate 1.25MB 未棘轮。**子进程半边 +47 683B**（同口径复测 2026-11-20：031f099→29 247 246→29 294 929B；上会话 +52 059B 不可复现，a5b420f 基点 +59 966B，其中 +12 283B 是 031f099 吸收的 c_idisqf/compact_rescue 等无关内容），累计 ~94KB、W5 包 ~108KB/175KB，gate 余 1.2MB |
+| c_oyp2qf 顶栏 ContextMeter | ≤6KB | 计量条。**实际 ~14.9KB**（go1.25.8，2026-11-20：页面三件 ~4.4KB + modelcap 车道表/usage 三字段编译本体）；gate ~1.16MB |
+| c_heffj3 /bind 目录浏览器（W5 后增补） | 卡面预估页面 3~4KB + Go ~4KB | **实际 +38.0KB**（go1.27.3，2026-11-22：main 269f682a 31557849B → 本分支 31595882B）：页面 embed +7878B（webfrontend.html 161590→169468B）+ `fs.go`/config/servecli 编译本体；超卡面预估，超在记账（c_xz2bey/c_rqcuaa 先例）。**gate 现况**：trip +263421B，其中 +225388B 是 main 既有欠棘轮（c_o3osoh 紧钉 31332461 后主干未记账），本卡 +38KB 在 200KB 内；baseline 只加注释 |
+| **合计** | **175KB** | 名义余 25KB（12.5%）。**已交付五卡实测 ≈120KB/175KB**，超配额 ~31KB；包内实余 ~55KB、剩余 8 卡名义配额 86KB——按实测收紧。（200KB 总闸现值 29,395,228B 远低于基线，未棘轮。） |
+| c_lnsdvu 项目点选（W5 组后增卡，不入上列合计） | 卡面预估 +3~5KB | **实际 +8200B**（1.27.3 same-path，2026-11-22：页面源 +6193B，无新 Go、零新 method）；超预估 ~1.2~3KB（注释与固定文案占大头），超在记账。gate 另有**先存未棘轮** +237996B（base 269f682a 对 pin 31332461B，c_qjaksw/eval/bash-grep 等合并卡未棘轮）——非本卡所致（web-size-baseline.txt 2026-11-22 注释记了 same-path 测量口径 pitfall） |
+| c_25d2ey 图标/按钮体系统一（W5 组后补卡，不入上列合计） | 卡面预估页面 +8~15KB | **实际 +4993B**（205603→210596B：30 枚 Lucide `<symbol>` sprite + 三档按钮 CSS + 动态面接线；无新 Go/method）。页面源 210596B 仍低于 §4.3 的 200KB 触发线。`web-gate.sh` 过：pin 31557490B → built 31696345B = +138855B < 204800B（本卡 ~4.4KB，余为既有未棘轮合并债），只记账。机制预算**不适用**——纯前端资产替换 + 脚本断言扩容 |
 
 
 参照系：W2.1–W4.6 十卡合计净增 29790B（均 ~3KB/卡）——配额是宽松上限不是目标，**超配额即超 gate**，卡内先做减法（每 minor 一刀的减法纪律）再谈棘轮。源码侧同步约束：`webfrontend.html` 现值 113504B（111KB，c_ni7mzw 交付面：本卡 +16.0KB，另有 merge main 吸收的 c_56yrcj 附件/c_4doebx 子代理/c_oyp2qf 计量三块；static/ 侧 `static/markdown.js` 6267B），static/ 拆分后全部前端源（html+js+css+vendor）合计维持 **<200KB**——超线即触发 §4.3 escape hatch 评审（build tag，不回 tarball）。
@@ -506,28 +497,28 @@ seek 现状一律指 W4 完工面（本卡开工时 main 的实况）；「精�
 
 **硬边（仅两条，其余不预设）**：
 
-1. **c_x2au4t 全组先行**（渲染底座）：所有消息/面板正文走 `renderBody` 渲染管线——markdown 渲染器 + static/ 拆分落地后，后续卡的 DOM 断言才有稳定渲染形状；先落底座避免 12 张卡各自绕过渲染器自造格式。
-2. **c_txz6vz 先于 c_rqcuaa / c_ni7mzw / c_oyp2qf**（布局骨架）：侧栏改变页面骨架，重命名/归档入口挂侧栏、主题 token 随骨架重排、顶栏计量随骨架落位——四卡同骨不同皮，骨架先定。
+1. **c_x2au4t 全组先行**（渲染底座）：消息/面板正文走 `renderBody` 管线——渲染器 + static/ 拆分落地后，后续卡的 DOM 断言才有稳定形状；否则 12 张卡各自绕过渲染器自造格式。
+2. **c_txz6vz 先于 c_rqcuaa / c_ni7mzw / c_oyp2qf**（布局骨架）：侧栏改页面骨架，重命名入口挂侧栏、主题 token 随骨架重排、顶栏计量随骨架落位——四卡同骨不同皮。
 
-**其余同文件卡由调度器串行判**（webfrontend.html 与 embed 资产族是全组共享文件，实质上 13 张卡全部同文件冲突）。软序建议（非硬边）：c_ux7lvk 排 c_x2au4t 之后（同改消息 DOM 与 renderBody 出口）；c_4doebx 排 c_txz6vz 之后（面板归侧栏挂点）；平面缝重的 c_56yrcj / c_n37tnr 服务端先行且卡内自含（不跨卡等待）。
+**其余同文件卡由调度器串行判**（webfrontend.html 与 embed 资产族全组共享，13 张卡实质全同文件冲突）。软序建议（非硬边）：c_ux7lvk 排 c_x2au4t 之后（同改消息 DOM 与 renderBody 出口）；c_4doebx 排 c_txz6vz 之后（面板归侧栏挂点）；平面缝重的 c_56yrcj / c_n37tnr 服务端先行、卡内自含。
 
 ### 13.6 设计规范双 skill 必读（2026-11-22 增补，卡 c_xphkui）
 
-**规矩**：动 `webfrontend.html`——或任何 UI 面（static/ 前端资产、面板、弹层、文案）——的卡，**动工前必读**仓内两份设计规范，视觉/交互/文案决策按其口径执行：
+**规矩**：动 `webfrontend.html` 或任何 UI 面（static/ 资产、面板、弹层、文案）的卡，**动工前必读**仓内两份设计规范，视觉/交互/文案按其口径：
 
-- **`.seek/skills/frontend-design.md`**（单文件 4.5KB，当普通文档读——它不是 SKILL.md 布局，没有 loader 帮忙）：管**方向**。动工前先选一个明确的审美方向并贯彻到底（bold minimalism / editorial / industrial……任选其一），反面清单是 generic「AI 味」美学（紫蓝渐变、千篇一律的圆角卡片这类）。
-- **`.seek/skills/ui-ux-pro-max/SKILL.md`（含 `data/` 设计数据库：161 套配色、57 组字体搭配、99 条 UX 准则、25 类图表等 CSV）**：管**选型**。配色/字号/间距/交互模式从库里检索取数，不凭空手搓。
+- **`.seek/skills/frontend-design.md`**（单文件 4.5KB，当普通文档读——非 SKILL.md 布局、无 loader）：管**方向**。先定一个审美方向并贯彻（bold minimalism / editorial / industrial……），反面清单=generic「AI 味」（紫蓝渐变、千篇一律圆角卡片）。
+- **`.seek/skills/ui-ux-pro-max/SKILL.md`（含 `data/` 设计数据库：161 套配色、57 组字体搭配、99 条 UX 准则、25 类图表等 CSV）**：管**选型**。配色/字号/间距/交互模式从库里取数。
 
-两份分工：frontend-design 定 taste（方向对不对），ui-ux-pro-max 供 data（选型有没有出处）；与 §4 零依赖纪律 / §13.3 体积配额冲突时**纪律优先**——规范指导视觉决策，不解禁 vendor 依赖与体积账。
+分工：frontend-design 定 taste、ui-ux-pro-max 供 data；与 §4 零依赖纪律 / §13.3 体积配额冲突时**纪律优先**——规范指导视觉，不解禁 vendor 依赖与体积账。
 
-**机制原因（为什么必须在卡面/口径源里显式指路）**：`.seek/skills/` 是 **seek 自家 agent 运行时**的 skill 目录；而 drive 派发的 web 工作会话跑在 zcode/opencode 上，这两个运行时的 skill 发现只扫 `~/.agents/skills` 与 `~/.zcode/skills`，**不读仓内 `.seek/skills/`**——规范躺在仓里 ≠ 会话看得见它。个别机器碰巧装过用户级拷贝也不算数（与仓内版本不绑定、逐机漂移），以仓内路径为准。所以指路必须写进卡面或本口径源，引用本节的卡自动带上。教训在案：W5 组 13+ 张 web 卡全程没读过这两份规范（用户 2026-11-22 点破「你但凡用一下呢」），是页面烂的根因之一；2026-11-22 当日在办 web 卡已逐张补「动工前必读」行（todo 态 5 张），本节把口径固化，之后的卡不必再逐张补。
+**机制原因**：`.seek/skills/` 是 **seek 自家运行时**的 skill 目录；drive 派发的 web 会话跑在 zcode/opencode 上，只扫 `~/.agents/skills` 与 `~/.zcode/skills`，**不读仓内 `.seek/skills/`**——规范在仓里 ≠ 会话看得见（用户级拷贝与仓内版本不绑定）。故指路必须写进卡面或本口径源，引用本节即自动带上。教训：W5 组 13+ 张 web 卡全程没读这两份规范（用户 2026-11-22 点破），是页面烂的根因之一；当日在办卡已逐张补「动工前必读」行（todo 态 5 张）。
 
-**「截图过目」与规范的关系——截图是证据，规范是判据**：验收里的截图过目/无头截图只证明「页面当时长这样」；判断「这样对不对」要拿本节两份规范核——审美方向是否明确执行、配色/字体是否有选型出处、有没有踩 AI 味反面清单。看着顺眼 ≠ 过：规范覆盖的维度按规范判，规范没覆盖的角落才轮到主观判断，且写回时说明依据。
+**「截图过目」与规范的关系——截图是证据，规范是判据**：截图只证明「页面当时长这样」；「这样对不对」拿两份规范核——审美方向是否贯彻、配色/字体有无选型出处、有无踩 AI 味反面清单。看着顺眼 ≠ 过：规范覆盖的维度按规范判，未覆盖的角落才轮到主观判断，写回时说明依据。
 
-**机制预算：不适用**。本节是口径文档——零代码、零新常驻机制/状态，减法纪律与机制退役预算（§13.1 各行「机制预算」注的形状）对本节无从落笔；按本节实际改 UI 的卡，其自身的机制预算照常适用。
+**机制预算：不适用**——口径文档，零代码、零新常驻机制；按本节改 UI 的卡照常适用自身机制预算。
 
 ### 13.7 审查证据包的视觉趋势计数（`manifest.visual`，2026-11-24 增补，卡 c_nkkyqf）
 
-`scripts/web-page-review.sh` 的证据包里 `manifest.json` 增 `visual{}` 五项：低对比配对数（WCAG 2.2 相对亮度比 <4.5 的「前景 token × 底色 token」组合，配对表 7×4 写死、亮暗各一套 = 各 28 对）、字号档数、字重档数、`:root` 外 hex 数、圆角档数；后四项是页面源 `<style>` 里的去重档位/字面量计数，读法是**逐轮对照趋势**而不是看单轮绝对值。
-`hex_outside_root` 给两个数：`count` 按卡面字面算法（剥掉 `:root{}` 块后再数，今天 **0**——31 个色值全住在 token 块里），`distinct_in_file` 是全文件去重数（**31**）；两个数一起看，避免把 31 误读成「31 处硬编码散落全文件」。
-**只记录不拦**：五项是「页面长什么样」的量化旁证，单轮数字本身不是失败判据（审美/可读性仍由人/审查 agent 看 PNG + 按 §13.6 两份规范判——「截图是证据，规范是判据」），退出码照旧只看 32/32 镜头是否拍齐，与 console/navError 同一条「坏页面是审查发现而非脚本失败」口径；采集失败只落 `visual.error`，不折损退出码。
+`scripts/web-page-review.sh` 的证据包里 `manifest.json` 增 `visual{}` 五项：低对比配对数（WCAG 2.2 相对亮度比 <4.5 的「前景 token × 底色 token」，配对表 7×4 写死、亮暗各一套 = 各 28 对）、字号档数、字重档数、`:root` 外 hex 数、圆角档数；后四项是页面源 `<style>` 的去重档位/字面量计数，读法=**逐轮对照趋势**，不看单轮绝对值。
+`hex_outside_root` 给两个数：`count` 按卡面字面算法（剥掉 `:root{}` 块再数，今天 **0**——31 个色值全在 token 块），`distinct_in_file` 是全文件去重数（**31**）；两个一起看，避免把 31 误读成「31 处硬编码散落」。
+**只记录不拦**：五项是「页面长什么样」的量化旁证，单轮数字不是失败判据（审美/可读性仍由人/审查 agent 看 PNG + 按 §13.6 两份规范判）；退出码只看 32/32 镜头是否拍齐，与 console/navError 同一条「坏页面是审查发现而非脚本失败」口径；采集失败只落 `visual.error`，不折损退出码。

@@ -2,93 +2,93 @@
 
 **所属版本**：独立 feature（编排承重轴，平台化线）
 **前置阅读**：[`feature-subagent.md`](archive/feature-subagent.md)（柱 G 已交付面——本文的扩基线）、[`feature-bash-monitor.md`](archive/feature-bash-monitor.md)（柱 K 进程级后台先例）、[`v5.md`](archive/v5.md) §2（跨柱约束六条）、[`v7.md`](v7.md)（autopilot/sandbox 已交付面）、[`docs/comparison.md`](../comparison.md) 头部「定位变更」+ §10
-**状态**：📐 设计稿（2026-11-13，卡 c_ur7bup）· P1 已交付（v0.11.0，per-spawn provider/model 形态；P1-a 生命周期骨架见卡 c_bickfj：D1 `SpawnBackground`/session-ctx/`Shutdown` + D2 通知 inbox→Notifier Prepend→TUI WakeCh 唤醒，`run_in_background`+`isolation=worktree` 暂拒——2026-11-17 收伞拍板：此组合与跨 worktree 合并辅助均并入本 PRD P1 残留，触发条件与解锁工作量见 `notes-v5-closeout.md` §1.1/§1.2，触发出现前不立卡）· **P1-b 续话复活已实现**（2026-11-15，卡 c_u4ugnu）：`agent` 工具 `session_id` 按子 id 再入与追加指令（sync 与 `run_in_background` 后台组合、`resumed_from` 血统、事件溯源零内存重建），D3 的 resume 回灌（M-O1.3）仍留· **P2-a（M-O2.1）已实现**（2026-11-14，卡 c_kkpwe7）：`internal/agenttypes` 只读加载器（双 scope + 内置三层 + 校验）、`internal/frontmatter` 共享解析（从 skill 提取）、内置三模板迁移为 `agenttypes.Builtins()` 数据源（spawn 路径字节不变，等值测试锁死）、`/agents types` 列出注册表。· **P2-b 已实现**（2026-11-14，卡 c_7xmecm）：D13 门 `internal/subagent/custom.go`——`ManagerOpts.AgentTypes` 接入后自定义 type 可 spawn（file 覆盖内置名生效、per-call provider/model 覆盖 def 声明、def 补空缺），`ValidateCustomType` 启动警告 + 未知工具名降级 general-purpose 工具集（不静默收窄），非法形状表驱动全测；loader 只读由行为测试钉死（无任何 os 写调用）。· **P2-c（M-O2.2 + config 段）已实现**（2026-11-15，卡 c_3d2bil）：内置三 type 的 spawn 特例路径退役——`Manager.resolveType` 对注册表内全部 origin 走同一 typed 路径（内置经 Set 与旧编译期表字节等值，`TestSpawn_BuiltinBytePathWithSetWired` 锁死；config 克隆不带降级语义，保 intersect）；config `agents` 段落地为第三层（`agenttypes.OriginConfig` + `RouteOverride`，内置默认 < config 段 < agents/*.md，键=内置名、值=仅路由旋钮 provider/model/effort/max_turns——config 只换脑子不换权限，未知键警告忽略）；`agent` 工具 schema 的 `subagent_type` enum 改启动时从注册表生成（`agenttool.CacheTypesSchema`，package var 缓存、进程内字节恒定、同配置跨启动字节一致、per-type 描述 200 字上限 + 工具 description 尾段）。effort/max_turns 两旋钮为声明态数据，Runner 侧消费未接（与文件 frontmatter 同状）。· **P2-d（M-O2.3）已实现**（2026-11-16，卡 c_azqudp）：`internal/agentsmgr` 写路径落地（照 skillmgr 先例，`~/.seek/agents/` 与 `<project>/.seek/agents/` 的唯一合法写入者——Create 先序列化再过 `agenttypes.Parse` 往返校验，非法形状在任何落盘前拒绝（含 name 穿越符号）、无任意目标目录旋钮只写两个 loader 可见 scope、悬空 symlink 按「已存在」拒绝防写穿；Remove 仅动 user scope，project 级走 git，内置名拒绝）+ `seek agents list/check/create/remove` CLI（`internal/agentscli`，list/check 复用与启动一致的 Load 接线（cwd + config 段）；check 汇报全部加载错误并非零退出，覆盖 project/user 两 scope 与 config 段；create/remove 即写路径出口，保 agentsmgr 生产可达非死码）+ 文档（guide-subagent / guide-config，config `agents` 段补记）。loader 保持只读无写 API（行为测试钉死）。· **P1-d（M-O1.2 TUI 半段）已实现**（2026-11-15，卡 c_zdjkgf）：状态徽标可见状态迁移（`agents N` 在跑 → `bg done M` 已完成待注入 → Notifier 注入后消失；inbox 走 PEEK 口径）+ `/agents` MODE 列（`-`/`bg`/`bg✓`——`started` 事件新增 `background` 布尔标记（additive omitempty，旧索引折叠为 sync）、fold 读 `notified` 事件为送达标记且不改终态；`notified` 的写入面属 P1-b，本卡只做读/呈现）。· **P3-a（M-O3.1）已实现**（2026-11-16，卡 c_wsf7us）：D15 五观察点进 `internal/hooks`——SubagentStart/SubagentStop/Stop/PreCompact/Notification 的 observer 接口 + Registry 全扩（Register 扇出 / CloneWithout / Stack / 五个 Notify* 分发，nil-safe）；hooksconfig 五新事件（`subagent_start`/`subagent_stop`/`stop`/`pre_compact`/`notification`）走全管线（decode stamp / Merge / All / IsEmpty / StaticCheck / Summarize）+ `seek hooks check --event` 收录（TUI `/hooks` 经 hookscli 自动受益）；ShellRunner 五实现面照 observer 先例收敛为 `runObserverHooks` 单循环（超时/非零仅 audit+status，deny 面不扩——pre_tool 仍是唯一 deny 点），env 契约 = hooks-injection §3.3 全套（SEEK_SUBAGENT_SID/TYPE/DESC/STATUS/TURNS/TOKENS、SEEK_STOP_TURNS/FINISH、SEEK_COMPACT_TRIGGER、SEEK_NOTIFY_KIND/TITLE）；`AuditEntry` 加 `subagent_sid`（additive omitempty，仅 subagent 两事件行携带——web W4.6 hooks/audit/tail 读面兼容已测：旧形状行不长键、同文件新旧行经 ReadAuditLog round-trip）。**P3-a 触发点接线已实现**（2026-11-19，卡 c_xt6ql7）：四个调用点全部接上——`pkg/agent.PromptFiles` 的 Stop（defer 链：`currentEvents` 解绑 → Stop → `close(out)`，Finish 词表 `stop`/`length`/`canceled`/`error`/`max_turns`，Turns 只在两种回合落定点自增）；`internal/subagent` 的 SubagentStart（`begin`/`beginContinue` 末尾，`m.mu` 释放之后，continuation 继承前次 Type）与 SubagentStop（`runAndFinish` 首个 defer，终态事件已落盘才触发）；TUI `startCompactCmd` 的 PreCompact（在 tea.Cmd 内、summarise 调用前，startCompactCmd 带 trigger 参数：/compact→manual、maybeAutoCompact→auto）与 ask_user 两处 picker 的 Notification（tea.Cmd 内，Kind=ask_user）；柱 H `routines.DefaultNotifier` 经 `hooks.NotifierObserver` 包一层（Kind=os，delegate 错误原样返回）接在 cron auto-tick 上。全部 nil-safe，`registry` 父子共享陷阱按既有 `CloneWithout` 结论处理（子代理拿快照，故 subagent_start/stop 只由 Manager 发一次；子 Prompt 自己的 Stop 是有意的 per-Prompt 语义）。**M-O3.2 已实现**（2026-11-17，卡 c_m2whz2）：`pre_prompt_inject` 授权通道全链路（hooksconfig 事件 + `max_bytes` 预算（默认 2048/上限 8192）+ `InjectRunner` PrePromptHook 面（独立类型以落在 in-process hooks 之后注册、pre_tool deny 链序不动）+ audit `injected_bytes` 留痕 + `seek hooks check --event` 收录）+ 三区守护测试（`internal/hooks/zones_test.go`：注入后 prefix 前段字节不变断言）+ 用户文档（guide-hooks.md §1–2）；deny 路径 = trust 拒绝/静态跳过/执行失败/超时全部只阻断注入不阻断 turn；状态栏字节数提示拍板不做（§9）。· **M-O1.3（D3 resume 回灌 + notified 写面）已实现**（2026-11-16，卡 c_fepxy2）：`internal/subagent/resume.go`——`recoverNotices` 纯读面（fold `ListProject` 选「本 parent 会话 · background · 终态 · 未 notified」行：completed→`LastAssistant` 读子 transcript 末条 assistant 重建 summary 通知（`FormatBackgroundResumed`：done 前缀 token 与 D2 相同、footer 无 `turns:`——D5 索引不存 turns，不造数）；索引在而 transcript 失联（含 header-only）→`FormatBackgroundLost` 一行状态注记；orphaned→同 lost 注记；failed→`FormatBackgroundFailed` 原样复用（reason 枚举不动）；killed/promoted 跳过（用户可见终态、无送达欠账）；多条按终态时间 FIFO）+ `Manager.RecoverNotices` 入队（复用 notice inbox 单一送达面；cmd/seek 在 OrphanRecover 之后接线，crash 残留先归 orphaned 再被选入状态注记路径；新会话 no-op——ParentSid 过滤天然为空）；**`notified` 事件写面**落在 Notifier.OnPrePrompt 送达点（`markNotified` append-only、不改写终态行；`parent_turn` 暂缺——PrePrompt seam 没有 turn 计数器，同 M11.0 `started.ParentTurn=0` 先例，fold 不读它；写失败 best-effort 吞掉——Prepend 已交付，marker 失败只损下次 resume 的幂等，同 `runAndFinish` 吞终态事件写错的降级级）；幂等 = fold 读回 `notified`（重复 resume 不重注，表驱动手造索引+transcript 与 Manager 集成双测锁死）。
-**定位依据**：用户 2026-11-13 指认（butler 决策流）——comparison.md 降级的正确口径是「**外围功能不追平，承重轴追平甚至反超**」，编排层四件是承重轴：①复杂任务拆解天花板 = 编排天花板；②dogfood 现在依赖 CC 形态会话管理 seek，编排不补则自举隔一层；③模型路由是三车道设计（DeepSeek 真值 / GLM 量 / 兜底）在编排层的兑现点。领先面确认不重做：无人值守编排（零 daemon cron / autopilot 舰队 / goal headless）与成本纪律。
+**状态**：📐 设计稿（2026-11-13，卡 c_ur7bup）· **P1 已交付**（v0.11.0，per-spawn provider/model 形态；P1-a 卡 c_bickfj：D1 `SpawnBackground`/session-ctx/`Shutdown` + D2 通知 inbox→Notifier Prepend→TUI WakeCh，`run_in_background`+`isolation=worktree` 暂拒，2026-11-17 收伞归 P1 残留，触发条件 `notes-v5-closeout.md` §1.1/§1.2，触发前不立卡）· **P1-b**（2026-11-15，c_u4ugnu）：`agent` 工具 `session_id` 再入 + 追加指令（`resumed_from` 血统、事件溯源零内存重建）；D3 resume 回灌（M-O1.3）仍留 · **P2-a（M-O2.1）**（2026-11-14，c_kkpwe7）：`internal/agenttypes` 只读加载器（双 scope + 内置三层 + 校验）、`internal/frontmatter` 解析、`agenttypes.Builtins()` 三模板（spawn 字节不变、等值测试锁死）、`/agents types` · **P2-b**（2026-11-14，c_7xmecm）：`internal/subagent/custom.go` 自定义 type 可 spawn（file 覆盖内置名、per-call 覆盖 def）、`ValidateCustomType` 警告 + 未知工具降级 general-purpose、表驱动全测 · **P2-c**（2026-11-15，c_3d2bil）：spawn 特例路径退役，`Manager.resolveType` 单一 typed 路径（`TestSpawn_BuiltinBytePathWithSetWired` 锁字节等值）；config `agents` 第三层（`OriginConfig` + `RouteOverride`）；enum 启动时按注册表生成（`agenttool.CacheTypesSchema`，package var 缓存、同配置跨启动字节一致、per-type 描述 ≤200 字）；effort/max_turns 声明态 · **P2-d（M-O2.3）**（2026-11-16，c_azqudp）：`internal/agentsmgr` 写路径（`~/.seek/agents/` 与 `<project>/.seek/agents/` 唯一写入者：`agenttypes.Parse` 往返校验、非法形状落盘前拒、悬空 symlink 按已存在拒、Remove 仅 user scope）+ `seek agents list/check/create/remove`（`internal/agentscli`）+ 文档（guide-subagent / guide-config）；loader 只读 · **P1-d**（2026-11-15，c_zdjkgf）：状态徽标（`agents N`→`bg done M`→消失）+ `/agents` MODE 列（`-`/`bg`/`bg✓`，`started.background` additive omitempty、fold 读 `notified`）· **P3-a（M-O3.1）**（2026-11-16，c_wsf7us）：D15 五观察点进 `internal/hooks`（observer 接口 + Registry 扩 Register/CloneWithout/Stack/五个 Notify*，nil-safe）；hooksconfig 五事件（`subagent_start`/`subagent_stop`/`stop`/`pre_compact`/`notification`）+ `seek hooks check --event`；ShellRunner 收敛 `runObserverHooks`（超时/非零仅 audit+status，`pre_tool` 唯一 deny 点），env = hooks-injection §3.3 全套（SEEK_SUBAGENT_SID/TYPE/DESC/STATUS/TURNS/TOKENS、SEEK_STOP_TURNS/FINISH、SEEK_COMPACT_TRIGGER、SEEK_NOTIFY_KIND/TITLE）；`AuditEntry.subagent_sid`（additive omitempty，web W4.6 已测）· **P3-a 接线**（2026-11-19，c_xt6ql7）：Stop（`pkg/agent.PromptFiles` defer 链，Finish 词表 `stop`/`length`/`canceled`/`error`/`max_turns`）、SubagentStart/Stop（`internal/subagent`）、PreCompact（`startCompactCmd`，manual/auto）、Notification（picker Kind=ask_user；柱 H `DefaultNotifier` 经 `NotifierObserver` Kind=os）；全 nil-safe · **M-O3.2**（2026-11-17，c_m2whz2）：`pre_prompt_inject` 全链路（`max_bytes` 默认 2048/上限 8192 + `InjectRunner` + audit `injected_bytes` + `check --event`）+ 三区守护测试（`internal/hooks/zones_test.go`）+ 文档（guide-hooks.md §1–2）；deny 只阻断注入不阻断 turn · **M-O1.3**（2026-11-16，c_fepxy2）：`internal/subagent/resume.go` 的 `recoverNotices` fold 选「本 parent · background · 终态 · 未 notified」（completed→`FormatBackgroundResumed`、失联/orphaned→`FormatBackgroundLost`、failed→`FormatBackgroundFailed`、killed/promoted 跳过，FIFO）+ `Manager.RecoverNotices` 入队（OrphanRecover 后接线；新会话 no-op）+ `notified` 写面在 Notifier.OnPrePrompt（append-only，`parent_turn` 暂缺同 M11.0 `started.ParentTurn=0` 先例，写失败 best-effort）；幂等 = fold 读回（双测锁死）。
+**定位依据**：用户 2026-11-13 指认（butler 决策流）——comparison.md 降级的正确口径是「**外围功能不追平，承重轴追平甚至反超**」，编排层四件是承重轴：①复杂任务拆解天花板 = 编排天花板；②dogfood 现依赖 CC 形态会话管理 seek，编排不补则自举隔一层；③模型路由是三车道设计（DeepSeek 真值 / GLM 量 / 兜底）在编排层的兑现点。领先面确认不重做：无人值守编排（零 daemon cron / autopilot 舰队 / goal headless）与成本纪律。
 
 ---
 
 ## 1. 动机
 
-v5 柱 G 交付了**同步**子代理：同 turn 内并行 spawn（`agent` 工具标 `ReadOnlyTool`，`pkg/agent` 对 ReadOnly 工具每调用一 goroutine）、worktree 隔离、权限单调收紧、成本归集。但编排轴上仍有四个"模型想表达而系统不让表达"的缺口，全部在复杂任务拆解的主路径上：
+v5 柱 G 交付了**同步**子代理：同 turn 内并行 spawn（`agent` 工具标 `ReadOnlyTool`，`pkg/agent` 对 ReadOnly 工具每调用一 goroutine）、worktree 隔离、权限单调收紧、成本归集。编排轴上仍有四个缺口：
 
-1. **父 turn 被子拖死**——`Manager.Spawn` 同步阻塞（`internal/subagent/manager.go` "blocks until it terminates"）。子跑 10 分钟，父 turn 卡 10 分钟；模型想"先派三个长任务出去、自己继续干别的"不可表达。CC 形态的对应物是 `Agent(run_in_background=true)` + 完成通知回注。
-2. **子代理角色只能三选一**——`subagent_type` 是硬编码 enum（`internal/subagent/types.go` 的 `IsValid` switch），per-type 工具白名单/模型/努力档全部写死在 `templates.go`。项目想要一个"只准跑测试的 verifier"、一个"固定走 GLM 的量贩 explorer"，只能改源码。CC 形态的对应物是 `.zcode/agents/*.md` frontmatter 定义类型（per-type model / effort / tools）。
-3. **全部子代理继承父模型**——`buildSubagentRunner` 里子 `agent.Config{Model: opts.getModel()}`（`cmd/seek/main.go:578`）。explore 型量贩调研本该走 GLM 量车道、judge 型该走 DeepSeek 真值，现在只能整机切 `--provider`。两车道地基（DeepSeek first-class + `pkg/llm/compatible` GLM 车道 + pricing 三口价）已全部就位，缺的只是**按 agent 类型选车道**的一层路由。
-4. **hooks 面够不到编排生命周期**——子代理启动/结束、turn 结束、compact 前夜、通知发出，这些点既无 in-process 观察者也无 shell hook 事件；用户想在"每次子代理结束后跑个 lint"无法表达。同时注入通道与 prefix-cache 字节纪律的张力从未给出受控出口。
+1. **父 turn 被子拖死**——`Manager.Spawn` 同步阻塞（`internal/subagent/manager.go` "blocks until it terminates"）：子跑 10 分钟父就卡 10 分钟，"先派长任务、自己继续干"不可表达。CC 对应物 `Agent(run_in_background=true)` + 完成通知回注。
+2. **子代理角色只能三选一**——`subagent_type` 是硬编码 enum（`internal/subagent/types.go` 的 `IsValid` switch），per-type 工具白名单/模型/努力档写死在 `templates.go`；"只准跑测试的 verifier"只能改源码。CC 对应物 `.zcode/agents/*.md` frontmatter。
+3. **全部子代理继承父模型**——`buildSubagentRunner` 里子 `agent.Config{Model: opts.getModel()}`（`cmd/seek/main.go:578`）；explore 型该走 GLM 量车道、judge 型该走 DeepSeek 真值，只能整机切 `--provider`。两车道地基（DeepSeek first-class + `pkg/llm/compatible` GLM 车道 + pricing 三口价）已就位，缺**按类型选车道**的路由层。
+4. **hooks 面够不到编排生命周期**——子代理启停、turn 结束、compact 前夜、通知发出均无 in-process 观察者也无 shell hook 事件；注入通道与 prefix-cache 字节纪律的张力无受控出口。
 
-四件合起来是"**把柱 G 的同步子代理升级成一个可编排的代理团队**"。分期：**P1 后台子代理 + 模型路由**（体感最大、地基最全）→ **P2 类型化 agent**（P1 路由的配置面自然生长点）→ **P3 hooks 面**（编排可观测性 + 注入通道定规矩）。
+四件合起来是"**把柱 G 的同步子代理升级成可编排的代理团队**"。分期：**P1 后台子代理 + 模型路由**→ **P2 类型化 agent**→ **P3 hooks 面**。
 
 ## 2. 差距矩阵（对 CC 实测行为）
 
-**证据口径**：CC 侧 = ZCode（CC 形态 harness）工具 schema / 系统提示**原文**，2026-11 实测（`run_in_background`、`SendMessage`、`TaskOutput`、agent-types frontmatter 等关键语句逐字引用）+ [`docs/comparison.md`](../comparison.md) 已核事实；seek 侧 = 本仓主干代码逐项回核（包/文件引用）。本节是**差距定性**，不是排期表——排期见 §4–§6 分期。
+**证据口径**：CC 侧 = ZCode（CC 形态 harness）工具 schema / 系统提示**原文**，2026-11 实测（`run_in_background`、`SendMessage`、`TaskOutput`、agent-types frontmatter 等逐字引用）+ [`docs/comparison.md`](../comparison.md) 已核事实；seek 侧 = 本仓主干代码逐项回核。本节是**差距定性**，排期见 §4–§6。
 
 ### 2.1 后台子代理生命周期
 
 | 能力 | Claude Code 实测行为（证据） | seek 现状 | 差距定性 |
 |---|---|---|---|
-| 异步 spawn | `Agent` 工具带 `run_in_background`："runs the agent asynchronously; you'll be notified when it completes. Never fabricate or predict a pending agent's results — **the notification is never something you write yourself**" | `Manager.Spawn` 同步阻塞至子终态；同 turn 并行已具备（ReadOnlyTool 标记 + per-call goroutine） | ❌ 缺 agent 级异步；进程级先例已有（柱 K `bash run_in_background`） |
-| 完成通知/唤醒 | harness 在后台代理完成时**注入通知唤醒模型**（同 turn 不阻塞、后续 turn 收到 task-notification） | 无通道。柱 K 明确延后了"job 退出自动 re-invoke agent"（feature-bash-monitor §2 不做什么）；柱 H 的 `schedule_wakeup` 是全新 `seek -p` 子进程、不带会话上下文 | ❌ 缺通知协议；Prepend 注入缝（`hooks.PrePromptOut.Prepend`）与 TUI 事件流是现成地基 |
-| 续话复活 | `SendMessage`（to: `agent_<uuid>`）："continue a previously spawned agent with its context intact"（后台复活续话） | 子 transcript 平铺 + `seek subagent resume <sub-sid>` 提升 + `subagents.jsonl` orphaned 扫描**全部已有**；缺的是**父会话视角**的调度面——父 `-resume` 后，未收尾/已收尾未读的后台子结果如何回灌 | 🔶 存储已备，调度面缺 |
-| 查询 / 终止 | `TaskOutput(task_id, block=true/false, timeout)` / `TaskStop`——模型侧主动 poll/wait/kill | `/agents` 面板 + `seek subagent kill` 是**人用**面；模型侧无 poll 面（sync 模式下也不需要） | 🔶 P1 靠通知注入送达结果，不做模型侧 poll 工具（§3 不做什么 #4） |
-| 后台生命周期边界 | CC 依托 attended harness 常驻进程 | bgjob 语义：**session 死则 job 死**（零 daemon 纪律） | ✅ 架构选择已定，P1 直接继承同语义 |
+| 异步 spawn | `Agent` 工具带 `run_in_background`："runs the agent asynchronously; you'll be notified when it completes. Never fabricate or predict a pending agent's results — **the notification is never something you write yourself**" | `Manager.Spawn` 同步阻塞至子终态；同 turn 并行已有（ReadOnlyTool + per-call goroutine） | ❌ 缺 agent 级异步；进程级先例已有（柱 K `bash run_in_background`） |
+| 完成通知/唤醒 | harness 在后台代理完成时**注入通知唤醒模型**（同 turn 不阻塞、后续 turn 收 task-notification） | 无通道：柱 K 延后了"job 退出自动 re-invoke agent"（feature-bash-monitor §2）；柱 H `schedule_wakeup` 是全新 `seek -p` 子进程、无会话上下文 | ❌ 缺通知协议；Prepend 注入缝（`hooks.PrePromptOut.Prepend`）+ TUI 事件流是现成地基 |
+| 续话复活 | `SendMessage`（to: `agent_<uuid>`）："continue a previously spawned agent with its context intact"（后台复活续话） | 子 transcript 平铺 + `seek subagent resume <sub-sid>` + `subagents.jsonl` orphaned 扫描**全部已有**；缺**父会话视角**调度面——父 `-resume` 后未收尾/已收尾未读结果如何回灌 | 🔶 存储已备，调度面缺 |
+| 查询 / 终止 | `TaskOutput(task_id, block=true/false, timeout)` / `TaskStop`——模型侧 poll/wait/kill | `/agents` + `seek subagent kill` 是**人用**面，模型侧无 poll（sync 下也不需要） | 🔶 P1 靠通知注入送达，不做模型侧 poll 工具（§3 不做什么 #4） |
+| 后台生命周期边界 | CC 依托 attended harness 常驻进程 | bgjob 语义：**session 死则 job 死**（零 daemon） | ✅ 已定，P1 直接继承 |
 
 ### 2.2 类型化 agent
 
 | 能力 | Claude Code 实测行为（证据） | seek 现状 | 差距定性 |
 |---|---|---|---|
-| 自定义类型 | 系统提示注入 Available agent types 列表（带各自描述），"Each agent type's model, reasoning effort, and tools come from its definition (**.zcode/agents/*.md frontmatter**)"——用户/项目可扩展 | 三模板硬编码：`general-purpose` / `explore` / `plan`（`types.go` + `templates.go`）；v5 §2 anti-goal 把注册表开放留给 v6 候选，一直未做 | ❌ 从写死到可配置 |
+| 自定义类型 | 系统提示注入 Available agent types 列表（带描述），"Each agent type's model, reasoning effort, and tools come from its definition (**.zcode/agents/*.md frontmatter**)"——用户/项目可扩展 | 三模板硬编码：`general-purpose` / `explore` / `plan`（`types.go` + `templates.go`）；v5 §2 anti-goal 把注册表开放留给 v6 候选 | ❌ 从写死到可配置 |
 | per-type 工具白名单 | frontmatter `tools` 字段（如 visual-judge "Tools: Read, Bash"） | 模板内写死 `Filter` 白名单 | ❌ 同上 |
-| per-type 模型/努力档 | frontmatter `model` / `reasoning effort`（如 explore 型配便宜快速模型） | 一律继承父（§1 缺口 3） | ❌ 同上（与 2.3 耦合） |
-| scope 先例 | 用户级 `.zcode/agents/`（+ 插件分发） | skills 已有 project（`<project>/.seek/skills/`）> user（`~/.seek/skills/`）双 scope + 安装审批先例 | ✅ 对齐 skills 即可 |
+| per-type 模型/努力档 | frontmatter `model` / `reasoning effort`（explore 型配便宜快速模型） | 一律继承父（§1 缺口 3） | ❌ 同上（与 2.3 耦合） |
+| scope 先例 | 用户级 `.zcode/agents/`（+ 插件分发） | skills 已有 project（`<project>/.seek/skills/`）> user（`~/.seek/skills/`）双 scope + 安装审批 | ✅ 对齐 skills 即可 |
 
 ### 2.3 模型路由
 
 | 能力 | Claude Code 实测行为（证据） | seek 现状 | 差距定性 |
 |---|---|---|---|
-| per-type 选 provider/model | frontmatter `model`（CC 本体绑定 Anthropic，无跨 provider 路由） | 子继承父 client/provider/model/effort（`subagentRunnerOpts` 闭包） | ❌ 缺 per-type 路由；**跨 provider 路由本身是 seek 独有优势的兑现点**（comparison §9：多 provider 是 Seek 优势） |
-| 车道就绪度 | — | 两车道已通：DeepSeek first-class（`pkg/deepseek`）+ GLM 订阅车道（`pkg/llm/compatible` + pinned bigmodel 端点，GLM 前缀缓存实测 cache_hit 已验证）；pricing 三口价已进表（`internal/pricing` ModelGLM53） | ✅ 地基全备，只缺路由层 |
-| 成本/预算打通 | 状态栏不区分模型来源 | `Tracker.Record(u, model, tier)` **已按 record 归因模型**，`CumulativeCost()` 自动多模型合计；`pricing.Cost(model,…)` 已吃 GLM 卡 | ✅ 几乎零改动；`internal/budget` 缺 `glm-5.3` 上下文条目（现落 Default 128K） |
-| key 解析 | — | `buildProvider`：flag → env key 探测链；无头车道 flag 不解析的坑已有 pitfall（docs/pitfalls.md「paseo provider 首次无头冒烟」） | 🔶 路由配置必须显式命名 provider，不走探测链 |
+| per-type 选 provider/model | frontmatter `model`（CC 绑 Anthropic，无跨 provider 路由） | 子继承父 client/provider/model/effort（`subagentRunnerOpts` 闭包） | ❌ 缺 per-type 路由；**跨 provider 路由是 seek 独有优势的兑现点**（comparison §9） |
+| 车道就绪度 | — | 两车道已通：DeepSeek first-class（`pkg/deepseek`）+ GLM 订阅车道（`pkg/llm/compatible` + pinned bigmodel 端点，GLM 前缀缓存实测 cache_hit 已验证）；pricing 三口价在表（`internal/pricing` ModelGLM53） | ✅ 地基备齐，只缺路由层 |
+| 成本/预算打通 | 状态栏不区分模型来源 | `Tracker.Record(u, model, tier)` **已按 record 归因模型**，`CumulativeCost()` 自动多模型合计；`pricing.Cost(model,…)` 已吃 GLM 卡 | ✅ 几乎零改动；`internal/budget` 缺 `glm-5.3` 条目（现落 Default 128K） |
+| key 解析 | — | `buildProvider`：flag → env key 探测链；无头不解析的坑见 pitfall（docs/pitfalls.md「paseo provider 首次无头冒烟」） | 🔶 路由配置必须显式命名 provider，不走探测链 |
 
 ### 2.4 hooks 面
 
 | 能力 | Claude Code 实测行为（证据） | seek 现状 | 差距定性 |
 |---|---|---|---|
-| 生命周期点覆盖 | PreToolUse / PostToolUse / SessionStart / SessionEnd / UserPromptSubmit / Stop / **SubagentStop** / PreCompact / Notification（harness 提示 "Hooks may intercept tool calls"；Stop/SubagentStop 类为文档口径） | in-process Registry 7 点（PrePrompt / PreToolUse 两个 decorator + PreTurn / PostTurn / PostToolUse / SessionStart / SessionEnd 五个 observer）；shell 面 5 事件（`pre_tool` deny、`post_tool`、`pre_prompt`、`session_start`、`session_end`） | 🔶 缺 SubagentStart/Stop、Stop（AgentEnd）、PreCompact、Notification |
-| 注入通道 | UserPromptSubmit 类 hook 可附加上下文（API 侧缓存按 TTL 容忍字节漂移） | shell `pre_prompt` **故意**降级为 PreTurnObserver——"PRD §2.1 + §3.2 forbid shell stdout from entering the prompt byte sequence"（`shell_runner.go` 头注）；注入仅 in-process `PrePromptOut.Prepend`（user-role `<context>` 包裹、cache-volatile 区） | 🔶 不是缺功能而是**缺定规矩**：可注入区与缓存稳定区的分离从未成文，P3 给出明确取舍（§6 D16/D17） |
+| 生命周期点覆盖 | PreToolUse / PostToolUse / SessionStart / SessionEnd / UserPromptSubmit / Stop / **SubagentStop** / PreCompact / Notification（harness 提示 "Hooks may intercept tool calls"；Stop/SubagentStop 为文档口径） | in-process Registry 7 点（PrePrompt / PreToolUse 两 decorator + PreTurn / PostTurn / PostToolUse / SessionStart / SessionEnd 五 observer）；shell 面 5 事件（`pre_tool` deny、`post_tool`、`pre_prompt`、`session_start`、`session_end`） | 🔶 缺 SubagentStart/Stop、Stop（AgentEnd）、PreCompact、Notification |
+| 注入通道 | UserPromptSubmit 类 hook 可附加上下文（API 侧缓存按 TTL 容忍字节漂移） | shell `pre_prompt` **故意**降级为 PreTurnObserver——"PRD §2.1 + §3.2 forbid shell stdout from entering the prompt byte sequence"（`shell_runner.go` 头注）；注入仅 in-process `PrePromptOut.Prepend`（user-role `<context>`、cache-volatile 区） | 🔶 缺的是**定规矩**而非功能：注入区与缓存稳定区的分离从未成文，P3 给出取舍（§6 D16/D17） |
 
 ### 2.5 已有地基清单（防重造）
 
 | 地基 | 出处 | 本文复用方式 |
 |---|---|---|
-| sync spawn / 并行分派 / worktree / `Policy.Spawn` / `Tracker.AdoptChild` | v5 柱 G（v0.6.0） | **不动**，P1 在其上加异步入口 |
-| `subagents.jsonl` 事件源索引 + orphaned 扫描 + `StatusPromoted` | 柱 G §3.4 | 直接复用：后台子代理的事件流就是它 |
-| 子 transcript 平铺（`writeSubagentTranscript`，schema_version=2，可 `-resume`） | 柱 G G1 修复 | 直接复用：通知/复活读子 transcript 末条 assistant |
-| turn-ctx vs session-ctx 分离 + `Manager.Shutdown()` 全杀 + ring buffer | v6 柱 K `internal/bgjob` | **语义照抄**到 agent 级（最大的坑已趟过） |
-| cron tick / `schedule_wakeup` / triggers 文件桥 / OS 通知 / webhook push | v5 柱 H + v6 柱 M | P1 不改；跨进程长任务的答案仍是它们（§3 不做什么 #2） |
-| autopilot 舰队（headless 并行 worktree fleet + no-remote guard） | v7 柱 N | 不动；autopilot 是独立进程 driver，不是会话内后台 |
+| sync spawn / 并行分派 / worktree / `Policy.Spawn` / `Tracker.AdoptChild` | v5 柱 G（v0.6.0） | **不动**，P1 加异步入口 |
+| `subagents.jsonl` 事件源索引 + orphaned 扫描 + `StatusPromoted` | 柱 G §3.4 | 直接复用（后台子事件流） |
+| 子 transcript 平铺（`writeSubagentTranscript`，schema_version=2，可 `-resume`） | 柱 G G1 修复 | 直接复用（读末条 assistant） |
+| turn-ctx vs session-ctx 分离 + `Manager.Shutdown()` 全杀 + ring buffer | v6 柱 K `internal/bgjob` | **语义照抄**到 agent 级（坑已趟过） |
+| cron tick / `schedule_wakeup` / triggers 文件桥 / OS 通知 / webhook push | v5 柱 H + v6 柱 M | P1 不改；跨进程长任务仍是它们（§3 不做什么 #2） |
+| autopilot 舰队（headless 并行 worktree fleet + no-remote guard） | v7 柱 N | 不动；独立进程 driver，非会话内后台 |
 | GLM 车道（compatible + pricing 三口价 + TurnDone.CachedInputTokens） | token 三车道落地（narrative #2897） | P1 路由的量车道底座 |
-| Prepend 注入缝（cache-volatile、`<context>` 包裹惯例） | `internal/hooks` PrePromptHook | P1 通知协议 + P3 注入通道的唯一注入口 |
-| skills 双 scope + 写路径包独占红线 | v2 skill 生命周期（skillmgr/skillstats） | P2 类型化 agent 的 scope 与写路径纪律直接对齐 |
+| Prepend 注入缝（cache-volatile、`<context>` 包裹） | `internal/hooks` PrePromptHook | P1 通知 + P3 注入的唯一注入口 |
+| skills 双 scope + 写路径包独占红线 | v2 skill 生命周期（skillmgr/skillstats） | P2 的 scope 与写路径纪律直接对齐 |
 
 ## 3. 设计目标与不做什么
 
 ### 目标
 
-1. **父 turn 不被长子拖死**——`run_in_background` 异步 spawn，父 turn 立即返回句柄继续干活。
-2. **完成必达**——后台子终态：进程内存活时下一 turn 注入通知；进程死了，父 `-resume` 首turn 回灌。通知是系统写的，模型永不编造（对齐 CC 契约原文）。
+1. **父 turn 不被长子拖死**——`run_in_background` 异步 spawn，父 turn 立即拿句柄继续干活。
+2. **完成必达**——进程内存活时下一 turn 注入通知；进程死了父 `-resume` 首turn 回灌。通知是系统写的，模型永不编造（对齐 CC 契约原文）。
 3. **per-type 车道**——agent 类型可配 provider/model/effort；explore→GLM 量车道、judge 类→DeepSeek 真值，成本照常归集显示。
-4. **编排可观测**——子代理启停、turn 结束、compact 前夜、通知发出都有 hook 点；注入通道与缓存纪律的边界成文。
-5. **零新常驻**——全部复用现有进程模型与调度面（turn-based + OS cron tick），零 daemon 纪律不破。
+4. **编排可观测**——子代理启停、turn 结束、compact 前夜、通知发出均有 hook 点；注入通道与缓存纪律的边界成文。
+5. **零新常驻**——复用现有进程模型与调度面（turn-based + OS cron tick），零 daemon 纪律不破。
 
 ### 不做什么（明确边界）
 
-1. ❌ **跨进程后台存活**——后台子代理生命周期 = seek 进程生命周期（同柱 K 语义：session 死则 job 死）。进程退出即全取消 + 事件落盘。跨进程/过夜长任务走 autopilot / cron（已有），不造第二套。
-2. ❌ **空闲自动拉起模型**——通知只排队到"下一次模型本来就要跑"（用户发消息 / resume 首turn / 同会话下一 turn），**不**在空闲时主动发起 LLM 调用。CC 的"通知即唤醒"依托 attended harness 常驻循环；seek turn-based + 零 daemon，主动拉起只能是 daemon，否决。（无人值守且确需自动跟进的场景：spawn 时让模型自己叠一个 `schedule_wakeup`——已有工具。）
-3. ❌ **模型侧 poll 工具**（`TaskOutput` 等价物）——结果靠注入送达，不靠模型轮询；人工查走 `/agents`。加工具 = schema 面膨胀 + 鼓励忙等，与"通知必达"目标互斥。（若 P1 落地后实战反馈强烈，P2 再评估。）
+1. ❌ **跨进程后台存活**——后台子生命周期 = seek 进程生命周期（柱 K：session 死则 job 死），进程退出即全取消 + 事件落盘；跨进程/过夜长任务走 autopilot / cron（已有）。
+2. ❌ **空闲自动拉起模型**——通知只排队到"下一次模型本来就要跑"（用户发消息 / resume 首turn / 同会话下一 turn），**不**在空闲时主动发起 LLM 调用：CC 的"通知即唤醒"依托 attended harness 常驻循环，seek turn-based + 零 daemon，主动拉起只能是 daemon。无人值守且需自动跟进：spawn 时让模型自己叠 `schedule_wakeup`（已有工具）。
+3. ❌ **模型侧 poll 工具**（`TaskOutput` 等价物）——结果靠注入送达，人工查走 `/agents`；加工具 = schema 膨胀 + 鼓励忙等，与"通知必达"互斥。（实战反馈强烈则 P2 再评估。）
 4. ❌ **嵌套 spawn 深度 > 1**——维持 v5 边界。
 5. ❌ **CC 插件市场 / hooks 通用 args 改写**——维持 feature-shell-hooks 边界（deny or observe）。
-6. ❌ **未授权的 shell stdout 进 prompt**——红线精确化为"未被显式授权的 shell 输出永不进 prompt"；唯一授权通道是 `pre_prompt_inject`（opt-in、有界、留痕，§6 D17）。
+6. ❌ **未授权的 shell stdout 进 prompt**——红线精确化："未被显式授权的 shell 输出永不进 prompt"；唯一授权通道 `pre_prompt_inject`（opt-in、有界、留痕，§6 D17）。
 
 ## 4. P1 —— 后台子代理生命周期 + 模型路由
 
@@ -96,15 +96,15 @@ v5 柱 G 交付了**同步**子代理：同 turn 内并行 spawn（`agent` 工�
 
 #### D1 — `agent` 工具加 `run_in_background`，Manager 加非阻塞入口
 
-schema `properties` **末尾**追加（一次性失效 prefix cache，同柱 K D9 先例）：
+schema `properties` **末尾**追加（一次性失效 prefix cache，同柱 K D9）：
 
 ```json
 "run_in_background": {"type": "boolean", "description": "Run detached: return a handle immediately instead of blocking until the subagent finishes. The final summary is delivered as a <context> notification on your next turn (or on session resume). Use for long research/implementation tasks you want to overlap with other work. Default false (blocking, current behavior)."}
 ```
 
-`Manager` 新增 `SpawnBackground(ctx, args) BackgroundResult`：与 `Spawn` 共享 step 1–8（校验、容量门、`Policy.Spawn`、AdoptChild、sub_sid、`started` 事件、注册 active），**不调 Runner 同步等待**——改为 goroutine 绑 **session ctx** 跑完 step 9–11。`ManagerOpts` 增加 `SessionCtx context.Context`（main 在构造 Manager 时传入进程级 ctx）。
+`Manager` 新增 `SpawnBackground(ctx, args) BackgroundResult`：与 `Spawn` 共享 step 1–8（校验、容量门、`Policy.Spawn`、AdoptChild、sub_sid、`started` 事件、注册 active），**不同步等 Runner**——goroutine 绑 **session ctx** 跑完 step 9–11。`ManagerOpts` 增 `SessionCtx context.Context`（main 传进程级 ctx）。
 
-**ctx 分离（柱 K D5 同款最关键坑）**：sync `Spawn` 继续绑调用方（turn）ctx；background 绑 session ctx——否则父 turn 一返回子就被砍，"后台"语义破产。`Kill` / 容量门 / `ActiveCount` 对两种 spawn 一视同仁（同一 `m.active` map + `MaxConcurrent` 门）。
+**ctx 分离（柱 K D5 同款最关键坑）**：sync `Spawn` 绑 turn ctx，background 绑 session ctx——否则父 turn 一返回子就被砍。`Kill` / 容量门 / `ActiveCount` 对两种 spawn 一视同仁（同一 `m.active` + `MaxConcurrent`）。
 
 父 turn 收到的即时 tool result（确定性 bytes）：
 
@@ -114,13 +114,13 @@ schema `properties` **末尾**追加（一次性失效 prefix cache，同柱 K D
 — runner active; final summary will arrive as a <context> note on a later turn (or on resume). Track via /agents.
 ```
 
-`background` 加入 `reason=` 封闭枚举吗？**不**——成功路径新前缀 `[agent: background started ...]`，失败路径沿用 `[agent: failed reason=...]`（含 background 启动失败）。前缀即契约，扩展项只加在闭合 token 之后（wire-format 纪律，同 `[plan: approved]` 先例）。
+`background` **不**加入 `reason=` 封闭枚举——成功走新前缀 `[agent: background started ...]`，失败沿用 `[agent: failed reason=...]`。前缀即契约，扩展项只加在闭合 token 之后（wire-format 纪律，同 `[plan: approved]`）。
 
 #### D2 — 完成通知协议（进程内存活）
 
-后台子终态时 Manager 已经写 `subagents.jsonl` 终态事件（复用，不加字段）。新增一步：把**通知消息**排队到父会话的注入队列（`Manager` 持有，TUI 每 turn 取走）：
+后台子终态时 Manager 已写 `subagents.jsonl` 终态事件（复用，不加字段）；新增一步：把**通知消息**排到父会话注入队列（`Manager` 持有，TUI 每 turn 取走）：
 
-- **注入载体**：现有 `PrePromptHook.Prepend`——user-role message、`<context>` 包裹、落在 cache-volatile（本 turn）区。**不写历史、不碰 system prompt、不重写旧消息**（Token & prefix-cache 约束的全部三条红线一次满足）。
+- **注入载体**：现有 `PrePromptHook.Prepend`——user-role message、`<context>` 包裹、落 cache-volatile（本 turn）区。**不写历史、不碰 system prompt、不重写旧消息**（prefix-cache 三红线一次满足）。
 - **注入格式**（确定性模板，summary 体天然 display 区）：
 
 ```
@@ -133,33 +133,33 @@ schema `properties` **末尾**追加（一次性失效 prefix cache，同柱 K D
 </context>
 ```
 
-失败/取消同理（`[agent: background failed reason=...]`）。多条完成按终态时间 FIFO 合并为**一条** Prepend（一次注入多条 `<context>` 块，避免多 turn 稀释）。
-- **TUI 即时反馈**：沿用柱 G §4.3 先例——状态栏 `⤴ N agents` 计数 + 完成闪 `✓ agent done`；输入框上方提示"background agent finished — send any message to ingest"。
-- **谁触发注入**：下一个 `Prompt()` 调用（用户发消息或 /steer）时，main 的 PrePrompt 链先取空注入队列。模型**下一 turn 必然**看到——这就是 turn-based 世界的"通知唤醒"。模型不得预测在途结果（写进工具 description，对齐 CC 契约原句的语义）。
+失败/取消同理（`[agent: background failed reason=...]`）。多条完成按终态时间 FIFO 合并为**一条** Prepend（避免稀释）。
+- **TUI 即时反馈**：沿用柱 G §4.3——状态栏 `⤴ N agents` + 完成闪 `✓ agent done`；输入框上方提示 "background agent finished — send any message to ingest"。
+- **谁触发注入**：下一个 `Prompt()`（用户发消息或 /steer）时 PrePrompt 链先取空队列。模型**下一 turn 必然**看到——turn-based 世界的"通知唤醒"；模型不得预测在途结果（写进工具 description，对齐 CC 契约语义）。
 
 #### D3 — 续话复活（进程死后）
 
-进程退出（含崩溃）时后台子 goroutine 随 session ctx 取消。两条路都已有一半，补最后一公里：
+进程退出（含崩溃）时后台子 goroutine 随 session ctx 取消。两条路各已有一半：
 
-- **干净退出**：main 的 shutdown 路径调 `Manager.Shutdown()`——遍历 active（sync+background）cancel，goroutine 终态分类照常写 `failed reason=canceled`。**不加**新事件类型。
+- **干净退出**：main shutdown 路径调 `Manager.Shutdown()`——遍历 active（sync+background）cancel，终态照常写 `failed reason=canceled`，**不加**新事件类型。
 - **崩溃**：下次启动 orphaned 扫描已有（started 无终态 → `orphaned`）。
-- **父 `-resume` 首turn 回灌**：resume 装配时 fold `subagents.jsonl`，找出「上次会话 spawn 的、终态为 completed 且**未被注入消费**」的子——消费标记走 append-only 事件源：注入取队时追写一条 `{"event":"notified","sub_sid":...,"parent_turn":N}`（不改写已写的 `completed` 行），读该子 `transcript.jsonl` 末条 assistant（summary 全文，柱 G G1 已落盘），按 D2 同款格式在 resume 首turn Prepend。用户体感："接着上次会话，第一条消息前系统自动汇报昨晚后台代理的结果"。`orphaned`/`failed` 的后台子不回灌 summary（没有可信 summary），只回灌一行状态注记。
+- **父 `-resume` 首turn 回灌**：resume 装配时 fold `subagents.jsonl`，找「上次会话 spawn · completed · **未被注入消费**」的子——消费标记走 append-only：注入取队时追写 `{"event":"notified","sub_sid":...,"parent_turn":N}`（不改写 `completed` 行），读该子 `transcript.jsonl` 末条 assistant（summary 全文，柱 G G1 已落盘），按 D2 格式首turn Prepend。`orphaned`/`failed` 无可信 summary，只注入一行状态注记。
 
 #### D4 — 容量、取消与并发
 
-- `MaxConcurrent`（默认 3）共门——sync + background 合计；超门 `too_many_subagents`（现有 reason 复用）。
+- `MaxConcurrent`（默认 3）共门——sync + background 合计；超门 `too_many_subagents`（复用现有 reason）。
 - Esc 取消当前 turn **不**杀 background 子（其 ctx 是 session 级）；`/agents` kill 照旧（sub-sid 寻址）。
-- 并发安全：`m.active` 已有 mutex + `-race` 表（柱 G #6/#14 验收先例），background 不新增共享结构。
+- 并发安全：`m.active` 已有 mutex + `-race` 表（柱 G #6/#14 先例），background 不新增共享结构。
 
 #### D5 — summary 持久化不加索引字段
 
-`subagents.jsonl` 维持「Cost 不入索引」同款纪律：事件只带 tokens，summary 全文已在子 transcript。`notified` 事件只带 `sub_sid` + `parent_turn`。理由：索引是状态折叠用的窄流，summary 是 display 数据，塞进去只会让 fold 变贵。
+`subagents.jsonl` 维持「Cost 不入索引」：事件只带 tokens，summary 全文已在子 transcript；`notified` 只带 `sub_sid` + `parent_turn`。索引是状态折叠的窄流，summary 是 display 数据，塞进去只让 fold 变贵。
 
 ### 4.2 模型路由（M-O1.4 ~ M-O1.5）
 
 #### D6 — 配置面（P1 最小形态：内置三 type 的 override）
 
-> **交付勘误（2026-11-14）**：本节为设计稿原文。P1 实际交付未做 config `agents` 段，改为 `agent` 工具的 per-spawn `provider`/`model` 参数（见文首状态行）；config 段去留见 D14 修订。下文按原稿保留。
+> **交付勘误（2026-11-14）**：本节为设计稿原文；P1 实际未做 config `agents` 段，改为 `agent` 工具的 per-spawn `provider`/`model` 参数（见文首状态行），config 段去留见 D14 修订。下文按原稿保留。
 
 `~/.seek/config.json` 新增 `agents` 段（user 级先行；project 级 scope 随 P2 的 agents/ 目录一起开，见 D14）：
 
@@ -173,43 +173,43 @@ schema `properties` **末尾**追加（一次性失效 prefix cache，同柱 K D
 }
 ```
 
-- 键 = 内置 type 名（`general-purpose` / `explore` / `plan`）；值空对象/缺省 = 继承父（现状语义）。自定义 type 名（如 `judge`）在 P2 的 agents/*.md 里定义，P1 不认——未知键启动时警告忽略（不硬错——前向兼容）。
-- `provider` ∈ {`deepseek`, `glm`, `anthropic`, `openai`, `gemini`}，**显式命名，不走 key 探测链**（pitfall「paseo provider 首次无头冒烟」的直接教训：探测链对残留 key 零抵抗）。命名的 provider 无 key → 启动警告 + 该 type 回退继承父（失败降级，不硬拒）。
-- `effort` 语义沿用 `/effort`（low/medium/high）；`max_turns` 可选覆盖。
-- 特权不变：路由只换脑子不换权限——`Policy.Spawn` 的 Restriction 仍按 type 模板走，配置**不能**指定 pref/workflow（那是 P2 frontmatter 的事，且同样只能收紧）。
+- 键 = 内置 type 名（`general-purpose` / `explore` / `plan`）；值空对象/缺省 = 继承父。自定义 type（如 `judge`）在 P2 agents/*.md 定义，P1 不认——未知键警告忽略（前向兼容）。
+- `provider` ∈ {`deepseek`, `glm`, `anthropic`, `openai`, `gemini`}，**显式命名，不走 key 探测链**（pitfall「paseo provider 首次无头冒烟」：探测链对残留 key 零抵抗）。无 key → 启动警告 + 回退继承父（不硬拒）。
+- `effort` 沿用 `/effort`（low/medium/high）；`max_turns` 可选覆盖。
+- 特权不变：路由只换脑子不换权限——`Policy.Spawn` Restriction 仍按 type 模板走，配置**不能**指定 pref/workflow（P2 frontmatter 同理只能收紧）。
 
 #### D7 — ProviderRegistry 与 RunnerJob 传递
 
-main 构造一次 `map[string]resolvedProvider`（仅含有 key 的 provider；deepseek 永在首位），注入 `subagentRunnerOpts`。`RunnerJob` 增加 `Provider string / Model string / Effort string`（Manager 从 type 配置解析后填入）。`buildSubagentRunner` 按 `job.Provider` 取 client/Provider 构造子 `agent.Config`；缺省 = 父实例（现状路径零变化）。GLM 车道 = `pkg/llm/compatible`（现有 pinned 端点 + 默认 `glm-5.3`）。
+main 构造一次 `map[string]resolvedProvider`（仅含有 key 的 provider；deepseek 永在首位）注入 `subagentRunnerOpts`。`RunnerJob` 增 `Provider string / Model string / Effort string`（Manager 从 type 配置解析填入）。`buildSubagentRunner` 按 `job.Provider` 取 client/Provider 构造子 `agent.Config`；缺省 = 父实例（现状路径零变化）。GLM 车道 = `pkg/llm/compatible`（pinned 端点 + 默认 `glm-5.3`）。
 
 #### D8 — DeepSeek-only 工具按 provider 过滤（已随 think 退役而移除）
 
-D8 机制（deepseekOnly 表 + Runner 在模板 Filter 之后追加的 provider 兼容滤网）已于 2026-11-22 随 `think` 工具退役整体删除：`think` 退役后表空，空表+空滤网是死代码。历史口径（P1 时代）：`think` / `fim_complete` 是 DeepSeek 专属工具，路由到 llm.Provider 车道的子代理在派生 Registry 时剔除之——工具 schema 里看得见、调用必失败的工具是最坏形态。今后再出现车道专属工具时按同思路重建（表写死在代码常量，不运行时探测）；skill manifest 引用车道专属流程的风险仍留提示级。
+D8 机制（deepseekOnly 表 + Runner 在模板 Filter 之后追加的 provider 兼容滤网）已于 2026-11-22 随 `think` 退役删除：表空，空表+空滤网是死代码。历史口径（P1 时代）：`think` / `fim_complete` 是 DeepSeek 专属工具，路由到 llm.Provider 车道的子在派生 Registry 时剔除——schema 里看得见、调用必失败是最坏形态。今后再现车道专属工具按同思路重建（表写死代码常量，不运行时探测）；skill manifest 引用车道专属流程的风险留提示级。
 
 #### D9 — 成本/预算/定价打通（几乎零改动，验收要钉死）
 
-- `job.Tracker.Record(u, model, tier)` 已按 record 归因——子用 GLM 时 record 的就是 `glm-5.3` + `pricing.Cost` 的 GLM 三口价（NoOffPeakDiscount 正确处理）。`CumulativeCost()` 自动多模型合计，状态栏不动。
-- `internal/budget.contextLimits` 补 `"glm-5.3": 1_000_000`（bigmodel 单一 1M-context 档，pricing 注释同源）；`/compact` 预警从此对 GLM 子会话不再误报。
+- `job.Tracker.Record(u, model, tier)` 已按 record 归因——子用 GLM 时 record 的就是 `glm-5.3` + `pricing.Cost` 的 GLM 三口价（NoOffPeakDiscount 正确处理）；`CumulativeCost()` 自动多模型合计，状态栏不动。
+- `internal/budget.contextLimits` 补 `"glm-5.3": 1_000_000`（bigmodel 单一 1M-context 档，pricing 注释同源）；`/compact` 预警对 GLM 子会话不再误报。
 - 子 footer 仍不含 cost（柱 G §3.2 纪律），显示走状态栏。
 
 ### 4.3 P1 验收（全部沙盒可验证：stub Runner / httptest fake / 临时 git repo，零真实 key）
 
 | # | 标准 | 验证方式 |
 |---|---|---|
-| 1 | `run_in_background=true` 调用立即返回（<1s），父 turn 不等子终态；返回串符合 `[agent: background started sub-sid=...]` 前缀契约 | 集成测试（stub Runner 睡 5s，断言 tool result 先回） |
-| 2 | background 子终态后，父下一次 `Prompt()` 的 messages 含 Prepend `<context>[agent: background done ...]`，且**历史消息零改动**（前后 diff 只增本 turn） | 集成测试：对 Prompt 前后 session.Messages 做字节对比 |
-| 3 | 多条后台完成合并为一次 Prepend、FIFO、各带独立 sub-sid | 单元测试（注入队列） |
-| 4 | 父 turn cancel（Esc）后 background 子仍存活至自然终态；`/agents` kill 生效且写 `killed` | 集成测试（turn ctx cancel ≠ session ctx cancel） |
-| 5 | 干净退出：`Manager.Shutdown()` 后所有 active 子终态事件为 `failed reason=canceled`，`subagents.jsonl` 无 started-无终态残留 | 单元测试 |
-| 6 | 崩溃复活：手造 started-无终态索引 → 新进程扫描写 `orphaned`（现有）；resume 父会话首turn 注入「completed 且未 notified」子的 summary（读子 transcript 末条 assistant），`orphaned` 子只注入一行状态 | 集成测试（伪造索引+transcript 文件） |
-| 7 | 注入消费回写 `notified` 事件；重复 resume 不重复注入 | 单元测试 |
-| 8 | 路由：config `explore→glm` 时子 `agent.Config.Provider` 为 compatible 实例、model `glm-5.3`；无配置时与现状字节同路径 | 单元测试（ProviderRegistry stub） |
-| 9 | GLM 路由的 type 工具白名单不含 `think`；deepseek 路由不变 | 单元测试（模板 Filter + provider 过滤表驱动） |
-| 10 | 混合车队成本：父 deepseek + 子 glm 完成后 `CumulativeCost()` == 父 deepseek 费用 + 子 GLM 费用（各按三口价，off-peak 只折 deepseek） | 单元测试（fake Usage + pricing.Cost 交叉） |
+| 1 | `run_in_background=true` 立即返回（<1s），父 turn 不等子终态；返回串带 `[agent: background started sub-sid=...]` 前缀 | 集成测试（stub Runner 睡 5s） |
+| 2 | background 子终态后，父下一次 `Prompt()` messages 含 Prepend `<context>[agent: background done ...]`，**历史零改动** | 集成测试（前后 session.Messages 字节对比） |
+| 3 | 多条后台完成合并一次 Prepend、FIFO、各带独立 sub-sid | 单元测试（注入队列） |
+| 4 | 父 turn cancel（Esc）后 background 子存活至终态；`/agents` kill 生效并写 `killed` | 集成测试（turn ctx ≠ session ctx） |
+| 5 | `Manager.Shutdown()` 后 active 子终态均 `failed reason=canceled`，索引无 started-无终态残留 | 单元测试 |
+| 6 | 崩溃复活：手造 started-无终态索引 → 新进程写 `orphaned`；resume 首turn 注入「completed 且未 notified」summary（读末条 assistant），`orphaned` 只注入一行状态 | 集成测试（伪造索引+transcript） |
+| 7 | 注入消费回写 `notified`；重复 resume 不重复注入 | 单元测试 |
+| 8 | 路由：config `explore→glm` 时子 Provider 为 compatible 实例、model `glm-5.3`；无配置时与现状字节同路径 | 单元测试（ProviderRegistry stub） |
+| 9 | GLM 路由的 type 工具白名单不含 `think`；deepseek 路由不变 | 单元测试（Filter + provider 过滤，表驱动） |
+| 10 | 混合车队成本：父 deepseek + 子 glm 后 `CumulativeCost()` == 两段费用之和（三口价，off-peak 只折 deepseek） | 单元测试（fake Usage + pricing.Cost） |
 | 11 | 命名 provider 无 key：启动警告 + 回退继承父，不 panic 不硬拒 | 单元测试 |
-| 12 | `budget.Limit("glm-5.3") == 1_000_000` | 单元测试（一行） |
-| 13 | `agent` 工具 schema 无 `run_in_background` 时旧行为字节级不变（不传字段 = sync 路径回归） | 现有柱 G 测试全绿（零回归） |
-| 14 | `go test -race ./...` 全绿（subagent 并发表扩 background 用例） | CI |
+| 12 | `budget.Limit("glm-5.3") == 1_000_000` | 单元测试 |
+| 13 | 不传 `run_in_background` 时旧行为字节级不变 | 柱 G 现有测试全绿（零回归） |
+| 14 | `go test -race ./...` 全绿（并发表扩 background 用例） | CI |
 
 ### 4.4 P1 里程碑
 
@@ -223,14 +223,14 @@ D8 机制（deepseekOnly 表 + Runner 在模板 Filter 之后追加的 provider 
 
 #### P1-b 续话复活（卡 c_u4ugnu，与 P1-a 后台面合流）
 
-§2.1「续话复活」行的模型侧调度面已交付：`agent` 工具新增 `session_id`——传既有子的 sub-sid（全 id 或脚注短后缀，唯一解析）+ 新指令即续话；与 P1-a 的 `run_in_background` 正交组合（后台续话）。落地口径：
+§2.1「续话复活」行调度面已交付：`agent` 工具新增 `session_id`——既有子的 sub-sid（全 id 或脚注短后缀，唯一解析）+ 新指令即续话，与 P1-a `run_in_background` 正交。落地口径：
 
-- **续话 = 新 sub_sid + 血统字段**，不是同 id 复活：`subagents.jsonl` 的 fold 契约是「一个 sub_sid 恰好一个终态」，同 id 二次 `started` 会被 fold 静默忽略。血统走 `started` 事件的 `resumed_from` 字段（fold 透出为 `Subagent.ResumedFrom`），旧 transcript 不动，新 transcript 自包含（prior messages + 续话轮次）。
-- **上下文延续的实现**：`Manager.Continue` fold 索引定位前运行 → `session.LoadFrom` 读旧 transcript → 消息经 `RunnerJob.PriorMessages` 传给 Runner → 生产 Runner 映射到 `agent.Config.InitialMessages`（系统提示词按前次模板**重新**组合，不沿用旧头部；模板经 `resolveType` 重建，自定义 type 的续话照常工作，def 的 provider/model 补空缺与 spawn 同语义）。全新 Manager（父进程 resume 后）凭盘上事件流即可续话——零内存携带，这就是本卡的「事件溯源重建」验收；后台子与同步子写同一套事件，续话入口不区分。
-- **完成事件合流**：`begin`（首发 1–8 步）/ `beginContinue`（续话 1–8 步）→ 共享 `runAndFinish(sp, background)` 分类尾——终态事件种类、Kill 语义、容量门、成本归集对首发/续话/后台完全一致；续话成功 footer 换 `resumed-from` 血统变体（`FormatContinued` / `FormatBackgroundContinued`），前缀 token 不变。
-- **后台续话（本卡与 P1-a 的组合点）**：`session_id` + `run_in_background` → `Manager.ContinueBackground`——立即返回 background-started 句柄，goroutine 绑 SessionCtx，完成后经 notice inbox → Notifier `<context>` Prepend 进主会话流（与 SpawnBackground 同一条 D2 送达路径）。`run_in_background` + `isolation=worktree` 仍拒（P1-a 口径，续话同样适用）。
-- **可续话状态**：仅 `completed`（生产 Runner 只在成功时写 transcript）；`active` 报 `session_active`，promoted/failed/killed/orphaned/索引在而 transcript 丢失报 `unknown_session`（hint 点名状态与路径）。进程死亡时在跑的后台子由 orphan 扫描归 `orphaned`——resume 后续话它得到明确报错而非复活，这是「resume 重建在跑状态」的答案：状态从事件流重建，死去的孩子不装活。
-- M-O1.3（父 `-resume` 首turn 回灌 completed-未 notified 子的 summary）不在本卡——那是通知面的回灌，见 D3。（后续已交付：卡 c_fepxy2，2026-11-16，见文首状态行。）
+- **续话 = 新 sub_sid + 血统**：fold 契约「一个 sub_sid 恰好一个终态」，同 id 二次 `started` 静默忽略；血统走 `started.resumed_from`（fold 透出 `Subagent.ResumedFrom`）；旧 transcript 不动，新 transcript 自包含（prior messages + 续话轮）。
+- **上下文延续**：`Manager.Continue` fold 定位前运行 → `session.LoadFrom` 读旧 transcript → `RunnerJob.PriorMessages` → 生产 Runner 映射 `agent.Config.InitialMessages`（系统提示词经 `resolveType` 按前次模板**重新**组合，def 的 provider/model 补空缺同 spawn）。全新 Manager 凭盘上事件流即可续话——零内存携带，即「事件溯源重建」验收。
+- **完成事件合流**：`begin`/`beginContinue`（各 1–8 步）→ 共享 `runAndFinish(sp, background)`，终态种类 / Kill / 容量门 / 成本归集一致；续话 footer 换 `resumed-from` 血统变体（`FormatContinued` / `FormatBackgroundContinued`），前缀 token 不变。
+- **后台续话**：`session_id` + `run_in_background` → `Manager.ContinueBackground`（立即返回句柄，goroutine 绑 SessionCtx，完成经 notice inbox → Notifier Prepend）；`run_in_background` + `isolation=worktree` 仍拒。
+- **可续话状态**：仅 `completed`；`active`→`session_active`，promoted/failed/killed/orphaned/索引在而 transcript 丢→`unknown_session`（hint 点名状态与路径）；死进程在跑的子由 orphan 扫描归 `orphaned`，续话报错而非复活。
+- M-O1.3（父 `-resume` 首turn 回灌 completed-未 notified 的 summary）见 D3；后续已交付卡 c_fepxy2（2026-11-16，见文首状态行）。
 
 ## 5. P2 —— 类型化 agent（M-O2.x）
 
@@ -241,7 +241,7 @@ D8 机制（deepseekOnly 表 + Runner 在模板 Filter 之后追加的 provider 
 ~/.seek/agents/<name>.md             # user 级
 ```
 
-单文件 `.md` + YAML frontmatter + body（角色 prompt）。解析复用 skill loader 的 frontmatter 形状处理；scope 解析顺序 project > user，同名 project 覆盖 user（skills 同款）。**写路径只归新包 `internal/agentsmgr`**——对齐 AGENTS.md 红线「`~/.seek/skills/` 只有 skillmgr/skillstats 可写」：`~/.seek/agents/` 同样只有 agentsmgr（+ 统计若做）可写，loader 只读。
+单文件 `.md` + YAML frontmatter + body（角色 prompt），解析复用 skill loader 的 frontmatter 处理。scope 顺序 project > user，同名 project 覆盖 user（skills 同款）。**写路径只归新包 `internal/agentsmgr`**——对齐 AGENTS.md 红线「`~/.seek/skills/` 只有 skillmgr/skillstats 可写」：`~/.seek/agents/` 同样只有 agentsmgr（+ 统计若做）可写，loader 只读。
 
 #### D11 — frontmatter 契约
 
@@ -260,69 +260,69 @@ You are a test verifier subagent. …（body = 角色 prompt，替换内置模�
 摘要长度提示与 AGENTS.md/M-index/skill manifest 继承段仍由 ComposeSubagent 拼装，§3.6.1 不变）
 ```
 
-内置三 type 保留为编译期默认（无任何文件时行为与 v0.6.0 完全一致）；文件可覆盖内置名（`explore.md` 覆盖内置 explore）。设计稿原排布「内置默认 < config 段 < agents/*.md」中的 config `agents` 段**实际未随 P1 落地**（P1 交付时改成了 per-spawn `provider`/`model` 参数形态，见状态行）——P2-a 落地的实际栈为 **project agents/*.md > user ~/.seek/agents/*.md > builtin**。**P2-c 修订（2026-11-15）**：config 段已按 D14 的预留位落地——`agenttypes.OriginConfig` 克隆内置（仅路由旋钮可覆写），栈现为 **project > user > config > builtin**；`Manager.resolveType` 同步统一为单一 typed 路径（内置特例路径退役，字节等值测试锁死）。
+内置三 type 为编译期默认（无文件时行为与 v0.6.0 一致）；文件可覆盖内置名（`explore.md` 覆盖内置 explore）。config `agents` 段**未随 P1 落地**（改走 per-spawn `provider`/`model`，见状态行与 D14），P2-a 栈为 **project > user > builtin**；**P2-c（2026-11-15）**按 D14 预留位兑现 config 层（`OriginConfig` 克隆内置，仅路由旋钮可覆写），栈现为 **project > user > config > builtin**，`resolveType` 单一 typed 路径（字节等值测试锁死）。
 
 #### D12 — schema 张力：enum 动态化的字节纪律
 
-`subagent_type` 从封闭 enum 改为**启动时从注册表生成的 enum**（含内置 + 文件 type）。约束：
+`subagent_type` 从封闭 enum 改为**启动时按注册表生成的 enum**（内置 + 文件 type）。约束：
 
-- schema 字节在**进程内**恒定（启动构建一次，package var 缓存）——同 turn 间 cache 不破。
-- 跨启动随配置变化 = 一次性失效，可接受（先例：bash schema 加 `run_in_background` 字段、agent 工具 description 更新）。**验收口径从「多次启动间字节一致」改为「同配置多次启动间字节一致」**。
-- Available types 的描述（frontmatter `description`）注入 enum 的 per-value description + 工具 description 尾段——对齐 CC 的 agent-types 列表注入形态（§2.2 证据）。描述长度设上限（~200 字/type），防 schema 膨胀。
+- schema 字节在**进程内**恒定（启动构建一次，package var 缓存），同 turn 间 cache 不破。
+- 跨启动随配置变化 = 一次性失效，可接受（先例：bash schema 加 `run_in_background`、agent 工具 description 更新）。**验收口径：「同配置多次启动间字节一致」**。
+- frontmatter `description` 注入 enum 的 per-value description + 工具 description 尾段——对齐 CC agent-types 列表注入形态（§2.2）；描述上限 ~200 字/type 防膨胀。
 
 #### D13 — 安全：只能收紧
 
-- `tools` ⊆ 父注册表 ∩ 非禁注（`agent`/`ask_user` 永不，嵌套防线不破）；未知工具名 = 配置错误，启动警告 + 该 type 降级为 general-purpose 工具集（不静默收窄——白名单拼错不能意外放大）。
-- `workflow: plan-analyze` 允许（收紧）；`plan-execute`/放宽 pref 一律拒绝（配置错误）——`Policy.Spawn` 的 Restriction 单调性是硬门，frontmatter 只是它的又一个来源。
-- D8 的 provider 过滤（已随 think 退役移除，2026-11-22）在其存续期照常作用于自定义 type。
+- `tools` ⊆ 父注册表 ∩ 非禁注（`agent`/`ask_user` 永不，嵌套防线不破）；未知工具名 = 配置错误：启动警告 + 降级 general-purpose 工具集（拼错不能意外放大）。
+- `workflow: plan-analyze` 允许（收紧）；`plan-execute`/放宽 pref 一律拒绝——`Policy.Spawn` Restriction 单调性是硬门。
+- D8 的 provider 过滤（2026-11-22 随 think 退役移除）存续期作用于自定义 type。
 - 校验器全量单测：每个非法形状（放宽 pref、未知工具、未知 provider、无 name）都有明确错误。
 
 #### D14 — 与 P1 config 段的关系
 
-设计稿原设想 P1 交付一个 config `agents` 段（内置 type 的最小 override，不动文件系统）与 P2 的 agents/*.md（全形态：自定义 type + 工具集 + prompt）两层并存。**实际交付记录**：P1 落地时换成了 per-spawn `provider`/`model` 参数形态（状态行），config `agents` 段未实现——P2-a 交付面因此只有 project/user/builtin 三层栈（D11 修订）。"只换模型不改行为"的需求现由 per-spawn 参数承接；config 段若仍有价值（免每次传参的默认路由），留给 M-O2.3 或后续版本再议，届时插在 builtin 与文件层之间。**P2-c 落地（2026-11-15，卡 c_3d2bil）**：config 段按上述预留位兑现——`internal/config` `agents` 段（键=内置 type 名，值=provider/model/effort/max_turns 路由旋钮，空=继承父），`agenttypes.Load` 经 `RouteOverride` 做成 `OriginConfig` 克隆插在 builtin 之上一层；未知键启动警告忽略（前向兼容），file 层同名直接压过 config 层（Shadowed 记录可见）。
+设计稿原设想 config `agents` 段（内置 type 最小 override，不动文件系统）与 agents/*.md（全形态）两层并存。**实际交付**：P1 换 per-spawn `provider`/`model` 参数形态（状态行），config 段未实现，P2-a 栈只有 project/user/builtin 三层（D11 修订）。**P2-c 落地（2026-11-15，卡 c_3d2bil）**：config 段按预留位兑现——`internal/config` `agents` 段（键=内置 type 名，值=provider/model/effort/max_turns 旋钮，空=继承父），`agenttypes.Load` 经 `RouteOverride` 做成 `OriginConfig` 克隆插在 builtin 之上；未知键警告忽略，file 层同名压过 config 层（Shadowed 记录可见）。
 
 ### P2 验收（沙盒可验证）
 
 | # | 标准 | 验证方式 |
 |---|---|---|
-| 1 | project `.seek/agents/verifier.md` 定义后，`subagent_type` enum 含 `verifier`；同配置两次启动 schema 字节一致 | 单元测试（临时目录 + schema hash） |
-| 2 | spawn `verifier` 子的 Policy/workflow/tools/provider 与 frontmatter 声明一致；`plan-execute` 声明被拒 | 表驱动单元测试（覆盖全部非法形状） |
-| 3 | 同名覆盖：project `explore.md` > user `explore.md` > 内置（设计稿原含 config 段层，该段未随 P1 落地，见 D11/D14 修订；**P2-c 后栈为 project > user > config > builtin，四层已全测**） | 单元测试（scope 栈） |
-| 4 | `~/.seek/agents/` 写路径仅 agentsmgr（loader 只读；grep 审计无越界写者） | 代码审查 + 单元测试（loader 无写 API） |
-| 5 | 无任何 agents 文件 + 空 config 时，行为与 v0.6.0 字节同路径（内置三 type 回归） | 柱 G 现有测试零回归 |
-| 6 | body 缺失/空 → 配置错误警告 + 拒绝注册（角色 prompt 是必要字段） | 单元测试 |
+| 1 | project `.seek/agents/verifier.md` 定义后 `subagent_type` enum 含 `verifier`；同配置两次启动 schema 字节一致 | 单元测试（临时目录 + schema hash） |
+| 2 | spawn `verifier` 子的 Policy/workflow/tools/provider 与 frontmatter 一致；`plan-execute` 被拒 | 表驱动单元测试（全部非法形状） |
+| 3 | 同名覆盖：project `explore.md` > user `explore.md` > 内置（**P2-c 后四层为 project > user > config > builtin，已全测**） | 单元测试（scope 栈） |
+| 4 | `~/.seek/agents/` 写路径仅 agentsmgr（loader 只读，grep 审计无越界写者） | 代码审查 + 单元测试（loader 无写 API） |
+| 5 | 无 agents 文件 + 空 config 时行为与 v0.6.0 字节同路径（内置三 type 回归） | 柱 G 现有测试零回归 |
+| 6 | body 缺失/空 → 配置错误警告 + 拒绝注册（role prompt 必要） | 单元测试 |
 
 里程碑：**M-O2.1** loader+scope+校验（~2 天）；**M-O2.2** schema 动态 enum + Manager/模板表改造（~2 天）；**M-O2.3** agentsmgr 写路径 + `seek agents list/check` CLI + 文档（~1.5 天）。
 
 ## 6. P3 —— hooks 面扩展（M-O3.x）
 
-> **P3-a 设计启动已细化**（2026-11-14，卡 c_o77s3m）：字节级缓存分析（四命题）、全量生命周期点清单（含 env/audit 契约）、注入通道决策（三区 + 唯一缝）与 CC hooks 逐项取舍见 [`feature-hooks-injection.md`](feature-hooks-injection.md)。该文对 D17 有两处精确化（非确定性代价面 = token 预算而非缓存；授权语义 = 内容信任），对 D16 三区补了字节范围定义——以该文为准。
+> **P3-a 设计已细化**（2026-11-14，卡 c_o77s3m）：字节级缓存分析（四命题）、全量生命周期点清单（含 env/audit 契约）、注入通道决策（三区 + 唯一缝）与 CC hooks 逐项取舍见 [`feature-hooks-injection.md`](feature-hooks-injection.md)——该文对 D17 有两处精确化（非确定性代价面 = token 预算而非缓存；授权语义 = 内容信任），对 D16 三区补了字节范围定义，以该文为准。
 
 #### D15 — 新观察点（全部 observer，无返回值，deny 面不扩）
 
 | 新点 | 触发时机 | in-process | shell（hooks.toml） |
 |---|---|---|---|
-| `SubagentStart` | Manager 发 `started` 事件后（sync+background） | `SubagentStartObserver` | `[[subagent_start]]` |
+| `SubagentStart` | Manager 发 `started` 后（sync+background） | `SubagentStartObserver` | `[[subagent_start]]` |
 | `SubagentStop` | 任一终态事件后（含 killed/orphaned） | `SubagentStopObserver` | `[[subagent_stop]]` |
-| `Stop` | `Agent.Prompt` 返回（AgentEnd——一次回合整体落定） | 新增 `StopObserver`（与 per-turn 的 PostTurn 分层：Stop 一回合一次） | `[[stop]]` |
+| `Stop` | `Agent.Prompt` 返回（AgentEnd，一回合落定） | 新增 `StopObserver`（与 per-turn PostTurn 分层：一回合一次） | `[[stop]]` |
 | `PreCompact` | `/compact` 执行前 | `PreCompactObserver` | `[[pre_compact]]` |
 | `Notification` | OS 通知 / ask_user 弹出时 | `NotificationObserver` | `[[notification]]` |
 
-env 变量沿 `SEEK_*` wire-format（`SEEK_SUBAGENT_SID` / `SEEK_SUBAGENT_TYPE` / `SEEK_EVENT`…）；audit log 加 `subagent_sid` 字段（柱 G §5.3 已预留口径）。全部 observer-only：shell hook 超时只 log 不 deny（现 observer 语义）。SubagentStart/Stop 是 P1 后台编排的审计刚需（"每次子代理结束跑 lint"用例的落点）。
+env 沿 `SEEK_*` wire-format（`SEEK_SUBAGENT_SID` / `SEEK_SUBAGENT_TYPE` / `SEEK_EVENT`…）；audit log 加 `subagent_sid`（柱 G §5.3 预留口径）。全部 observer-only：shell hook 超时只 log 不 deny。SubagentStart/Stop 是 P1 后台编排的审计刚需（"每次子代理结束跑 lint"）。
 
 #### D16 — 注入通道的三区模型（把张力写成规矩）
 
 | 区 | 内容 | 注入政策 |
 |---|---|---|
-| **cache-stable 区** | system prompt 段 1–3（AGENTS.md / M-index / skill manifest）、tool schema bytes、全部历史 messages | **绝对禁注入**。任何机制（in-process / shell 授权通道）不得改写。已注入字节永不回收重写。 |
-| **cache-volatile 区** | 本 turn 的 Prepend（user-role `<context>` 块）与 UserText | **唯一注入区**。P1 通知、P3 授权通道、记忆注入全走这里。天然随 turn 沉淀为历史，旧字节不再变。 |
-| **session-boundary 区** | 启动一次性装配：agent types 列表进 schema/description、`SessionDate` header、hooks 快照 | 仅在会话边界（进程启动 / `-resume`）重算，进程内冻结。变更 = 一次性 cache 失效（已接受的发版代价）。 |
+| **cache-stable 区** | system prompt 段 1–3（AGENTS.md / M-index / skill manifest）、tool schema bytes、全部历史 messages | **绝对禁注入**：任何机制（in-process / shell 授权通道）不得改写，已注入字节永不回收重写。 |
+| **cache-volatile 区** | 本 turn 的 Prepend（user-role `<context>` 块）与 UserText | **唯一注入区**：P1 通知、P3 授权通道、记忆注入全走这里；随 turn 沉淀为历史后旧字节不再变。 |
+| **session-boundary 区** | 启动一次性装配：agent types 列表进 schema/description、`SessionDate` header、hooks 快照 | 仅会话边界（启动 / `-resume`）重算，进程内冻结；变更 = 一次性 cache 失效（已接受的发版代价）。 |
 
-取舍一句话：**DeepSeek 前缀缓存按字节命中最强纪律，注入能力以"只写未来、不改过去、启动冻结"三律换取**——比 CC（API 缓存按 TTL 容忍漂移）更严，这是 seek 的成本护城河，不为功能便利松绑。
+取舍：**DeepSeek 前缀缓存按字节命中是纪律上限，注入能力以"只写未来、不改过去、启动冻结"三律换取**——比 CC（API 缓存按 TTL 容忍漂移）更严，是 seek 的成本护城河。
 
 #### D17 — shell 注入通道：显式授权、有界、留痕的 stdout
 
-红线**精确化而非推翻**：feature-shell-hooks §2.1 的原红线"shell stdout 永不进 prompt"收紧表述为"**未被显式授权的** shell stdout 永不进 prompt"。授权通道：
+红线**精确化而非推翻**：feature-shell-hooks §2.1 的"shell stdout 永不进 prompt"收紧为"**未被显式授权的** shell stdout 永不进 prompt"。授权通道：
 
 - hooks.toml 新事件 `pre_prompt_inject`（opt-in，默认无）：
 
@@ -333,19 +333,19 @@ command = "cat .seek/ci-context.txt 2>/dev/null"   # 惯用法：hook 从 contex
 max_bytes = 2048                                   # 而不是每次现场生成动态输出（确定性自担）
 ```
 
-- 语义：每 turn PrePrompt 时执行，**stdout 作为 `<context>` 块进 Prepend**（cache-volatile 区），`max_bytes` 硬截断 + 溢出标记。确定性责任在用户（hook 自己保证同输入同输出；文档明示"非确定性输出 = 每 turn cache 半失效"的代价公式——只损本 turn 之后的增量，历史不受影响）。
-- 与直接放开 `pre_prompt` stdout 的差别：显式 opt-in 事件名（用户签名的就是这个风险）、长度上限、`<context>` 包裹与 Prepend 同缝复用、audit log 记录注入字节数。未授权路径（`pre_prompt` observer）的字节纪律不变。
-- 否决项（记录理由）：让 hook 改写 UserText / 改 system prompt——改写历史区，直接违反三律，永不开放。
+- 语义：每 turn PrePrompt 时执行，**stdout 作为 `<context>` 块进 Prepend**（cache-volatile 区），`max_bytes` 硬截断 + 溢出标记。确定性责任在用户（同输入同输出；"非确定性输出 = 每 turn cache 半失效"只损增量）。
+- 与直接放开 `pre_prompt` stdout 的差别：显式 opt-in 事件名（用户签的就是这个风险）、长度上限、`<context>` 与 Prepend 同缝复用、audit 记注入字节数；未授权路径（`pre_prompt` observer）字节纪律不变。
+- 否决项：hook 改写 UserText / system prompt——改写历史区，违反三律，永不开放。
 
 ### P3 验收（沙盒可验证）
 
 | # | 标准 | 验证方式 |
 |---|---|---|
-| 1 | 后台子 spawn/终态触发 `subagent_start`/`subagent_stop` shell hook，env 带 `SEEK_SUBAGENT_SID`；audit log 行含 `subagent_sid` | 集成测试（fake hook 脚本写临时文件） |
-| 2 | 新观察点全部无返回值、超时只 log；deny 面未扩（`pre_tool` 仍是唯一 deny 点） | 单元测试 + 代码审查 |
-| 3 | `pre_prompt_inject` 输出进本 turn Prepend `<context>`；>max_bytes 截断 + 标记；历史消息字节零改动 | 集成测试（前后 messages diff） |
-| 4 | 未配置 `pre_prompt_inject` 时 PrePrompt 字节路径与现状一致（零回归） | 现有测试全绿 |
-| 5 | 三区模型写入 guide-hooks.md 并有守护测试：schema bytes / system prompt 段在 hook 执行前后 hash 不变 | 集成测试（hash 断言） |
+| 1 | 后台子 spawn/终态触发 `subagent_start`/`subagent_stop` shell hook，env 带 `SEEK_SUBAGENT_SID`，audit 行含 `subagent_sid` | 集成测试（fake hook 脚本写临时文件） |
+| 2 | 新观察点全无返回值、超时只 log；deny 面未扩（`pre_tool` 仍唯一 deny 点） | 单元测试 + 代码审查 |
+| 3 | `pre_prompt_inject` 输出进本 turn Prepend `<context>`；>max_bytes 截断 + 标记；历史字节零改动 | 集成测试（前后 messages diff） |
+| 4 | 未配置 `pre_prompt_inject` 时 PrePrompt 字节路径与现状一致 | 现有测试全绿 |
+| 5 | 三区模型写入 guide-hooks.md 且有守护测试：schema bytes / system prompt 段在 hook 前后 hash 不变 | 集成测试（hash 断言） |
 
 里程碑：**M-O3.1** 新观察点 + shell 事件 + audit（~2 天）；**M-O3.2** `pre_prompt_inject` 授权通道 + 三区文档（~1.5 天）。
 
@@ -353,34 +353,34 @@ max_bytes = 2048                                   # 而不是每次现场生成
 
 | 已交付面 | 本文动作 |
 |---|---|
-| 柱 G sync spawn / 三模板 / worktree / `Policy.Spawn` / `AdoptChild` / `/agents` / `seek subagent` | **扩展不重写**：Spawn 原路径字节不动；SpawnBackground 共享 step 1–8；模板表从编译期常量长成"常量默认 + 配置覆盖" |
-| 柱 K bgjob | **零改动**；只引用其 ctx 分离/Shutdown/并发上限语义作为设计先例 |
-| 柱 H routines / wakeup / triggers / 柱 M push | **零改动**；跨进程跟进 = 现有 wakeup（§3 不做什么 #2 的出口） |
-| v7 柱 N autopilot fleet | **零改动**；autopilot 继续走自己的 headless driver；P1 落地后 autopilot 可选受益于 per-type 路由（fleet 的 type=general-purpose 可配 GLM 量车道），属配置层红利非代码依赖 |
-| v7 柱 O sandbox | 零改动；后台子代理同样走 per-worktree confine（已有 wiring） |
-| v3 柱 B hooks Registry / shell hooks | **扩展不重写**：新 observer 走 `Registry.Register` 现有分发；ShellRunner 加事件不改既有五事件语义 |
-| feature-shell-hooks「stdout 禁入 prompt」红线 | **精确化不推翻**：从"永不"到"未授权永不"，授权通道有长度上限与文档化代价 |
+| 柱 G sync spawn / 三模板 / worktree / `Policy.Spawn` / `AdoptChild` / `/agents` / `seek subagent` | **扩展不重写**：Spawn 原路径字节不动；SpawnBackground 共享 step 1–8；模板表 = 编译期常量 + 配置覆盖 |
+| 柱 K bgjob | **零改动**；只引用其 ctx 分离/Shutdown/并发上限语义作先例 |
+| 柱 H routines / wakeup / triggers / 柱 M push | **零改动**；跨进程跟进 = 现有 wakeup（§3 不做什么 #2 出口） |
+| v7 柱 N autopilot fleet | **零改动**；走自己的 headless driver；P1 后可选受益于 per-type 路由（type=general-purpose 可配 GLM 量车道），配置层红利非代码依赖 |
+| v7 柱 O sandbox | 零改动；后台子同样走 per-worktree confine（已有 wiring） |
+| v3 柱 B hooks Registry / shell hooks | **扩展不重写**：新 observer 走 `Registry.Register`；ShellRunner 加事件不改既有五事件语义 |
+| feature-shell-hooks「stdout 禁入 prompt」红线 | **精确化不推翻**："永不"→"未授权永不"，通道有长度上限与文档化代价 |
 
 ## 8. 风险
 
 | 风险 | 缓解 |
 |---|---|
-| 后台子绑错 ctx（turn ctx）→ turn 一结束子被砍 | D1 显式 session ctx + 验收 #4 专测（柱 K 最大坑的直译） |
+| 后台子绑错 ctx（turn ctx）→ turn 一结束子被砍 | D1 显式 session ctx + 验收 #4 专测 |
 | 注入队列与用户消息竞态（同 turn 同时到） | 注入在 PrePrompt 链首步同步取空（单 goroutine 时点），无并发写；测试 #2/#3 |
-| `notified` 事件与 resume fold 的时序洞（注入后崩溃，notified 未写） | 注入取队时**先写 `notified` 再 Prepend**——最坏丢一次注入（下次 resume 重灌），绝不重复灌 |
-| 模型在等后台结果时空转 poll（反复发消息催） | 工具 description 明示"notification arrives on your next turn; do not wait idly"；CC 同款契约原句语义 |
-| GLM 车道限流叠加 MaxConcurrent=3 并发放大 | 路由不放宽容量门；config 段可加 `max_turns` 收紧；实战反馈再调 |
-| per-type 路由 + 车道专属工具静默失败 | D8 启动期过滤（think 退役后机制移除；复现时按 D8 思路重建）|
-| 动态 enum 后 schema 膨胀（type 描述过长） | D12 描述上限 + schema hash 测试钉字节 |
-| frontmatter `tools` 拼错静默放大到全集 | D13 未知工具名 = 配置错误：启动警告 + 该 type 降级 general-purpose 工具集（响亮且不静默收窄，P2-b 实现） |
+| `notified` 与 resume fold 时序洞（注入后崩溃，notified 未写） | 注入取队时**先写 `notified` 再 Prepend**——最坏丢一次注入（下次 resume 重灌），绝不重复 |
+| 模型等后台结果时空转 poll | 工具 description 明示 "notification arrives on your next turn; do not wait idly"（同 CC 契约语义） |
+| GLM 车道限流叠加 MaxConcurrent=3 并发放大 | 路由不放宽容量门；config 段可加 `max_turns` 收紧 |
+| per-type 路由 + 车道专属工具静默失败 | D8 启动期过滤（think 退役后移除；复现按 D8 思路重建）|
+| 动态 enum 后 schema 膨胀 | D12 描述上限 + schema hash 测试钉字节 |
+| frontmatter `tools` 拼错静默放大到全集 | D13 未知工具名 = 配置错误：启动警告 + 降级 general-purpose 工具集（P2-b 实现） |
 | `pre_prompt_inject` 被滥用改写历史 | 三区模型 + 验收 #3/#5 hash 守护；UserText/system prompt 改写显式否决 |
-| 双 summary 源（completed 事件 vs transcript）漂移 | D5 单源纪律：索引永不带 summary，复活只读 transcript |
+| 双 summary 源（completed 事件 vs transcript）漂移 | D5 单源纪律：索引不带 summary，复活只读 transcript |
 
 ## 9. 后续版本与开放问题
 
-- **模型侧 poll 工具**（TaskOutput 等价物）：P1 显式不做；若"通知必达"在实战中被证明不够（如模型需条件等待多个后台子），P2 评估 `monitor` 语义扩展到 agent 句柄。
+- **模型侧 poll 工具**（TaskOutput 等价物）：P1 显式不做；若"通知必达"实战不够（如需条件等待多个后台子），P2 评估 `monitor` 语义扩展到 agent 句柄。
 - **子 → 父流式回显**：柱 G 已留 v0.6.x dot 候选，与本 P1 正交。
 - **后台子的前台化**（`TaskOutput(block)` 等待）：同上，依赖 poll 面先立。
 - **per-type ask_user 开放**：维持柱 G 保守（disambiguation UI 未做前不开）。
-- **编排层 eval**：P1 落地后补 tool-selection eval 用例（"长任务该 background"），进 eval/cases/——内部回归口径，不做公开跑分（#2575）。
+- **编排层 eval**：P1 后补 tool-selection eval 用例（"长任务该 background"），进 eval/cases/——内部回归口径，不做公开跑分（#2575）。
 - **开放问题**：GLM 1M context 档位若未来分档，budget 表跟随 pricing 同步节奏；~~`pre_prompt_inject` 的确定性代价是否值得在状态栏给"本 turn 注入 N bytes"提示，M-O3.2 实现时定~~（**已定，M-O3.2 拍板不做**：字节量在 transcript `<context type="hook">` 与 audit `injected_bytes` 已可查，状态栏计数信息密度不抵常驻宽度，状态事件链已随卡 c_z4mn6y 移除不为它复活——见 feature-hooks-injection §8）。

@@ -1,5 +1,5 @@
 {
-  "description": "compact A/B（eval v3 记录项，card c_qjb5mq）：同一 follow-up prompt、同一 scripted endpoint，唯一变量是送给模型的历史——arm A 全历史 vs arm B /compact 留下的 summary pair（形状取自 internal/tui/update_agent.go:handleCompactDone）。脚本端点做抽取式作答：请求体里三个金标事实（internal/csvexport/export.go / report.csv / 45s）齐了才答，缺一个就答 NO-FACTS-AVAILABLE——所以'答出了事实'只能来自历史，不能来自 prompt。判分是机械的 runner_fact（arm_a_keeps_facts / arm_b_keeps_facts / arms_are_distinguishable），零 LLM judge、零真 key：在假 key 车道让 judge 去评本仓自己写的罐头文案，测的是端点不是压缩。record_only：真 key 车道与 E2 标定前不闸门（docs/prd/feature-eval-v3.md §2.1）。",
+  "description": "compact A/B（eval v3 记录项，card c_qjb5mq）：同一 follow-up prompt、同一 scripted endpoint，唯一变量是送给模型的历史——arm A 全历史 vs arm B /compact 留下的 summary pair（形状取自 internal/tui/update_agent.go:handleCompactDone）。脚本端点做抽取式作答：请求体里三个金标事实（internal/csvexport/export.go / report.csv / 45s）齐了才答，缺一个就答 NO-FACTS-AVAILABLE——所以'答出了事实'只能来自历史，不能来自 prompt。判分是机械的 runner_fact（arm_a_keeps_facts / arm_b_keeps_facts / arms_are_distinguishable），零 LLM judge、零真 key：在假 key 车道让 judge 去评本仓自己写的罐头文案，测的是端点不是压缩。record_only：真 key 车道与 E2 标定前不闸门（docs/prd/archive/feature-eval-v3.md §2.1）。",
   "max_turns": 3,
   "exact_agent_ends": 2,
   "max_nonzero_exits": 0,

@@ -464,7 +464,7 @@ func (p *Project) TouchRecall(name string, t time.Time) error {
 // TouchInjections refreshes last_injected_at for the named entries in
 // one lock + one write (active-memory first slice: the M-index snapshot
 // injection counts as effective use, so continuously-injected entries
-// don't decay to stale — docs/prd/feature-active-memory.md §1.1).
+// don't decay to stale — docs/prd/archive/feature-active-memory.md §1.1).
 //
 // Missing names are silently skipped rather than erroring: the caller
 // passes the name set it computed moments ago from Entries(), and a
