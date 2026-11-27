@@ -31,6 +31,7 @@
 - c_zib76h：web 审查脚本与资产面小修：截图等侧栏过渡 / 后台夹具路径规范化 / 记忆空态边框 / 统计图「$ $」
 - c_7bqiq5：seek acp × Paseo：ask_user/propose 恒 ErrDisabled — Paseo 0.17.4 不申报 elicitation.form，也不实现 createElicitation handler
 - c_cq77nj：doc-slim：docs/prd 超预算 104KB — 归档名单定案（archive 余量只够 65KB，需人拍是否调预算）
+- c_mxura4：web 无头脚本族：18 个 headless 脚本跑完删一次性 Chrome profile，收尾抽成公共函数
 
 ## v0.13.1（2026-11-24）
 
