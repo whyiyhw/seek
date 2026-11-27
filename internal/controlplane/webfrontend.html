@@ -478,10 +478,9 @@
           color: var(--seek-fg-soft); }
   /* 中断收口标注（c_5m3fm6）：保留的半截气泡尾部一行灰字，流状态可见地终止 */
   .msg .cut { color: var(--seek-fg-dim); font-size: 13px; padding-top: 2px; }
-  /* composer 卡片（W6-4，notes §0⑥/§1/§2）：宽同阅读列（外框 774）、
-     居中、r=22、1px l2 边框 + §2 阴影。上行 textarea 无自己的边框（卡片
-     即边框），自动增高到 200px 后滚动；下行操作条高 42。position:relative
-     仍是候选弹层的定位父级（贴卡片上沿）。 */
+  /* composer 卡片（W6-4，notes §0⑥/§1/§2）：宽同阅读列（外框 774）、居中、
+     r=22、l2 边框 + §2 阴影；textarea 无自己的边框、增到 200px 后滚动，下行
+     操作条高 42。position:relative 是候选弹层的定位父级（贴卡片上沿）。 */
   form { position: relative; display: flex; flex-direction: column;
          align-self: center; width: 100%; max-width: 774px;
          margin: 6px 0 10px; background: var(--seek-panel);
@@ -1804,9 +1803,8 @@ function dropChatEmpty() {
 // 版本徽标 + 芯片行（工作区芯片放大版）+ 一行提示；body.chat-empty-on 让
 // Hero+composer 作为一组垂直居中（conv-head 绝对化让位，见样式表）。
 function renderChatEmpty() {
-  // 「有内容」的判据是消息（.msg/.tcall）——空态盒子自己是 #list 的 child，
-  // 按裸 children.length 判会把刚挂上的 chat-empty-on 当场摘掉（盒子还在
-  // 类没了，居中失效）。W6-4。
+  // 「有内容」的判据是消息（.msg/.tcall）：空态盒子自己是 #list 的 child，
+  // 按裸 children.length 判会把刚挂上的 chat-empty-on 当场摘掉。W6-4。
   if (list.children.length && !list.querySelector('.chat-empty')) {
     chatEmptyKind = '';
     document.body.classList.remove('chat-empty-on');
@@ -1936,9 +1934,8 @@ function syncSend() {
 function renderSend() {
   const busy = runs.size > 0;
   const gated = gatedNow();
-  // 圆形图标钮（W6-4）：arrow-up=发送、square=停止；语义在 aria-label
-  // 与 title（icon-only button 必须 aria-label——ui-ux-pro-max）。文字
-  // 「停止/发送」改由这两个属性承载（web-stop 断言随迁，见 commit body）。
+  // 圆形图标钮（W6-4）：arrow-up=发送、square=停止；语义在 aria-label 与
+  // title（icon-only button 必须 aria-label），文字「停止/发送」由这两个属性承载。
   swapIcon(send, busy ? 'square' : 'arrow-up');
   send.setAttribute('aria-label', gated ? '发送（当前会话生成中，暂不可用）' : busy ? '停止' : '发送');
   send.title = gated ? GATE_TEXT + '（回实时视图可停止）'
