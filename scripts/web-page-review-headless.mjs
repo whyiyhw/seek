@@ -23,7 +23,7 @@
 // Env:  PAGE_REVIEW_GIT_REV   写进 manifest 的 git 短 rev（缺省 unknown）
 import { spawn } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -95,7 +95,22 @@ const chrome = spawn(CHROME, [
 ], { stdio: ['ignore', 'ignore', 'pipe'] });
 const chromeErr = [];
 chrome.stderr.on('data', d => chromeErr.push(d));
-const cleanup = () => { try { chrome.kill(); } catch { /* already gone */ } };
+// 收尾：杀 Chrome，再删一次性 profile。不删的话每跑一轮在 $TMPDIR 留一份
+// （2026-11-27 实录：75 份 / 606MB，最早的是四天前的）。两个坑都实测过：
+// ① 默认的 SIGTERM 让 Chrome 走优雅关闭，删完它还在关闭途中把文件写回来
+//   （剩 652K）——一次性 profile 不需要体面收场，直接 SIGKILL；
+// ② 主进程死了，辅助进程（存储/网络服务）还要几十毫秒才跟着退，这期间照样
+//   落文件，rmSync 撞上就中途报错删一半（剩 620K，时有时无）——'exit' 钩子里
+//   只有同步手段，用阻塞式小睡重试。
+const cleanup = () => {
+  try { chrome.kill('SIGKILL'); } catch { /* already gone */ }
+  const sleep = new Int32Array(new SharedArrayBuffer(4));
+  for (let i = 0; i < 15; i++) {
+    try { rmSync(profile, { recursive: true, force: true }); return; } catch { /* 还有进程在写，再试 */ }
+    Atomics.wait(sleep, 0, 0, 100);
+  }
+  console.error(`warn: 一次性 Chrome profile 没删掉，留给系统清 temp：${profile}`);
+};
 process.on('exit', cleanup);
 process.on('SIGTERM', () => process.exit(1));
 process.on('SIGINT', () => process.exit(1));
