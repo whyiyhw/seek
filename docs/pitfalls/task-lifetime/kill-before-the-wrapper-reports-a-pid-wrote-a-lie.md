@@ -3,4 +3,4 @@
 - **Why**: the record is two facts written by two processes (spawner: metadata, wrapper: pid); `Runner.Kill` only guarded `Terminal()` and `Zombie`, so the sub-second `starting` window fell through to `sig(t.PID=0, SIGTERM)` (a no-op) followed by an unconditional `killed` append.
 - **Fix**: `Kill` refuses when `t.PID == 0` with a "still starting; retry in a moment" error and writes nothing — the record stays `starting` so the next `seek kill` works. `internal/taskproc/runner.go`; test `TestRunner_KillDuringStartWindowRefuses` (commit on drive/c_wvd7a7).
 - **Lesson**: in an append-only fact log, "we tried" and "it happened" must not share a line — any fact a subcommand writes after an operation must be gated on the operation's own precondition (here: a real pid), or a read-only observer will later believe a lie it cannot undo.
-- **Refs**: `internal/taskproc/runner.go`, `internal/taskproc/runner_test.go`, `docs/prd/feature-task-lifetime.md` §1.3
+- **Refs**: `internal/taskproc/runner.go`, `internal/taskproc/runner_test.go`, `docs/prd/archive/feature-task-lifetime.md` §1.3

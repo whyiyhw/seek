@@ -1,6 +1,6 @@
 # plan-e2e — eval v2 E3, 承重轴首例（c_c5wwey）
 
-`docs/prd/feature-eval-v2.md` §2.2 B 的第一条承重轴：真实走 plan 工具链全链——
+`docs/prd/archive/feature-eval-v2.md` §2.2 B 的第一条承重轴：真实走 plan 工具链全链——
 **propose（带 done_when 断言列表 + reviewed_by）→ 用户批准 → plan(start) 执行期回显 →
 write → plan(complete) → /exit → `-resume` 状态折叠**。判分全部机械化
 （`eval/tools/plan-e2e-judge.py`），无 LLM-as-judge、无散文匹配。

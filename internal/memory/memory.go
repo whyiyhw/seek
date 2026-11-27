@@ -48,7 +48,7 @@ type Entry struct {
 	// actually injected into a prompt via the M-index snapshot
 	// (active-memory first slice: injection IS effective use — the
 	// use path tagline→prompt→behaviour never shows up as a recall,
-	// see docs/prd/feature-active-memory.md §1.1). It joins the
+	// see docs/prd/archive/feature-active-memory.md §1.1). It joins the
 	// max(...) anchor in Score() so continuously-injected entries
 	// don't go stale, while entries squeezed out of the index (token
 	// budget) or in dead projects stop refreshing and decay normally.

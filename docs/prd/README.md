@@ -20,15 +20,12 @@
 | [`feature-remote-control-plane.md`](feature-remote-control-plane.md) | 🚀 已交付（无剩余排期） | Frontend 端口定义所在——`seek serve` sidecar + 会话绑定路由 + 直连执行。v8「新的端只经 Frontend 端口或 ACP」的参照物，故留活跃区。|
 | [`feature-web-frontend.md`](feature-web-frontend.md) | 📐 设计稿（MVP 已交付） | Web Frontend：MVP 聊天已交付；P2 任务面板 → P3 资产面设计中。|
 | [`feature-slim-loop.md`](feature-slim-loop.md) | 📐 设计稿 | 减法机制 L2 账与刀 / L3 自噬循环；本目录的预算由它看管。|
-| [`feature-eval-v2.md`](feature-eval-v2.md) | 📐 设计稿（2026-11-19） | eval 判定口径重做：单次抽样 → `--rounds` + `min_pass_rate`；补 plan / 后台子代理 / serve-web 三条承重轴；发版 release lane + 夜间 core 入口；能确定化的检查移回 Go 单测。|
-| [`feature-task-lifetime.md`](feature-task-lifetime.md) | 📐 v1 最小面已交付（2026-11-21） | v8 柱 V1：任务寿命脱离 seek 进程 + `seek ps/attach/kill`；detach 全语义（会话移交 / 断连续跑）仍留待。|
 | [`feature-mcp-client.md`](feature-mcp-client.md) | 📐 深度集成设计完成（可开卡） | MCP 客户端 infra 已于 M5.4 交付。深度集成设计（2026-11-16）以 Semble 为第一验证目标：引导三层落点（工具 schema / sysprompt MCPSection / AGENTS.md）+ 路由决策（默认 `server__tool` 前缀、grep 结果内 hint 后手、否决调度层拦截）+ 三臂对照评估口径，拆 D1–D5 五张 2h 卡。|
 | [`feature-skill-distill.md`](feature-skill-distill.md) | 🚀 一~三期已交付 | Skill 自动蒸馏（S→K）：四层新颖性漏斗 + `.drafts/` 草稿区 + 人审 install 铁律。AGENTS.md 架构节引用。|
 | [`feature-plan-mode.md`](feature-plan-mode.md) | 🚀 已交付 | Plan 模式 v2：analyze → propose → execute 闭环 + event-sourcing resume。AGENTS.md 权限节引用。|
 | [`feature-permission-refactor.md`](feature-permission-refactor.md) | 🚀 已交付 | Permission 两轴（Preference/Workflow）重构。AGENTS.md 权限节引用。|
 | [`feature-inspect-rpc.md`](feature-inspect-rpc.md) | 🗄 已归档（冻结面留此） | RPC 单一数据面权威 + `--rpc` stdio 三 method 冻结的决定记录。AGENTS.md RPC 节引用。|
 | [`feature-webfetch.md`](feature-webfetch.md) | 🚀 已交付 | WebFetch SSRF 防御外部读取。AGENTS.md 架构节引用。|
-| [`feature-active-memory.md`](feature-active-memory.md) | 🚀 已交付 | 主动记忆整理。AGENTS.md 架构节引用。|
 | [`feature-i18n.md`](feature-i18n.md) | 🚀 已交付 | i18n view 层目录 + 奇偶校验。AGENTS.md 架构节引用。|
 | [`feature-judge-engine.md`](feature-judge-engine.md) | 📐 设计稿（2026-11-24） | 判读引擎：`seek judge` 结构化判读面（JSONL in/out + 三值 verdict + 成本硬顶），供外部程序把 seek 当批处理推理引擎用。四个缺口：`--tools=none` 哨兵 / `--no-save`×`--memory` 解耦 / `--isolated`（skills+MCP 无关闭开关）/ `ResponseFormat` 已定义未使用。第一条消费线为信息流产品 winnow。|
 
@@ -68,6 +65,10 @@
 - [`feature-image-ocr.md`](archive/feature-image-ocr.md) — 柱 Q 本体（被 feature-vision 取代，代码已移除）
 - [`feature-plan-tasklist.md`](archive/feature-plan-tasklist.md) — 被 feature-plan-mode 取代
 - [`feature-deepseek-app-api.md`](archive/feature-deepseek-app-api.md) — v0.12.0：DeepSeek 应用 API 四项评估收口（文件输入 F1–F5 / ASR+TTS 客户端+语音 frontend / `safety_check` 交付；`read_url` 判红不接）
+- [`feature-eval-v2.md`](archive/feature-eval-v2.md) — E1 判定口径 / E2 标定 / E3–E6 落地记录（2026-11-19，c_ennnwa…c_rkoeiy）。被 v3 修订 §2.5，实现面由 `eval/README.md` 维护。
+- [`feature-eval-v3.md`](archive/feature-eval-v3.md) — J1–J3（judge 分层 + 校准 + 接线）与 A1–A3（Terminal-Bench-lite 私有锚）落地记录（2026-11-22）。
+- [`feature-task-lifetime.md`](archive/feature-task-lifetime.md) — v8 柱 V1：任务寿命脱离进程 + `seek ps/attach/kill` 最小面（2026-11-21，c_wvd7a7）；detach 全语义留待。
+- [`feature-active-memory.md`](archive/feature-active-memory.md) — 主动记忆策展（M-index 注入即续命切片，c_ff4pcp）；阶段 2/3 LLM 评估路线图留档。
 
 ## 阅读指引
 

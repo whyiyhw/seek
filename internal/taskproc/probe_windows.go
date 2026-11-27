@@ -21,7 +21,7 @@ const (
 // owned by someone else, which for our own tasks means gone).
 //
 // Windows has no Unix zombie state, so this reports alive-or-gone only —
-// documented in docs/prd/feature-task-lifetime.md §5.
+// documented in docs/prd/archive/feature-task-lifetime.md §5.
 func ProbePID(pid int) Probe {
 	if pid <= 0 {
 		return ProbeGone

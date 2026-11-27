@@ -3,7 +3,7 @@
 
 The calibration set is HAND-LABELLED editorial data (labels drafted by
 the agent 2026-11-22, spot-checked by the user — the J2 口径 in
-docs/prd/feature-eval-v3.md §2.1); this builder exists so the set stays
+docs/prd/archive/feature-eval-v3.md §2.1); this builder exists so the set stays
 reproducible and auditable (判分必须可复算, the amended eval-v2 §2.5
 stance): every REAL row is re-pulled from committed eval/results/*.jsonl
 by (case, ran_at) — no transcription — while constructed rows carry

@@ -1,14 +1,17 @@
 package main
 
 // Unit tests for the ACP ask lane's pure halves (acp_askuser.go): the
-// form builder and the answer mapper. The transport round-trip is
-// covered end to end in acp_askuser_e2e_test.go; here we pin the
-// mapping decisions that would otherwise be invisible — which answer a
-// given form reply becomes, and what the emitted schema looks like.
+// form builder, the answer mapper, and — since card c_7bqiq5 — the
+// session/request_permission fallback (popup shape + per-question answer
+// collection). The transport round-trip is covered end to end in
+// acp_askuser_e2e_test.go; here we pin the mapping decisions that would
+// otherwise be invisible — which answer a given reply becomes, and what
+// the emitted wire shape looks like.
 
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"testing"
 	"time"
 
@@ -310,6 +313,285 @@ func TestElicitationParams_MarshalRoundTrip(t *testing.T) {
 	}
 	if got := back.RequestedSchema.Properties["q2"].Items; got == nil || len(got.Enum) != 3 {
 		t.Fatalf("round trip q2 items = %+v, want 3-value enum", got)
+	}
+}
+
+// --- request_permission fallback (card c_7bqiq5) -------------------
+
+// TestBuildAskPermissionParams pins the popup shape the fallback sends.
+// The rows that carry real weight:
+//   - every question option is allow_once, so a client's "chooser"
+//     detection (repeated allow kinds) fires and auto-accept stays off;
+//   - a trailing reject_once is the Skip row;
+//   - the question text is in BOTH title and content (title is all some
+//     overlays draw; content is what detail-capable clients show).
+func TestBuildAskPermissionParams(t *testing.T) {
+	q := singleChoiceQuestion()
+	q.Header = "Scope"
+	p := buildAskPermissionParams("sess-1", 0, q)
+
+	if p.SessionID != "sess-1" {
+		t.Errorf("sessionId = %q, want sess-1", p.SessionID)
+	}
+	if p.ToolCall.Kind != "other" {
+		t.Errorf("toolCall.kind = %q, want other (a question is not execute/edit)", p.ToolCall.Kind)
+	}
+	if p.ToolCall.ToolCallID == "" {
+		t.Error("toolCallId is required by the schema")
+	}
+	if want := "Scope — Which scope?"; p.ToolCall.Title != want {
+		t.Errorf("title = %q, want %q", p.ToolCall.Title, want)
+	}
+	if len(p.ToolCall.Content) == 0 {
+		t.Fatal("content is missing; detail-capable clients would show an empty prompt")
+	}
+
+	// Options: one per question row (all allow_once) + Skip (reject_once).
+	if len(p.Options) != 3 {
+		t.Fatalf("options = %+v, want 2 rows + Skip", p.Options)
+	}
+	if p.Options[0].OptionID != "user" || p.Options[0].Kind != acp.OptionAllowOnce {
+		t.Errorf("option 0 = %+v, want user/allow_once", p.Options[0])
+	}
+	if p.Options[0].Name != "user — private" {
+		t.Errorf("option 0 name = %q, want the label with its description folded in", p.Options[0].Name)
+	}
+	if p.Options[1].OptionID != "project" || p.Options[1].Kind != acp.OptionAllowOnce {
+		t.Errorf("option 1 = %+v, want project/allow_once", p.Options[1])
+	}
+	last := p.Options[2]
+	if last.OptionID != askSkipOptionID || last.Kind != acp.OptionRejectOnce {
+		t.Errorf("last option = %+v, want the Skip row as reject_once", last)
+	}
+
+	// The chooser signal Paseo keys on: ≥2 allow options of the same kind.
+	allows := 0
+	for _, o := range p.Options {
+		if o.Kind == acp.OptionAllowOnce {
+			allows++
+		}
+	}
+	if allows < 2 {
+		t.Errorf("allow_once count = %d, want ≥2 so a client reads this as a question, not an approval", allows)
+	}
+
+	// Ids must be unique per question in a batch.
+	if a, b := buildAskPermissionParams("s", 0, q).ToolCall.ToolCallID, buildAskPermissionParams("s", 1, q).ToolCall.ToolCallID; a == b {
+		t.Errorf("toolCallId repeats across a batch (%q); the schema wants distinct ids", a)
+	}
+}
+
+// askFallbackHarness drives acpAskUser's request_permission path against a
+// scripted client over pipes — the same posture as acpApprovalHarness.
+type askFallbackHarness struct {
+	srv *acp.Server
+	enc *json.Encoder
+	dec *json.Decoder
+	ask *acpAskUser
+}
+
+func newAskFallbackHarness(t *testing.T, timeout time.Duration) *askFallbackHarness {
+	t.Helper()
+	c2sR, c2sW := io.Pipe()
+	s2cR, s2cW := io.Pipe()
+	srv := acp.NewServer(c2sR, s2cW, nopBackend{})
+	ctx, cancel := context.WithCancel(context.Background())
+	go srv.Serve(ctx)
+	t.Cleanup(func() { cancel(); c2sW.Close(); s2cW.Close() })
+
+	ask := newACPAskUser(srv, timeout)
+	ask.arm(false) // no elicitation.form → fallback
+	ask.beginTurn(ctx, "sess-1")
+	t.Cleanup(ask.endTurn)
+
+	return &askFallbackHarness{srv: srv, enc: json.NewEncoder(c2sW), dec: json.NewDecoder(s2cR), ask: ask}
+}
+
+// answerSequence runs askBatch in the background and answers each popup
+// with the given option ids in order. Returns the answers.
+func (h *askFallbackHarness) answerSequence(t *testing.T, b askuser.Batch, ids ...string) []askuser.Answer {
+	t.Helper()
+	type result struct{ ans []askuser.Answer }
+	done := make(chan result, 1)
+	go func() { done <- result{h.ask.askBatch(b)} }()
+
+	for _, id := range ids {
+		var frame struct {
+			Method string          `json:"method"`
+			ID     json.RawMessage `json:"id"`
+			Params struct {
+				Options []struct {
+					OptionID string `json:"optionId"`
+					Kind     string `json:"kind"`
+				} `json:"options"`
+			} `json:"params"`
+		}
+		if err := h.dec.Decode(&frame); err != nil {
+			t.Fatalf("read agent→client frame: %v", err)
+		}
+		if frame.Method != acp.MethodRequestPermission {
+			t.Fatalf("method = %q, want %s", frame.Method, acp.MethodRequestPermission)
+		}
+		// The id we were told to answer must be one we actually offered.
+		offered := false
+		for _, o := range frame.Params.Options {
+			if o.OptionID == id {
+				offered = true
+			}
+		}
+		if !offered {
+			t.Fatalf("answer %q was not among the offered options", id)
+		}
+		if err := h.enc.Encode(map[string]any{
+			"jsonrpc": "2.0",
+			"id":      json.RawMessage(frame.ID),
+			"result": map[string]any{
+				"outcome": map[string]any{"outcome": "selected", "optionId": id},
+			},
+		}); err != nil {
+			t.Fatalf("write answer: %v", err)
+		}
+	}
+	select {
+	case r := <-done:
+		return r.ans
+	case <-time.After(10 * time.Second):
+		t.Fatal("askBatch did not return")
+		return nil
+	}
+}
+
+// TestACPAskUser_FallbackSingleChoice: one question, one popup, the picked
+// row arrives as ChosenIDs. This is the whole point of the fallback — the
+// model gets a real answer on a client that has no elicitation handler.
+func TestACPAskUser_FallbackSingleChoice(t *testing.T) {
+	h := newAskFallbackHarness(t, 5*time.Second)
+	got := h.answerSequence(t,
+		askuser.Batch{Questions: []askuser.Question{singleChoiceQuestion()}},
+		"project")
+
+	if len(got) != 1 || !sameAnswer(got[0], askuser.Answer{ChosenIDs: []string{"project"}}) {
+		t.Fatalf("answers = %+v, want one ChosenIDs=[project]", got)
+	}
+}
+
+// TestACPAskUser_FallbackSkipKeepsAsking: Skip on question 1 cancels only
+// question 1 — the batch still pops for question 2, because the channel is
+// alive and the questions are independent.
+func TestACPAskUser_FallbackSkipKeepsAsking(t *testing.T) {
+	h := newAskFallbackHarness(t, 5*time.Second)
+	got := h.answerSequence(t,
+		askuser.Batch{Questions: []askuser.Question{singleChoiceQuestion(), singleChoiceQuestion()}},
+		askSkipOptionID, "user")
+
+	if len(got) != 2 {
+		t.Fatalf("len = %d, want 2", len(got))
+	}
+	if !got[0].Cancelled {
+		t.Errorf("answer 0 = %+v, want Cancelled (skipped)", got[0])
+	}
+	if !sameAnswer(got[1], askuser.Answer{ChosenIDs: []string{"user"}}) {
+		t.Errorf("answer 1 = %+v, want ChosenIDs=[user] (skip must not abandon the batch)", got[1])
+	}
+}
+
+// TestACPAskUser_FallbackMultiSelectCancelled pins the deliberate gap: a
+// multi-select question is NOT carried over request_permission (the
+// per-row fan-out zcode uses would look like a plain approval pair to an
+// auto-accepting host). It answers cancelled without ever sending a frame
+// — the assertion is that no prompt reaches the client at all.
+func TestACPAskUser_FallbackMultiSelectCancelled(t *testing.T) {
+	h := newAskFallbackHarness(t, 2*time.Second)
+
+	done := make(chan []askuser.Answer, 1)
+	go func() {
+		done <- h.ask.askBatch(askuser.Batch{Questions: []askuser.Question{multiChoiceQuestion()}})
+	}()
+	select {
+	case got := <-done:
+		if len(got) != 1 || !got[0].Cancelled {
+			t.Fatalf("answers = %+v, want one Cancelled", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("askBatch hung on a multi-select instead of cancelling")
+	}
+}
+
+// TestACPAskUser_FallbackCancelledOutcomeStops: a protocol-level cancelled
+// outcome ends the batch (no channel left) — questions after it stay
+// cancelled and no further prompt is sent.
+func TestACPAskUser_FallbackCancelledOutcomeStops(t *testing.T) {
+	h := newAskFallbackHarness(t, 5*time.Second)
+
+	type result struct{ ans []askuser.Answer }
+	done := make(chan result, 1)
+	go func() {
+		done <- result{h.ask.askBatch(askuser.Batch{Questions: []askuser.Question{singleChoiceQuestion(), singleChoiceQuestion()}})}
+	}()
+
+	var frame struct {
+		ID json.RawMessage `json:"id"`
+	}
+	if err := h.dec.Decode(&frame); err != nil {
+		t.Fatalf("read frame: %v", err)
+	}
+	if err := h.enc.Encode(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      json.RawMessage(frame.ID),
+		"result":  map[string]any{"outcome": map[string]any{"outcome": "cancelled"}},
+	}); err != nil {
+		t.Fatalf("write cancel: %v", err)
+	}
+
+	select {
+	case r := <-done:
+		if len(r.ans) != 2 {
+			t.Fatalf("len = %d, want 2 (contract: one answer per question)", len(r.ans))
+		}
+		for i, a := range r.ans {
+			if !a.Cancelled {
+				t.Errorf("answer %d = %+v, want Cancelled", i, a)
+			}
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("askBatch hung after a cancelled outcome")
+	}
+}
+
+// TestACPAskUser_FallbackUnknownEchoCancels: an optionId we never offered
+// is a client bug, not a new answer — that question stays cancelled.
+func TestACPAskUser_FallbackUnknownEchoCancels(t *testing.T) {
+	h := newAskFallbackHarness(t, 5*time.Second)
+
+	type result struct{ ans []askuser.Answer }
+	done := make(chan result, 1)
+	go func() {
+		done <- result{h.ask.askBatch(askuser.Batch{Questions: []askuser.Question{singleChoiceQuestion()}})}
+	}()
+
+	var frame struct {
+		ID json.RawMessage `json:"id"`
+	}
+	if err := h.dec.Decode(&frame); err != nil {
+		t.Fatalf("read frame: %v", err)
+	}
+	if err := h.enc.Encode(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      json.RawMessage(frame.ID),
+		"result": map[string]any{
+			"outcome": map[string]any{"outcome": "selected", "optionId": "nosuch"},
+		},
+	}); err != nil {
+		t.Fatalf("write answer: %v", err)
+	}
+
+	select {
+	case r := <-done:
+		if len(r.ans) != 1 || !r.ans[0].Cancelled {
+			t.Fatalf("answers = %+v, want one Cancelled", r.ans)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("askBatch hung on an unknown echo")
 	}
 }
 

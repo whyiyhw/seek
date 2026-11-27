@@ -1,5 +1,5 @@
 // Package taskproc is the on-disk registry for lifetime-detached task
-// processes (v8 柱 V1, docs/prd/feature-task-lifetime.md). It is the
+// processes (v8 柱 V1, docs/prd/archive/feature-task-lifetime.md). It is the
 // deliberate sibling — NOT a replacement — of internal/bgjob:
 //
 //   - bgjob is session-scoped, lives in memory, and its Shutdown kills
@@ -181,7 +181,7 @@ func (s *Store) Dir() string { return s.dir }
 
 // HomeDir is the SEEK_HOME a spawned wrapper must be told about, so it
 // appends its exit fact to the same registry (the wrapper's environment
-// is otherwise scrubbed of SEEK_* — see docs/prd/feature-task-lifetime.md
+// is otherwise scrubbed of SEEK_* — see docs/prd/archive/feature-task-lifetime.md
 // §1.2).
 func (s *Store) HomeDir() string { return filepath.Dir(s.dir) }
 
