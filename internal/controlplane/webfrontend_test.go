@@ -501,7 +501,7 @@ func TestWeb_PageSessionSidebar(t *testing.T) {
 		"localStorage.setItem(SIDE_KEY", // ... written back on toggle
 		"innerWidth < 1024",             // narrow viewport defaults to collapsed
 		"SESS_PAGE = 30",                // row page size (filter+page are client-side)
-		"viewing", // W6-5 history view body class (was sess-detail)
+		"viewing",                       // W6-5 history view body class (was sess-detail)
 		// the tree itself: groups, collapsed-group memory, the two gestures
 		"wsGroups", "ws-head", "WS_CLOSED_KEY", "treeBind", "treeNewSession",
 		// W6-5: click-a-session enters the history view; lazy /resume keeps
@@ -1159,10 +1159,10 @@ func TestWeb_PageSkeletonW62(t *testing.T) {
 		}
 	}
 	for _, need := range []string{
-		`id="conv-head"`,                                       // the one conversation header
-		`id="composer-meta"`,                                   // meter row under the composer
-		`id="side-new"`,                                        // full-width new-session button
-		`id="side-find"`,                                       // search toggle (collapsed #side-search)
+		`id="conv-head"`,     // the one conversation header
+		`id="composer-meta"`, // meter row under the composer
+		`id="side-new"`,      // full-width new-session button
+		`id="side-find"`,     // search toggle (collapsed #side-search)
 		`<header id="status" class="warn" aria-live="polite">`, // hidden but alive
 		`clip-path: inset(50%)`,                                // the visually-hidden pattern itself
 		`fmtAgo`,                                               // relative time on session rows
@@ -1186,14 +1186,14 @@ func TestWeb_PageChatFlowW63(t *testing.T) {
 		t.Error("page still emits the 'tool · ' role label — W6-3 retired it (results merge into the call row)")
 	}
 	for _, need := range []string{
-		"max-width: 768px",             // the reading column
-		"var(--seek-user-bubble)",      // user bubble rides a themed token, not a bare hex
-		"--seek-user-bubble:#1f2a44",   // dark value pinned
-		"--seek-user-bubble:#edf3fe",   // light value pinned
-		".tcall",                       // the one tool-call row shape (live + history)
-		"function histTurn",            // history renderer rides the same forms
-		"turn-meta",                    // per-turn hover copy affordance
-		"dataset.mi",                   // message-index stamp (blocks ≠ messages now)
+		"max-width: 768px",           // the reading column
+		"var(--seek-user-bubble)",    // user bubble rides a themed token, not a bare hex
+		"--seek-user-bubble:#1f2a44", // dark value pinned
+		"--seek-user-bubble:#edf3fe", // light value pinned
+		".tcall",                     // the one tool-call row shape (live + history)
+		"function histTurn",          // history renderer rides the same forms
+		"turn-meta",                  // per-turn hover copy affordance
+		"dataset.mi",                 // message-index stamp (blocks ≠ messages now)
 	} {
 		if !strings.Contains(page, need) {
 			t.Errorf("embedded page lost the W6-3 chat-flow piece %q (c_ovly6d)", need)
@@ -1215,15 +1215,15 @@ func TestWeb_PageChatFlowW63(t *testing.T) {
 func TestWeb_PageComposerW64(t *testing.T) {
 	page := string(webPage)
 	for _, need := range []string{
-		"border-radius: 22px",          // the card itself (form rule)
-		"max-width: 774px",             // card width == reading column frame
-		"border-radius: 999px",         // round send (+ attach/mic/chips)
-		`id="ws-chip"`,                 // workspace chip in the action row
-		`id="model-tag"`,               // model label (hidden until known)
-		"hero-t",                       // empty-state Hero title class
-		"chat-empty-on",                // the centering body class
-		"applyWsChip",                  // chip/placeholder follow binding
-		"先选一个工作区",                  // unbound plain-text send → picker copy
+		"border-radius: 22px",  // the card itself (form rule)
+		"max-width: 774px",     // card width == reading column frame
+		"border-radius: 999px", // round send (+ attach/mic/chips)
+		`id="ws-chip"`,         // workspace chip in the action row
+		`id="model-tag"`,       // model label (hidden until known)
+		"hero-t",               // empty-state Hero title class
+		"chat-empty-on",        // the centering body class
+		"applyWsChip",          // chip/placeholder follow binding
+		"先选一个工作区",              // unbound plain-text send → picker copy
 	} {
 		if !strings.Contains(page, need) {
 			t.Errorf("embedded page lost the W6-4 composer piece %q (c_ljtmy4)", need)
@@ -1248,13 +1248,13 @@ func TestWeb_PageLazyResumeW65(t *testing.T) {
 		}
 	}
 	for _, need := range []string{
-		"ensureContext",                   // the lazy-context split lives in one function
-		"'/resume ' + sid",                // the resume POST is built before the body
-		"pendingFresh",                    // lazy /new · /bind for the new-session buttons
-		"body.viewing #list",              // history view hides (not destroys) the live DOM
-		`id="hist"`,                      // history renders into #hist
-		`id="fresh-hero"`,                // the lazy new-session empty state
-		"草稿已保留",                          // failure path keeps the draft
+		"ensureContext",      // the lazy-context split lives in one function
+		"'/resume ' + sid",   // the resume POST is built before the body
+		"pendingFresh",       // lazy /new · /bind for the new-session buttons
+		"body.viewing #list", // history view hides (not destroys) the live DOM
+		`id="hist"`,          // history renders into #hist
+		`id="fresh-hero"`,    // the lazy new-session empty state
+		"草稿已保留",              // failure path keeps the draft
 	} {
 		if !strings.Contains(page, need) {
 			t.Errorf("embedded page lost the W6-5 lazy-resume piece %q (c_mo7quv)", need)
