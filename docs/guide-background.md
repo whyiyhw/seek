@@ -151,6 +151,6 @@ seek kill <id> [--grace 3s]        # SIGTERM 整进程组 → 超时升 SIGKILL
 | 输出 | 内存 ring（64 KiB） | `~/.seek/tasks/<id>.log` 文件 |
 | 常驻机制 | 无 | **同样无**——三个子命令各读一遍目录就退出 |
 
-状态是折叠出来的：`starting` / `running` / `exited` / `failed` / `killed` / `zombie` / `lost`。`zombie` 表示进程已死但父进程还没 reap（如实显示，不假装 running）；`lost` 表示进程消失且没留下退出码（OOM 或外部 SIGKILL）。设计见 [`docs/prd/feature-task-lifetime.md`](./prd/feature-task-lifetime.md)。
+状态是折叠出来的：`starting` / `running` / `exited` / `failed` / `killed` / `zombie` / `lost`。`zombie` 表示进程已死但父进程还没 reap（如实显示，不假装 running）；`lost` 表示进程消失且没留下退出码（OOM 或外部 SIGKILL）。设计见 [`docs/prd/archive/feature-task-lifetime.md`](./prd/archive/feature-task-lifetime.md)。
 
 `starting` 是 spawn 与 wrapper 报告 pid 之间那一瞬（微秒级）。在这窗口里 `kill` 会**拒绝并报错**、不落 `killed` 事实——给 pid 0 发信号是空操作，写下的「已杀」会让 `ps` 撒谎而任务还在跑；重试即可。

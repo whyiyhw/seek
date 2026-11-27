@@ -26,6 +26,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { disposeHeadlessChrome } from './web-headless-chrome.mjs';
 
 const argv = process.argv.slice(2);
 const trace = m => console.error('[trace] ' + m);
@@ -64,8 +65,7 @@ const chrome = spawn(CHROME, [
 trace(`chrome pid=${chrome.pid} 起动 (cdp ${dbgPort})`);
 const chromeErr = [];
 chrome.stderr.on('data', d => chromeErr.push(d));
-const cleanup = () => { try { chrome.kill(); } catch { /* already gone */ } };
-process.on('exit', cleanup);
+process.on('exit', () => disposeHeadlessChrome(chrome, profile));   // 杀 Chrome + 删一次性 profile
 process.on('SIGTERM', () => process.exit(1));
 process.on('SIGINT', () => process.exit(1));
 

@@ -1,7 +1,7 @@
 package memory
 
 // active_memory_test.go locks the "injection is effective use"
-// lifecycle (docs/prd/feature-active-memory.md §1.1–1.2, first slice,
+// lifecycle (docs/prd/archive/feature-active-memory.md §1.1–1.2, first slice,
 // card c_ff4pcp): a continuously-injected entry must survive the
 // Day-21 stale cliff, while recall-only decay semantics for everything
 // else stay untouched.

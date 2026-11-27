@@ -6,7 +6,7 @@ package taskproc
 // zombies, and force timeouts without depending on the machine's
 // process table. Production fills them from probe_*.go and spawn_*.go.
 //
-// The lifetime contract (docs/prd/feature-task-lifetime.md §1.3): the
+// The lifetime contract (docs/prd/archive/feature-task-lifetime.md §1.3): the
 // WRAPPER owns the exit fact, not the spawning seek process. A spawner
 // that dies immediately after forking therefore loses nothing — the
 // record is still completed by the process it started, which is the

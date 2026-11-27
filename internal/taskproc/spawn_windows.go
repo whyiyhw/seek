@@ -12,7 +12,7 @@ import (
 // combination below is the platform's equivalent (the child gets no
 // console to die with, and Ctrl-C in the parent's console doesn't reach
 // it). Zombie-state modelling does not apply here — see
-// docs/prd/feature-task-lifetime.md §5.
+// docs/prd/archive/feature-task-lifetime.md §5.
 func detach(cmd *exec.Cmd) {
 	const (
 		createNewProcessGroup = 0x00000200

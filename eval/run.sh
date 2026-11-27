@@ -13,7 +13,7 @@
 # Each case appends one JSON row PER ROUND to:
 #   eval/results/<UTC-date>-<binary-version>.jsonl
 #
-# --rounds N (eval v2 E1, docs/prd/feature-eval-v2.md §2.1): defaults to
+# --rounds N (eval v2 E1, docs/prd/archive/feature-eval-v2.md §2.1): defaults to
 # 1, which is the historical single-sample behaviour BYTE FOR BYTE —
 # no `round` field, no aggregate row, no extra stdout. With N > 1 each
 # round is a full case lifecycle (setup → seek → teardown) appending its
@@ -23,7 +23,7 @@
 # Cost warning: rounds multiply API spend — see the cost table in
 # eval/README.md before raising N on the full case set.
 #
-# --lane NAME (eval v2 E6, docs/prd/feature-eval-v2.md §2.3/§三): run the
+# --lane NAME (eval v2 E6, docs/prd/archive/feature-eval-v2.md §2.3/§三): run the
 # curated case list in eval/lane-<name>.txt instead of all cases — one
 # case name per line, '#' comments and blank lines ignored. Every entry
 # must name an existing eval/cases/<name>/ dir (a name with no case dir
@@ -238,7 +238,7 @@ if [ "$seek_eval_provider" != deepseek ]; then
 fi
 export SEEK_EVAL_PROVIDER_ARGS="$provider_args"
 
-# --- Judge lane args (eval v3 J1, docs/prd/feature-eval-v3.md §2.1) ------
+# --- Judge lane args (eval v3 J1, docs/prd/archive/feature-eval-v3.md §2.1) ------
 # The judge rides the SAME provider lane (credentials, base-url override,
 # scrub rules above) but always with its OWN model — the cross-family
 # default (kimi-k3.1-pro) judges deepseek-flash output from outside the
@@ -635,7 +635,7 @@ extract_metric() {
       # runner_fact lines flagging a FAILED judgement assertion
       # ({"failed":true}) from a case's mechanical scorer — the
       # task-level judging pattern of eval v2's load-bearing axis
-      # (plan-e2e's A1..A10, docs/prd/feature-eval-v2.md §2.2 B).
+      # (plan-e2e's A1..A10, docs/prd/archive/feature-eval-v2.md §2.2 B).
       # Generic on purpose: any runner.sh may emit failed-facts; the
       # assertions themselves live in the case's scorer, not here.
       $JQ -s '[.[] | select(.type=="runner_fact" and ((.failed // false) == true))] | length' "$path"
