@@ -1214,6 +1214,8 @@ func TestWeb_PageChatFlowW63(t *testing.T) {
 // plain-text send opens the directory picker instead of posting.
 func TestWeb_PageComposerW64(t *testing.T) {
 	page := string(webPage)
+	// 空态会话头是绝对定位的，包含块必须是主栏——#center 不定位时它横穿侧栏、
+	// 盖住品牌行（W6-4 遗留，2026-11-27 返工）。
 	for _, need := range []string{
 		"border-radius: 22px",  // the card itself (form rule)
 		"max-width: 774px",     // card width == reading column frame
@@ -1224,6 +1226,7 @@ func TestWeb_PageComposerW64(t *testing.T) {
 		"chat-empty-on",        // the centering body class
 		"applyWsChip",          // chip/placeholder follow binding
 		"先选一个工作区",              // unbound plain-text send → picker copy
+		"body.chat-empty-on:not(.viewing) #center { position: relative; }",
 	} {
 		if !strings.Contains(page, need) {
 			t.Errorf("embedded page lost the W6-4 composer piece %q (c_ljtmy4)", need)
@@ -1247,6 +1250,8 @@ func TestWeb_PageLazyResumeW65(t *testing.T) {
 			t.Errorf("page still carries the retired read-only browser piece %q (W6-5 must delete, not stack)", gone)
 		}
 	}
+	// 看历史是内容态（2026-11-27 返工）：实时列表空着时 chat-empty-on 还挂着，
+	// 空态布局（会话头绝对化/内容居中/composer 上浮）不能跟进历史视图。
 	for _, need := range []string{
 		"ensureContext",      // the lazy-context split lives in one function
 		"'/resume ' + sid",   // the resume POST is built before the body
@@ -1255,6 +1260,9 @@ func TestWeb_PageLazyResumeW65(t *testing.T) {
 		`id="hist"`,          // history renders into #hist
 		`id="fresh-hero"`,    // the lazy new-session empty state
 		"草稿已保留",              // failure path keeps the draft
+		"body.viewing.chat-empty-on #conv-head { position: static; }",
+		"body.viewing.chat-empty-on #center { justify-content: flex-start; }",
+		"body.viewing.chat-empty-on form { margin-bottom: 10px; }",
 	} {
 		if !strings.Contains(page, need) {
 			t.Errorf("embedded page lost the W6-5 lazy-resume piece %q (c_mo7quv)", need)

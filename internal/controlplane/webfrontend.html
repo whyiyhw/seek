@@ -953,12 +953,22 @@
      首条消息落地（dropChatEmpty）摘类即落回底部；淡出 0.3s，
      reduced-motion 关停。 */
   body.chat-empty-on #center { justify-content: center; }
+  /* 绝对定位的包含块必须是主栏：#center 不定位时 left/right 落到页面两端，
+     会话头会横穿侧栏、盖住品牌行（W6-4 遗留）。只在非看历史态定位——看历史
+     态会话头本来就该回文档流（见本段末）。 */
+  body.chat-empty-on:not(.viewing) #center { position: relative; }
   body.chat-empty-on #conv-head { position: absolute; top: 0; left: 0; right: 0; }
   body.chat-empty-on #list { flex: 0 0 auto; }
   body.chat-empty-on #composer-meta { display: none; }   /* 空态无计量，别垫高 */
   /* composer 在组底，裸居中会让它的中心落在视口中线下 60px——底下垫
      一段呼吸边距把组重心抬回 dsh 的观感（验收②：卡中心 y ∈ 380–520）。 */
   body.chat-empty-on form { margin-bottom: 64px; }
+  /* 看历史是内容态，不是空态（W6-5）：chat-empty-on 只看实时 #list——它空着时
+     点开历史会话，这个类还挂着，空态布局不能跟着进来：会话头回文档流（否则
+     盖在 #hist 顶上）、内容顶对齐、composer 落回底部。 */
+  body.viewing.chat-empty-on #center { justify-content: flex-start; }
+  body.viewing.chat-empty-on #conv-head { position: static; }
+  body.viewing.chat-empty-on form { margin-bottom: 10px; }
   .chat-empty { display: flex; flex-direction: column; align-items: center;
                 gap: 10px; padding: 0 16px 12px; text-align: center;
                 opacity: 1; transition: opacity .3s; }
