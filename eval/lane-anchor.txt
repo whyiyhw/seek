@@ -1,4 +1,4 @@
-# lane-anchor — 外部锚（eval v3 A1，docs/prd/feature-eval-v3.md §2.2）
+# lane-anchor — 外部锚（eval v3 A1，docs/prd/archive/feature-eval-v3.md §2.2）
 # Terminal-Bench-lite 私有任务集：record_only 起步，首轮基线后按区分度定
 # gate（修题不修阈值）。排序 = 预期成本从低到高（lane 纪律：cheapest first）。
 # #2575：仅私有校准，任何数字不对外发布。跑法：

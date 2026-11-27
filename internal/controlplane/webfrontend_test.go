@@ -1197,6 +1197,15 @@ func TestWeb_PageSkeletonW62(t *testing.T) {
 			t.Errorf("embedded page lost the W6-2 skeleton piece %q (c_onxxge)", need)
 		}
 	}
+	// 工作区小节头三枚图标钮的 DOM 顺序 = 卡面做③：搜索 / 归档 / 新建工作区。
+	// 没有 CSS order 重排，DOM 序即视觉序与 Tab 序，三者必须一致（首版把后两枚
+	// 写反了，2026-11-27 巡检指出）。
+	iFind := strings.Index(page, `id="side-find"`)
+	iArch := strings.Index(page, `id="side-arch"`)
+	iWsNew := strings.Index(page, `id="side-ws-new"`)
+	if iFind < 0 || iArch < iFind || iWsNew < iArch {
+		t.Errorf("sidebar header icon order drifted: want #side-find < #side-arch < #side-ws-new, got %d/%d/%d", iFind, iArch, iWsNew)
+	}
 }
 
 // TestWeb_PageChatFlowW63 pins the W6-3 conversation-flow unification
@@ -1260,6 +1269,19 @@ func TestWeb_PageComposerW64(t *testing.T) {
 	}
 	if !strings.Contains(page, "#send:disabled { opacity: .4; }") {
 		t.Error("round send lacks its 40% disabled treatment (W6-4 ①)")
+	}
+	// 空态布局与「让聊天面让位的视图」的组合：面板打开按内容态处理（会话头回
+	// 文档流、内容顶对齐；W6-4 首版/二版缺陷，2026-11-27 返工）。看历史一态的
+	// 规则由 TestWeb_PageLazyResumeW65 钉，只读浏览器已随 W6-5 退役。几何由
+	// scripts/web-composer-manual.sh 无头量测。
+	for _, need := range []string{
+		"body.chat-empty-on #center { justify-content: center; }",
+		"body.browsing.chat-empty-on #center { justify-content: flex-start; }",
+		"body.browsing.chat-empty-on #conv-head { position: static; }",
+	} {
+		if !strings.Contains(page, need) {
+			t.Errorf("embedded page lost the W6-4 empty-state geometry rule %q (c_ljtmy4 rework)", need)
+		}
 	}
 }
 

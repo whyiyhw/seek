@@ -7,20 +7,49 @@
 // was sitting right there in the editor. print/rpc/goal have no human and
 // keep that answer; ACP does, and now says so.
 //
-// The channel is `elicitation/create` (internal/acp/elicitation.go). It is
-// advertised, not assumed: a client that does not declare
-// `clientCapabilities.elicitation.form` keeps the old ErrDisabled
-// behaviour verbatim, which is why the existing ACP lane test (whose fake
-// client declares nothing) stays green.
+// TWO channels, picked at initialize from what the client advertised
+// (card c_7bqiq5):
 //
-// Same posture as acp_approval.go — every non-answer ending (timeout,
-// disconnect, cancel, -32601 from a client that declared the capability
-// but never implemented it, malformed body) becomes a CANCELLED answer,
-// never a hung turn and never a fatal error.
+//   - `elicitation/create` (internal/acp/elicitation.go) when the client
+//     declares `clientCapabilities.elicitation.form`. This is the shape the
+//     protocol designed for a question: one form, one field per question,
+//     enums plus a free-text twin.
+//   - `session/request_permission` as a FALLBACK for everyone else. It is
+//     the only "ask the human" method a minimal ACP client is guaranteed to
+//     implement — Paseo 0.17.4 declares no elicitation capability and has
+//     no createElicitation handler at all (verified by reading its
+//     app.asar), yet implements requestPermission and even special-cases
+//     "chooser" menus (repeated allow kinds) to render them as a question
+//     with the toolCall.content as body. Without the fallback, every such
+//     client answers ErrDisabled and the model must rephrase in prose.
+//
+// The fallback is deliberately narrower than the form, because
+// request_permission's semantics are pinned to a yes/no gate:
+//
+//   - ONE popup per question (a batch pops N times, in order).
+//   - Options are the question's own rows, all `allow_once` so the menu
+//     reads as a choice rather than an approval; a trailing `reject_once`
+//     is the Skip row.
+//   - `reject_once` = "skip this question" (only this one; the next
+//     question still pops). Protocol-level cancel / timeout / client error
+//     = "stop asking", the rest of the batch stays cancelled.
+//   - MULTI-SELECT is NOT carried: request_permission is single-select, and
+//     the per-option Include/Skip fan-out zcode uses would look like a
+//     plain [allow, reject] pair to an auto-accepting headless host, which
+//     would then silently answer "yes" to every row — a fabricated user
+//     answer, worse than none. A multi-select question therefore comes back
+//     cancelled with a stderr note, and the model asks in prose.
+//   - FREE TEXT has no carrier either; Skip is the honest ending.
+//
+// Same posture as acp_approval.go on both channels — every non-answer
+// ending (timeout, disconnect, cancel, -32601 from a client that declared
+// the capability but never implemented it, malformed body) becomes a
+// CANCELLED answer, never a hung turn and never a fatal error.
 package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -40,10 +69,23 @@ import (
 type acpAskUser struct {
 	srv     *acp.Server
 	timeout time.Duration
+	// form is the channel negotiated at initialize: true = the client
+	// declared `elicitation.form` and gets a real form; false = the
+	// request_permission fallback. Written once by the Initialize handler
+	// (read loop, before any prompt can start) and read by turn
+	// goroutines, so a plain bool is enough — see arm().
+	form bool
 
 	mu   sync.Mutex
 	turn *acpTurnScope
 	seq  int // form counter, keeps field names unique within a turn
+}
+
+// arm picks the channel: called from the Initialize handler, which is the
+// only place the client's capabilities are known. Both channels keep
+// askPolicy ModeAsk — the difference is only HOW the question travels.
+func (a *acpAskUser) arm(form bool) {
+	a.form = form
 }
 
 func newACPAskUser(srv *acp.Server, timeout time.Duration) *acpAskUser {
@@ -75,10 +117,8 @@ func (a *acpAskUser) ask(q askuser.Question) askuser.Answer {
 	return answers[0]
 }
 
-// askBatch renders the whole batch as ONE form: one property per question,
-// which is what ACP's form mode is shaped for (a stack of pickers in the
-// TUI becomes a stack of fields in the client). Length of the returned
-// slice always equals len(b.Questions).
+// askBatch raises the questions on whichever channel initialize selected.
+// Length of the returned slice always equals len(b.Questions).
 func (a *acpAskUser) askBatch(b askuser.Batch) []askuser.Answer {
 	n := len(b.Questions)
 	cancelled := make([]askuser.Answer, n)
@@ -98,7 +138,16 @@ func (a *acpAskUser) askBatch(b askuser.Batch) []askuser.Answer {
 		fmt.Fprintf(os.Stderr, "acp: ask_user not delivered: no active turn to ask in\n")
 		return cancelled
 	}
+	if a.form {
+		return a.askViaForm(t, form, b, cancelled)
+	}
+	return a.askViaPermission(t, b, cancelled)
+}
 
+// askViaForm is the elicitation/create path: the whole batch rides as ONE
+// form (one property per question), which is what the protocol's form mode
+// is shaped for.
+func (a *acpAskUser) askViaForm(t *acpTurnScope, form int, b askuser.Batch, cancelled []askuser.Answer) []askuser.Answer {
 	params := buildElicitationParams(t.sessionID, form, b)
 	raw, err := a.srv.Call(t.ctx, acp.MethodElicitationCreate, params, a.timeout)
 	if err != nil {
@@ -111,6 +160,68 @@ func (a *acpAskUser) askBatch(b askuser.Batch) []askuser.Answer {
 		return cancelled
 	}
 	return answersFromElicitation(b, acp.ParseElicitationResponse(raw))
+}
+
+// askViaPermission is the request_permission fallback: one popup per
+// question, the question's own rows as options, a trailing Skip. Answers
+// are collected per question, so a Skip on question 1 does not abandon
+// question 2 — but a protocol-level ending (timeout / cancel / client
+// error) stops the batch, because there is no channel left to ask on.
+func (a *acpAskUser) askViaPermission(t *acpTurnScope, b askuser.Batch, cancelled []askuser.Answer) []askuser.Answer {
+	out := make([]askuser.Answer, len(b.Questions))
+	copy(out, cancelled)
+
+	for i, q := range b.Questions {
+		if q.MultiSelect {
+			// See the package comment: a per-row yes/no fan-out would read
+			// as a plain approval gate to an auto-accepting host, which
+			// would answer "yes" to every row. Cancelling is the honest
+			// answer; the model re-asks in prose.
+			fmt.Fprintf(os.Stderr, "acp: ask_user: multi-select question %d not carried over session/request_permission (client has no elicitation.form) — answering cancelled\n", i+1)
+			continue
+		}
+		raw, answered, err := a.askOnePermission(t, i, q)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "acp: ask_user unanswered (request_permission): %v\n", err)
+			return out // no channel left for the remaining questions
+		}
+		if !answered {
+			continue // Skip: this question stays cancelled, keep asking
+		}
+		out[i] = askuser.Answer{ChosenIDs: []string{raw}}
+	}
+	return out
+}
+
+// errAskStopped ends the fallback batch: the client closed the prompt
+// (cancelled outcome or an unreadable body), so there is no channel left to
+// ask the remaining questions on. Distinct from a transport error only for
+// the stderr wording.
+var errAskStopped = errors.New("acp: question cancelled by client")
+
+// askOnePermission sends one question as a request_permission prompt and
+// returns the picked option id. answered=false means the user skipped it
+// (our trailing reject_once); err means the batch must stop.
+func (a *acpAskUser) askOnePermission(t *acpTurnScope, index int, q askuser.Question) (picked string, answered bool, err error) {
+	params := buildAskPermissionParams(t.sessionID, index, q)
+	raw, err := a.srv.Call(t.ctx, acp.MethodRequestPermission, params, a.timeout)
+	if err != nil {
+		return "", false, err
+	}
+	id, ok := acp.ParsePermissionSelection(raw)
+	if !ok {
+		return "", false, errAskStopped
+	}
+	if id == askSkipOptionID {
+		return "", false, nil
+	}
+	if !knownID(q, id) {
+		// A closed menu: an id we never offered is a client bug, not a new
+		// answer — the same posture as ParsePermissionOutcome's
+		// unknown-echo-is-deny.
+		return "", false, nil
+	}
+	return id, true, nil
 }
 
 // buildElicitationParams turns a batch of questions into one form schema.
@@ -183,6 +294,82 @@ func buildElicitationParams(sessionID string, form int, b askuser.Batch) acp.Cre
 			Title:      "seek asks",
 			Properties: props,
 		},
+	}
+}
+
+// askSkipOptionID is the trailing "skip this question" row of the
+// request_permission fallback's menu. Not a legal askuser option id
+// (askuser.Validate reserves "other", and this spelling is ours), so it can
+// never collide with a model-provided row.
+const askSkipOptionID = "seek:skip"
+
+// buildAskPermissionParams turns ONE question into a
+// session/request_permission prompt.
+//
+// Shape decisions, each load-bearing for a real client:
+//
+//   - Every option is `allow_once` and the Skip row is `reject_once`. Two or
+//     more allow options of the SAME kind is what Paseo's
+//     isACPChooserRequest detects, and that detection does two things we
+//     want: it disables auto-accept (a headless host must not answer a
+//     question for the human) and it renders toolCall.content as the
+//     prompt body instead of a one-line approval title.
+//   - The question text goes in BOTH the title and a content block: the
+//     title is all martty-style overlays draw, the content block is what
+//     Paseo/Zed render in detail.
+//   - Option Description rides into the option's Name — request_permission
+//     options are a single `name` string, there is no secondary text.
+//
+// index makes the toolCallId unique per question in a batch (the schema
+// requires ids to be distinct within a session's prompts).
+func buildAskPermissionParams(sessionID string, index int, q askuser.Question) acp.RequestPermissionParams {
+	opts := make([]acp.PermissionOption, 0, len(q.Options)+1)
+	for _, o := range q.Options {
+		name := o.Label
+		if name == "" {
+			name = o.ID
+		}
+		if o.Description != "" {
+			name += " — " + o.Description
+		}
+		opts = append(opts, acp.PermissionOption{OptionID: o.ID, Name: name, Kind: acp.OptionAllowOnce})
+	}
+	opts = append(opts, acp.PermissionOption{
+		OptionID: askSkipOptionID,
+		Name:     "Skip this question",
+		Kind:     acp.OptionRejectOnce,
+	})
+
+	title := q.Question
+	if q.Header != "" {
+		title = q.Header + " — " + q.Question
+	}
+	var body []string
+	for _, o := range q.Options {
+		line := o.Label
+		if line == "" {
+			line = o.ID
+		}
+		if o.Description != "" {
+			line += " — " + o.Description
+		}
+		body = append(body, line)
+	}
+
+	return acp.RequestPermissionParams{
+		SessionID: sessionID,
+		ToolCall: acp.PermissionToolCall{
+			ToolCallID: fmt.Sprintf("ask-%d", index+1),
+			// "other" — the schema's ToolKind has no "question" member, and
+			// mislabelling it as execute/edit would make clients render a
+			// terminal/file affordance for a question.
+			Kind:  "other",
+			Title: title,
+			Content: []acp.ToolCallContentWrap{
+				{Type: "content", Content: acp.ContentBlock{Type: "text", Text: strings.Join(body, "\n")}},
+			},
+		},
+		Options: opts,
 	}
 }
 

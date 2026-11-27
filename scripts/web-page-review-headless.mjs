@@ -23,9 +23,10 @@
 // Env:  PAGE_REVIEW_GIT_REV   写进 manifest 的 git 短 rev（缺省 unknown）
 import { spawn } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { disposeHeadlessChrome } from './web-headless-chrome.mjs';
 
 const argv = process.argv.slice(2);
 const opt = (name, dflt) => {
@@ -95,23 +96,9 @@ const chrome = spawn(CHROME, [
 ], { stdio: ['ignore', 'ignore', 'pipe'] });
 const chromeErr = [];
 chrome.stderr.on('data', d => chromeErr.push(d));
-// 收尾：杀 Chrome，再删一次性 profile。不删的话每跑一轮在 $TMPDIR 留一份
-// （2026-11-27 实录：75 份 / 606MB，最早的是四天前的）。两个坑都实测过：
-// ① 默认的 SIGTERM 让 Chrome 走优雅关闭，删完它还在关闭途中把文件写回来
-//   （剩 652K）——一次性 profile 不需要体面收场，直接 SIGKILL；
-// ② 主进程死了，辅助进程（存储/网络服务）还要几十毫秒才跟着退，这期间照样
-//   落文件，rmSync 撞上就中途报错删一半（剩 620K，时有时无）——'exit' 钩子里
-//   只有同步手段，用阻塞式小睡重试。
-const cleanup = () => {
-  try { chrome.kill('SIGKILL'); } catch { /* already gone */ }
-  const sleep = new Int32Array(new SharedArrayBuffer(4));
-  for (let i = 0; i < 15; i++) {
-    try { rmSync(profile, { recursive: true, force: true }); return; } catch { /* 还有进程在写，再试 */ }
-    Atomics.wait(sleep, 0, 0, 100);
-  }
-  console.error(`warn: 一次性 Chrome profile 没删掉，留给系统清 temp：${profile}`);
-};
-process.on('exit', cleanup);
+// 收尾（杀 Chrome + 删一次性 profile）走全族共用的 disposeHeadlessChrome——
+// 为什么不是一句 rmSync 见该模块头注释。
+process.on('exit', () => disposeHeadlessChrome(chrome, profile));
 process.on('SIGTERM', () => process.exit(1));
 process.on('SIGINT', () => process.exit(1));
 
@@ -283,6 +270,10 @@ async function navigate(panel) {
     await backToChat();
     if (!RICH_SID) throw new Error('未传 --rich-sid');
     await evalJS(`document.querySelector('.sess-row[data-sid="${RICH_SID}"]').click()`);
+    // 就绪条件跟页面的对话流形态走：W6-3 起历史由 histTurn 渲染（.msg / .tcall），
+    // W6-5 起落在 #hist——驱动还等旧载体的类名/容器（.smsg、#sess-msgs）就是等
+    // 8 秒超时后硬拍，「富会话」镜头全没走完导航（W6-3/W6-4 的证据即如此，
+    // 2026-11-27 修）。
     await until('会话正文（W6-5 #hist）', `document.querySelectorAll('#hist .msg').length >= 4`);
     // 展开第一行工具调用：参数/结果面板进 DOM（懒建），夹具的「工具行」
     // 易烂元素才算进了镜头。
@@ -291,7 +282,7 @@ async function navigate(panel) {
       if (row) row.click();
       return !!row;
     })()`);
-    await until('工具树展开', `document.querySelectorAll('.tdetail:not([hidden])').length >= 1`);
+    await until('工具调用展开', `document.querySelectorAll('#hist .tdetail:not([hidden])').length >= 1`);
     return {};
   }
   // pane 型：已开则不点（togglePane 是开关，二连点会关掉）。按钮点了但

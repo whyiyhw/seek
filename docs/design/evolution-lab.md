@@ -1,7 +1,7 @@
 # W 试验田：I4 人审晋升闸闭环设计（evolution-lab）
 
 > 状态：📐 设计稿（2026-11-21，card `c_x5hpbn`，docs-only 零代码）。W 本体**未放行**——等 `c_2aymtn` 复测数（[`../prd/v8.md`](../prd/v8.md) §9.5 补记④）的人裁定，见 §5 冲突清单第 1 条。
-> 前置阅读：[`../prd/v8.md`](../prd/v8.md) §3 I4 / §4 柱 W / §9.5 R2 落地记录；[`../prd/feature-eval-v2.md`](../prd/feature-eval-v2.md)（E1 判定口径 / E2 标定 / E6 lane）；[`../../eval/README.md`](../../eval/README.md) §Judgment / §Calibration / §发版前跑什么。
+> 前置阅读：[`../prd/v8.md`](../prd/v8.md) §3 I4 / §4 柱 W / §9.5 R2 落地记录；[`../prd/archive/feature-eval-v2.md`](../prd/archive/feature-eval-v2.md)（E1 判定口径 / E2 标定 / E6 lane）；[`../../eval/README.md`](../../eval/README.md) §Judgment / §Calibration / §发版前跑什么。
 > 一句话：**core 在 worktree 里改壳（工具描述 / 系统提示段 / skill），从 main 树重放 eval v2 做配对 A/B，读数过机械 verifier 后交人审；人批准才进 main，分支永不自动出去。**
 
 ## 0. 定位与边界
@@ -125,7 +125,7 @@ doubt（如无人值守假 key 下裁判 401）**不阻塞**人审但带 caution
 | 验收项 | 落点 |
 |---|---|
 | ① 设计稿存在且含五节 | 本文件 §1–§5 对应卡面 ①改什么/②怎么重放/③晋升闸/④机制预算/⑤冲突清单 |
-| ② 与 v8.md / feature-eval-v2.md 无口径冲突或列清单 | §5（六条，1 阻塞 / 5 注记） |
+| ② 与 v8.md / archive/feature-eval-v2.md 无口径冲突或列清单 | §5（六条，1 阻塞 / 5 注记） |
 | ③ 未改 AGENTS.md | 本卡 diff 仅新增本文件 |
 | ④ go test ./... 绿 | docs-only，commit 前实跑留证（见卡面写回） |
 | ⑤ 机制预算预答、本卡零新增 | §4 |
