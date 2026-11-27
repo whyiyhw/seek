@@ -282,6 +282,10 @@
        仍比次级浅一档、但四底都 ≥4.5 的 #666b71（最低 4.62，soft 上）。 */
     --seek-fg-soft:#61666b;
     --seek-fg-dim: #666b71;
+    /* 状态色不取 §2 亮列：dsh 的 ok #22c55e / warn #f59e0b 在白底只有
+       2.3 / 2.2，err #ec1313 白底 4.5 但压 panel/soft 只有 4.3 / 3.9——亮底
+       上一律不过 AA，沿用 W5 的深值（白/panel/soft 三底均 ≥5:1）。暗底
+       反差大，才用 dsh 的饱和档。 */
     --seek-ok:    #14703c;
     --seek-warn:  #8a5a00;
     --seek-warn-bg:#fbf0d5;
@@ -770,10 +774,16 @@
      仍吃选中底（.cur 与 .arch 同特异性，本规则在其后）。 */
   .sess-row.arch:not(.cur) { background: var(--seek-inset); }
   .sess-row:focus-visible { outline: 1px solid var(--seek-line-focus); }
-  /* 悬停/聚焦才亮的行内操作组：底色取侧栏底，盖住底下文字避免叠字 */
+  /* 悬停/聚焦才亮的行内操作组。行有了悬停层之后它不能再靠底色盖字：补丁色
+     跟不了悬停层/选中层/归档底，会在提过一档的行上显出一块异色（亮偏浅、
+     暗偏深）。改成行自己让位——padding 落在行上而不是 .t1/.t2 上，行内布局
+     怎么改都成立。68 = 原右内边距 12 + 操作组占位 56（right 6 + 两钮 46 +
+     组内边距 4）。 */
   .sess-acts { position: absolute; right: 6px; top: 50%;
                transform: translateY(-50%); display: none; gap: 2px;
-               background: var(--seek-panel); padding: 2px; border-radius: 8px; }
+               padding: 2px; border-radius: 8px; }
+  .sess-row:hover, .sess-row:focus-within { padding-right: 68px; }
+  .sess-row.editing { padding-right: 12px; }   /* 改名态操作组已隐藏，输入框不让位 */
   .sess-row:hover .sess-acts, .sess-row:focus-within .sess-acts { display: flex; }
   .sess-acts button { padding: 0; font-size: 12px; }
   .sess-acts .ic { width: 13px; height: 13px; }
@@ -891,6 +901,9 @@
      它直接声明在 svg 上，不受父级这条 color 影响，语义色保留。 */
   .mem-row.cur .t2 { color: var(--seek-fg); }
   #mem-detail { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  /* 未选条目时元信息行与标签行是空的：不兜底会留下两条只有 padding 与下边框
+     的空带（2026-11-27 复核实录）。 */
+  #mem-meta:empty, #mem-tags:empty { display: none; }
   #mem-meta { padding: 6px 14px; border-bottom: 1px solid var(--seek-line); color: var(--seek-fg-dim); }
   #mem-tags { padding: 4px 14px; border-bottom: 1px solid var(--seek-line); }
   #mem-tags .chip { display: inline-block; background: var(--seek-panel); border: 1px solid var(--seek-line);
@@ -4628,7 +4641,7 @@ function renderTrend() {
   const x = i => (pts.length === 1 ? L + plotW / 2 : L + (plotW * i) / (pts.length - 1));
   const rows = [
     { cls: 'tokens', label: 'tok', v: p => (p.prompt_tokens || 0) + (p.completion_tokens || 0), f: fmtTok },
-    { cls: '', label: '$', v: p => p.cost_usd || 0, f: fmtUSD },
+    { cls: '', label: '成本', v: p => p.cost_usd || 0, f: fmtUSD },   // fmtUSD 自带 $：标签别再写 '$'
     { cls: 'cache', label: '缓存', v: p => (p.hit_ratio || 0) * 100, f: v => v.toFixed(0) + '%' },
   ];
   const svg = svgEl('svg', { viewBox: '0 0 ' + W + ' ' + H, width: W, height: H,

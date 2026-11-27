@@ -335,14 +335,32 @@ func buildSubagentRunner(opts subagentRunnerOpts) subagent.Runner {
 			turnCount  int
 			lastErr    error
 		)
+		// Subagent progress → parent ACP stream (paseo). The pump is a
+		// no-op unless this turn installed a sink (ACP lane only); every
+		// other lane keeps the old discard-on-drain behaviour byte-for-byte.
+		// Sync spawns derive runCtx from the caller's ctx, so the sink only
+		// reaches runs whose parent turn is still in flight — a background
+		// child derives from SessionCtx and never sees it.
+		progress := newSubagentProgressPump(ctx, job.SubSid)
 		events := sub.Prompt(ctx, job.UserPrompt)
 		for ev := range events {
 			switch e := ev.(type) {
+			case agent.MessageDelta:
+				// Reasoning and answer text both ride the client's
+				// reasoning region via agent_thought_chunk — the process
+				// is the point ("过程"), and the final answer already
+				// lands in the tool result.
+				progress.write(e.Delta)
+			case agent.ToolExecStart:
+				progress.note("→ " + e.Name)
+			case agent.ToolDelta:
+				progress.write(e.Delta)
 			case agent.TurnEnd:
 				// Effective model, not the parent's — a GLM-routed child
 				// prices at the GLM card (pricing.Cost keys off the model
 				// id; NoOffPeakDiscount keeps flat-rate lanes flat).
 				job.Tracker.Record(e.Usage, model, pricing.CurrentTier(time.Now()))
+				progress.flush()
 			case agent.AgentEnd:
 				totalUsage = e.Usage
 				turnCount = e.Turns
@@ -350,6 +368,7 @@ func buildSubagentRunner(opts subagentRunnerOpts) subagent.Runner {
 				lastErr = e.Err
 			}
 		}
+		progress.flush()
 		if lastErr != nil {
 			return subagent.RunnerResult{}, lastErr
 		}

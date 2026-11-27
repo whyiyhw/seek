@@ -1,6 +1,6 @@
 ### 同一份 PDF 的两次上传，解析结果并不总是完整——上传返回 id ≠ 全部页面已进上下文
-- **Saw**: F4 烟测（2026-11-18）同一份 2 页 PDF、同一字节内容，上传后立刻发问：多数运行 `prompt_tokens≈1941`（两页文字全在），但有一次只有 `1079`——第 1 页的事实答得出来，只存在于第 2 页的口令直接答 `NOT IN DOCUMENT`。同一进程再发一轮（`1102`）依旧没有第 2 页，说明不是「等一会儿就好」的异步补齐。`page_count` 又不返回（见上一条），客户端无法自检「解析是否完整」。
-- **Why**: 未定论。可能是服务端按页/按块切分解析并各自入索引，某一页在 id 返回时仍未就绪；也可能是解析有截断上限。反例也观察到过一次（`prompt_tokens≈1022` 时第 2 页事实仍答对），所以既不能假设「id 到手 = 全文可用」，也不能断言必然丢页。
-- **Fix**: 无代码改动。F4 的烟测只断言**第 1 页**的事实（`files_smoke_test.go` 里写死了原因），把「页 2 是否在场」留作观察而不是失败条件。**观测面（2026-11-19，卡 c_y2akdi）**：读口复核——[检索文件 `GET /files/{id}`](https://api-docs.deepseek.com/zh-cn/api/retrieve-file) 返回的 FileObject 只有 `id/object/bytes/created_at/filename/purpose`（`expires_at` 仅在上传时设了过期才出现），**没有 `page_count`**；[列出文件 `GET /files`](https://api-docs.deepseek.com/zh-cn/api/list-files) 同一份字段表；解析结果与原文件均不可下载。唯一会返回 `page_count` 的 [`POST /v1/tools/ocr`](https://api-docs.deepseek.com/zh-cn/api/ocr) 是**另一条路**——它不存进 Files API、也不交给对话模型，拿它的页数去对账本 file_id 的解析完整性属于串源，不做。故走客户端断言材料：transcript 每次上传记 `{file_id, 声称页数, 估旗}`（`FilePart.Pages`/`PagesEstimated` + marker 恒量化页数），同文件多次上传按内容寻址 asset 配对即可事后对账；对账另一半是运行时 usage 行的 prompt_tokens（tracker 只在内存、session 仅存累计值——逐轮 token 不落盘是已知边界）。
-- **Lesson**: e2e 断言要挑「最不容易被服务端实现细节削掉」的证据：同一页内的事实比「某一页存在」稳。真 API 测试里凡是依赖「解析完整性」的断言，都该先跑三次看稳定性。
-- **Refs**: `pkg/deepseek/files_smoke_test.go`；上一条 `page_count / expires_at` 缺失（同一族的「文档字段 ≠ 实际行为」）。
+- **Saw**: 烟测（2026-11-18）同一 2 页 PDF：多数 `prompt_tokens≈1941`，一次 `1079`——第 2 页口令答 `NOT IN DOCUMENT`，再发（`1102`）仍缺。
+- **Why**: 未定论——或某页未就绪，或截断；反例见过（`prompt_tokens≈1022` 仍答对）。
+- **Fix**: 烟测只断言第 1 页事实（`files_smoke_test.go`）；`GET /files/{id}`/`GET /files` 只有 `id/object/bytes/created_at/filename/purpose`（`expires_at` 仅设过才现）、无 `page_count`（卡 c_y2akdi；`POST /v1/tools/ocr` 不入 Files API）；transcript 记 `{file_id, 声称页数, 估旗}`（`FilePart.Pages` / `PagesEstimated`）对账。
+- **Lesson**: e2e 断言挑最不易被实现细节削掉的证据——同页内的事实比「某页存在」稳。
+- **Refs**: `pkg/deepseek/files_smoke_test.go`；上一条 `page_count / expires_at`。

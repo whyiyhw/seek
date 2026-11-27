@@ -92,6 +92,14 @@ case "$ADDR" in
 esac
 
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/seek-page-review.XXXXXX")" || exit 1
+# 沙盒路径只规范化一次，后面夹具、/bind、清理都用同一个串。macOS 的 TMPDIR
+# 带尾斜杠，mktemp 原样返回 `…/T//seek-page-review.X`：夹具拿这个串算项目 id，
+# 而 /bind 那头走 filepath.Abs 把双斜杠折叠了——两串不同即两个 id
+# （paths.ProjectID 按字节哈希、不规范化），后台面板就一直 project … not found
+# （2026-11-27 实录，main 上同样中招）。`cd && pwd` 只清多余分隔符、不解析
+# 符号链接，与 filepath.Abs 的 Clean 同口径；别换成 `pwd -P`——那会解到
+# /private/var，又对不上。
+TMP="$(cd "$TMP" && pwd)"
 HOME_DIR="$TMP/seekhome"
 PROJ="$TMP/proj"
 SERVE_PID=""
@@ -121,8 +129,9 @@ SID2="20261122-091500-bbbbprobe000002"
 SID3="20261122-090000-ccccthird000003"
 mkdir -p "$HOME_DIR/sessions" "$PROJ"
 
-# 项目 id = sha256(绝对路径)[:16]（paths.ProjectID 契约；/tmp 在 macOS 是
-# /private/tmp 的符号链接，mktemp 返回物理路径，两侧同源）。
+# 项目 id = sha256(绝对路径)[:16]（paths.ProjectID 契约：按字节哈希，不规范化）。
+# 夹具这串必须与 /bind 那头 filepath.Abs 的结果逐字节相同——靠上面的 TMP
+# 规范化保证，别在这里另解符号链接。
 hash16() {
   if command -v sha256sum >/dev/null 2>&1; then
     printf '%s' "$1" | sha256sum

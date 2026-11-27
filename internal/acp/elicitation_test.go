@@ -89,7 +89,7 @@ func TestClientCapabilities_SupportsElicitationForm(t *testing.T) {
 		{"elicitation null", `{"elicitation":null}`, false},
 		{"absent elicitation", `{"fs":{"readTextFile":false}}`, false},
 		{"empty object", `{}`, false},
-		{"paseo 0.17 baseline", `{"fs":{"readTextFile":false,"writeTextFile":false},"terminal":true}`, false},
+		{"paseo base capabilities (no elicitation)", `{"fs":{"readTextFile":false,"writeTextFile":false},"terminal":true}`, false},
 	}
 	for _, c := range cases {
 		var caps ClientCapabilities
