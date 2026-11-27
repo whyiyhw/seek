@@ -1249,15 +1249,15 @@ func TestWeb_PageChatFlowW63(t *testing.T) {
 func TestWeb_PageComposerW64(t *testing.T) {
 	page := string(webPage)
 	for _, need := range []string{
-		"border-radius: 22px",          // the card itself (form rule)
-		"max-width: 774px",             // card width == reading column frame
-		"border-radius: 999px",         // round send (+ attach/mic/chips)
-		`id="ws-chip"`,                 // workspace chip in the action row
-		`id="model-tag"`,               // model label (hidden until known)
-		"hero-t",                       // empty-state Hero title class
-		"chat-empty-on",                // the centering body class
-		"applyWsChip",                  // chip/placeholder follow binding
-		"先选一个工作区",                  // unbound plain-text send → picker copy
+		"border-radius: 22px",  // the card itself (form rule)
+		"max-width: 774px",     // card width == reading column frame
+		"border-radius: 999px", // round send (+ attach/mic/chips)
+		`id="ws-chip"`,         // workspace chip in the action row
+		`id="model-tag"`,       // model label (hidden until known)
+		"hero-t",               // empty-state Hero title class
+		"chat-empty-on",        // the centering body class
+		"applyWsChip",          // chip/placeholder follow binding
+		"先选一个工作区",              // unbound plain-text send → picker copy
 	} {
 		if !strings.Contains(page, need) {
 			t.Errorf("embedded page lost the W6-4 composer piece %q (c_ljtmy4)", need)
