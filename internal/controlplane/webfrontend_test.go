@@ -1262,6 +1262,24 @@ func TestWeb_PageChatFlowW63(t *testing.T) {
 			t.Errorf("embedded page lost the W6-3 reading-column geometry rule %q (c_ovly6d rework)", need)
 		}
 	}
+	// 返工第 2 轮（2026-11-27）：80% 上限必须落在气泡规则上。写进 `.msg.user`
+	// 是白写——`#list > *, #sess-msgs > *` 的 (1,0,0) 会盖掉 (0,2,0) 的
+	// max-width，长气泡照旧撑满 768 列（图解 06/13/20 实证）。移动端的 94%
+	// 同理，一起钉住，别让它下次又落回消息盒上。
+	if !strings.Contains(page, ".msg.user .bub { background: var(--seek-user-bubble); border-radius: 22px;\n                   padding: 10px 16px; max-width: 80%;") {
+		t.Errorf("user bubble rule lost max-width: 80%% — the cap must sit on .msg.user .bub, not on the (1,0,0)-outranked .msg.user box (c_ovly6d rework 2)")
+	}
+	for _, gone := range []string{
+		"\n              align-items: flex-end; max-width: 80%; }",
+		"    .msg.user { max-width: 94%",
+	} {
+		if strings.Contains(page, gone) {
+			t.Errorf("page still caps the user MESSAGE box instead of the bubble (%q) — #list > * outranks it, the cap never applies (c_ovly6d rework 2)", gone)
+		}
+	}
+	if !strings.Contains(page, ".msg.user .bub { max-width: 94%; }") {
+		t.Error("mobile user bubble lost its own max-width: 94% rule (c_ovly6d rework 2)")
+	}
 }
 
 // TestWeb_PageInputEnhancements pins the c_7lsngm input contract: a

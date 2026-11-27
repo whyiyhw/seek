@@ -367,11 +367,15 @@
   #list > *, #sess-msgs > * { width: 100%; max-width: 768px; }
   .msg { position: relative; margin: 2px 0; max-width: 100%; }
   /* 用户气泡右对齐的是阅读列里的气泡，不是整条消息：消息盒由上面的容器规则居中在
-     768 列里，align-self:flex-end 会把整个 768 盒推到容器右缘——气泡就跑出阅读列。 */
+     768 列里，align-self:flex-end 会把整个 768 盒推到容器右缘——气泡就跑出阅读列。
+     max-width 上限同理必须落在气泡上：消息盒由 #list > * 那条 (1,0,0) 规则给
+     width:100%/768，(0,2,0) 的 .msg.user 再写 max-width:80% 只是白写（输给容器
+     规则）；气泡自己拿 80%，长气泡的左缘才真正离开阅读列左缘。 */
   .msg.user { display: flex; flex-direction: column;
-              align-items: flex-end; max-width: 80%; }
+              align-items: flex-end; }
   .msg.user .bub { background: var(--seek-user-bubble); border-radius: 22px;
-                   padding: 10px 16px; white-space: pre-wrap; word-break: break-word; }
+                   padding: 10px 16px; max-width: 80%;
+                   white-space: pre-wrap; word-break: break-word; }
   .msg.user .thumbs { justify-content: flex-end; margin: 0 0 4px; }
   .msg.seek { padding: 2px 0; }
   .msg.hint { color: var(--seek-fg-dim); font-size: 13px; line-height: 20px;
@@ -1056,7 +1060,7 @@
                           border-right: 0; border-bottom: 1px solid var(--seek-line); }
     /* 气泡放宽一档：单栏下代码块（pre 本就 overflow-x:auto，markdown
        卡同容器）多一截横向空间 */
-    .msg.user { max-width: 94%; }
+    .msg.user .bub { max-width: 94%; }
     /* 设置面板：label 上 value 下堆叠，value 满宽按 ellipsis 折——路径
        /hash 不再硬裁或碎行（全文悬停 title 可见，见 setRow） */
     .set-row { flex-direction: column; gap: 1px; padding: 5px 0; }
