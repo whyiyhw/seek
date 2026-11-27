@@ -778,6 +778,9 @@ func TestWeb_PageMemoryStats(t *testing.T) {
 		"q('/rpc')",       // rides the same token'd /rpc route
 		"id=\"mem-proj\"", // the two pickers exist
 		"id=\"stat-sess\"",
+		// 未选条目时元信息行与标签行是空的——不兜底会留下两条只有 padding
+		// 与下边框的空带（2026-11-27 复核实录）。
+		"#mem-meta:empty, #mem-tags:empty { display: none; }",
 	} {
 		if !strings.Contains(page, need) {
 			t.Errorf("embedded page lost the memory/stats piece %q (W4.5)", need)
@@ -819,6 +822,9 @@ func TestWeb_PageStatsTrend(t *testing.T) {
 		"TREND_WINDOWS",      // time-window switching
 		"还没有历史会话",            // empty-state copy
 		"折线需要 ≥2 个点",         // one-point boundary copy
+		// fmtUSD 自带 $：成本行的标签写成 '$' 会渲染成「$ $0.00xx」（行首
+		// 标签与悬停读数共用它，2026-11-27 复核实录）。
+		"label: '成本', v: p => p.cost_usd || 0, f: fmtUSD",
 	} {
 		if !strings.Contains(page, need) {
 			t.Errorf("embedded page lost the trend-chart piece %q (c_6xktw4)", need)

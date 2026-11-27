@@ -781,6 +781,9 @@
      它直接声明在 svg 上，不受父级这条 color 影响，语义色保留。 */
   .mem-row.cur .t2 { color: var(--seek-fg); }
   #mem-detail { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  /* 未选条目时元信息行与标签行是空的：不兜底会留下两条只有 padding 与下边框
+     的空带（2026-11-27 复核实录）。 */
+  #mem-meta:empty, #mem-tags:empty { display: none; }
   #mem-meta { padding: 6px 14px; border-bottom: 1px solid var(--seek-line); color: var(--seek-fg-dim); }
   #mem-tags { padding: 4px 14px; border-bottom: 1px solid var(--seek-line); }
   #mem-tags .chip { display: inline-block; background: var(--seek-panel); border: 1px solid var(--seek-line);
@@ -4440,7 +4443,7 @@ function renderTrend() {
   const x = i => (pts.length === 1 ? L + plotW / 2 : L + (plotW * i) / (pts.length - 1));
   const rows = [
     { cls: 'tokens', label: 'tok', v: p => (p.prompt_tokens || 0) + (p.completion_tokens || 0), f: fmtTok },
-    { cls: '', label: '$', v: p => p.cost_usd || 0, f: fmtUSD },
+    { cls: '', label: '成本', v: p => p.cost_usd || 0, f: fmtUSD },   // fmtUSD 自带 $：标签别再写 '$'
     { cls: 'cache', label: '缓存', v: p => (p.hit_ratio || 0) * 100, f: v => v.toFixed(0) + '%' },
   ];
   const svg = svgEl('svg', { viewBox: '0 0 ' + W + ' ' + H, width: W, height: H,

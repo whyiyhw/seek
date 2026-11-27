@@ -208,6 +208,19 @@ async function setViewport(view) {
   // 会顶着手机宽时算出的「已收起」态（首跑实测踩中）。按目标宽度设回
   // 自然态：桌面展开、手机收起（真人首访在各自宽度下看到的样子）。
   await evalJS(`setSideCollapsed(${view.name === 'mobile'})`);
+  // 侧栏宽度有 .15s 过渡：不等它走完就拍，紧接着的空态镜头会把半展开的侧栏
+  // 定格成 117–167px（2026-11-27 实录，main 与 W6-1 同样中招）。等宽度连续
+  // 两次读数相同再返回——不写死目标宽度（各分支 260/280、轨 44/56 都有），
+  // 先空等一帧再读，免得过渡还没起步就被判成「已稳定」。
+  await delay(60);
+  let prev = -1;
+  for (let i = 0; i < 40; i++) {
+    const w = await evalJS(`document.getElementById('side').getBoundingClientRect().width`);
+    if (w === prev) return;
+    prev = w;
+    await delay(40);
+  }
+  throw new Error(`侧栏宽度 2s 内未落定（最后一次读数 ${prev}px）`);
 }
 async function until(what, expr, ms = 8000) {
   const t0 = Date.now();
