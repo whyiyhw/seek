@@ -24,7 +24,7 @@
 // 退出码：0 全部断言过；1 启动/断言失败（stderr 带 DOM 现场）。
 import { spawn } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -38,6 +38,13 @@ const args = argv.filter((a, i) => a !== '--chrome' && i !== chromeIdx + 1);
 const pageUrl = args[0];
 const LONG_SID = args[1];
 const TINY_SID = args[2];
+// 桩 seek 的调用日志（web-sessions-manual.sh 经 PATH 前置装的桩，c_mo7quv 返工）：
+// 景 L 用它拿服务端证据。没传 = 景 L 里依赖它的断言会红，不静默空过。
+const stubIdx = argv.indexOf('--stub-log');
+const STUB_LOG = stubIdx > 0 ? argv[stubIdx + 1] : '';
+// 夹具会话的项目目录（沙盒内，manual.sh 建好传进来）。
+const projIdx = argv.indexOf('--proj');
+const PROJ = projIdx > 0 ? argv[projIdx + 1] : '/tmp/w44-fixture';
 const N_LONG = 1234;   // 与 web-sessions-manual.sh 夹具同源（50/页 → 24 整页+尾页 34）
 const N_ALL = 32;      // 夹具总数：长 + 短 + 30 条 old（侧栏 30/页 → 有「加载更多」）
 const SESS_PAGE = 30;
@@ -228,6 +235,21 @@ async function until(what, pred, ms) {
   return s;
 }
 
+// until 的异步谓词版。until() 的谓词吃的是 snapshot()——写成 async（里面自己
+// fetch /state、读桩日志）时返回的是 Promise，恒为真，循环当场退出，断言空过
+// （景 L 首版的 b/d 即如此，2026-11-27 验证 blocker ②）。凡谓词要 await 的一律
+// 走这里；返回谓词第一次给出的真值。
+async function untilEv(what, pred, ms) {
+  const t0 = Date.now();
+  for (;;) {
+    let v = null;
+    try { v = await pred(); } catch { /* 瞬时态 */ }
+    if (v) return v;
+    if (Date.now() - t0 > ms) throw new Error(`等 ${what} 超时（${ms}ms）`);
+    await delay(120);
+  }
+}
+
 // 景 0：基线 —— 侧栏常驻展开 + 列表 30 行（updated 倒序）+ 聊天面原样。
 trace('景 0：基线侧栏');
 try {
@@ -369,7 +391,7 @@ try {
 } catch (e) { ck('收起展开 + 刷新保持', false, e.message); await dump(); }
 
 // 景 6：组头 = 「去这个工作区」（工作区树卡）。夹具里 32 条会话同属一个
-// 工作区（cwd 都是 /tmp/w44-fixture），未绑定状态下点组头 → 该组有会话，
+// 工作区（cwd 都是同一个沙盒内的 w44-fixture），未绑定状态下点组头 → 该组有会话，
 // 所以发的是 /resume <最新一条>（绑定跟着会话自记的 cwd 走，上下文不丢），
 // 而不是 /bind（/bind 会重置会话——点一下组头就清掉正在进行的对话是错的）。
 trace('景 6：点组头 = 去这个工作区');
@@ -387,67 +409,142 @@ try {
   const st = await evalJS(`fetch('/state', {headers: {'X-Seek-Conversation':
     localStorage.getItem('seek-web-conv') || ''}}).then(r => r.json())`);
   ck('绑定会话翻成组内最新一条', st.session === LONG_SID, JSON.stringify(st.session));
-  ck('绑定项目跟到会话自记的 cwd', st.project === '/tmp/w44-fixture', String(st.project));
+  ck('绑定项目跟到会话自记的 cwd', st.project === PROJ, String(st.project));
   const after = await until('组头标当前', s => s.groups.some(g => g.cur), 8000);
   ck('当前工作区的组头高亮（左缘 accent 条）', after.groups.find(g => g.cur)?.name === 'w44-fixture',
     JSON.stringify(after.groups.map(g => g.name + '|' + g.cur)));
 } catch (e) { ck('组头去工作区', false, e.message); await dump(); }
 
-// 景 L（W6-5 懒 resume 四则）：a) 看≠切；b) 发送先 /resume 再正文；
-// c) 生成中看别处/切回不丢；d) ＋新会话懒执行。
+// 景 L（W6-5 懒 resume 四则）：a) 看≠切；b) 发送先 /resume 再正文；c) 生成中
+// 看别处/切回不丢；d) ＋新会话懒执行。
+// 证据口径（2026-11-27 返工，验证 blocker ②）：b/d 不再只看页面自述——桩 seek
+// 把每次被拉起的参数记进 STUB_LOG，执行器拉子进程时带 -resume <sid>：正文那
+// 一行必须带着所看会话的 sid（= /resume 已先生效），且 /resume 的服务端应答在
+// 转录区里先于正文；c 用桩「慢流」的真流式增量（8 段 × 0.5s），不再伪造 run。
+// 凡谓词要 await 的走 untilEv——until() 的谓词写成 async 会恒真、断言空过。
 trace('景 L：懒 resume');
+const SLOW_FULL = ['一', '二', '三', '四', '五', '六', '七', '八'].map(s => '慢流第' + s + '段。').join('');
+const stubLog = async () => {
+  if (!STUB_LOG) return [];
+  try { return readFileSync(STUB_LOG, 'utf8').split('\n').filter(Boolean); }
+  catch { return []; }   // 桩还没被拉起过
+};
+const state = () => evalJS(`fetch('/state', {headers: {'X-Seek-Conversation':
+  localStorage.getItem('seek-web-conv') || ''}}).then(r => r.json())`);
+const typeIn = text => evalJS(`(() => { const el = document.getElementById('input'); el.value = ${JSON.stringify(text)}; el.dispatchEvent(new Event('input')); return 'ok'; })()`);
+const clickSend = () => evalJS(`document.getElementById('send').click()`);
+const pressEnter = () => evalJS(`document.getElementById('input').dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true, cancelable: true}))`);
+const listText = () => evalJS(`document.getElementById('list').textContent`);
 try {
   // d) ＋ 新会话：只落空态 Hero，不发 /new（此刻无绑定会话在跑、也不该有指令出门）
   await evalJS(`document.getElementById('side-new').click()`);   // 夹具已绑定（景 6）→ 走 fresh 懒路径
-  const freshOn = await until('fresh 空态', () => evalJS(`document.body.classList.contains('fresh')`), 5000);
-  ck('d) ＋新会话只落空态 Hero（不发 /new）', !!freshOn, '');
-  const noCmd = await evalJS(`document.getElementById('list').textContent`);
+  ck('d) ＋新会话只落空态 Hero', await evalJS(`document.body.classList.contains('fresh')`), '');
+  const noCmd = await listText();
   ck('d) fresh 态转录区静默（无 /new 回执）', !noCmd.includes('新会话已开') && !noCmd.includes('/new'), noCmd.slice(-80));
-  // d 续) 发第一条才真正 /new：草稿箱里打字发送 → /state 会话清空
-  await evalJS(`(() => { const el = document.getElementById('input'); el.value = '懒新会话第一条'; el.dispatchEvent(new Event('input')); })()`);
-  await evalJS(`document.getElementById('send').click()`);
-  const st1 = await until('/new 生效', async () => {
-    const st = await evalJS(`fetch('/state', {headers: {'X-Seek-Conversation':
-      localStorage.getItem('seek-web-conv') || ''}}).then(r => r.json())`);
-    return !st.session ? st : null;
-  }, 10000);
-  ck('d) 第一条消息触发 /new（绑定会话清空）', !!st1, '');
+  ck('d) fresh 态不出指令（桩未被拉起）', (await stubLog()).length === 0, JSON.stringify(await stubLog()));
+  // d 续) 发第一条才真正 /new → 绑定会话清空；正文作为新会话首轮出门（不带 -resume）
+  await typeIn('懒新会话第一条'); await clickSend();
+  const d1 = await untilEv('第一条消息出门', async () => {
+    const hit = (await stubLog()).filter(l => l.includes('懒新会话第一条'));
+    return hit.length === 1 ? hit[0] : null;
+  }, 12000);
+  ck('d) 第一条消息确实出门，且是新会话首轮（/new 先行，无 -resume）', !d1.includes('-resume'), d1);
+  const stD = await state();
+  ck('d) /new 生效（绑定会话清空）', !stD.session, JSON.stringify(stD.session));
+  const dReply = await untilEv('桩应答', () => listText().then(t => t.includes('桩应答：懒新会话第一条')), 8000);
+  ck('d) 桩应答到达实时面', dReply === true, (await listText()).slice(-80));
   await evalJS('viewLive()');
 
   // a) 看历史不动绑定
   await clickRow(TINY_SID);
   await until('短会话历史', s => s.nmsgs === 2, 8000);
-  const stA = await evalJS(`fetch('/state', {headers: {'X-Seek-Conversation':
-    localStorage.getItem('seek-web-conv') || ''}}).then(r => r.json())`);
+  const stA = await state();
   ck('a) 看历史：/state 绑定不变（看≠切）', !stA.session, JSON.stringify(stA.session));
+  const nA = (await stubLog()).length;
 
-  // c) 生成中闸 + 切回不丢：伪造活跃 run（runBubble 直接进 runs 表）
-  await evalJS(`runBubble('probe-run'); 'ok'`);
-  await evalJS(`(() => { const el = document.getElementById('input'); el.value = '生成中不该发'; el.dispatchEvent(new Event('input')); })()`);
-  await evalJS(`document.getElementById('send').click()`);
-  await until('生成中提示', () => evalJS(`document.getElementById('list').textContent.includes('生成中')`), 5000);
+  // c) 生成中看别处（真慢流）：发送钮禁用 + composer 说明；回车也发不出去，
+  //    提示落在可见的 #hist；看历史期间流跑完，切回全文完整。
+  await evalJS('viewLive()');
+  await typeIn('慢流'); await clickSend();
+  ck('c) 慢流开始（实时面出现流式泡）',
+    await untilEv('流式泡', () => evalJS(`!!document.querySelector('#list .msg.streaming')`), 8000) === true, '');
+  await clickRow(TINY_SID);                       // 生成中看别处
+  await until('短会话历史', s => s.nmsgs === 2, 8000);
+  const gate = await evalJS(`(() => { const b = document.getElementById('send');
+    return { disabled: b.disabled, title: b.title, ph: document.getElementById('input').placeholder,
+      viewing: document.body.classList.contains('viewing') }; })()`);
+  ck('c) 生成中看别处：发送钮禁用', gate.viewing && gate.disabled === true, JSON.stringify(gate));
+  ck('c) composer 说明「当前会话生成中」', gate.ph.includes('当前会话生成中'), gate.ph);
+  await typeIn('生成中不该发'); await pressEnter();
+  const notice = await untilEv('可见的生成中提示', () => evalJS(`(() => {
+    const h = document.querySelector('#hist .msg.hint');
+    return h && h.textContent.includes('生成中') && h.getClientRects().length > 0 ? h.textContent : ''; })()`), 5000);
+  ck('c) 回车被拦：提示落在可见的 #hist（不是隐藏的 #list）', !!notice, String(notice));
   const kept = await evalJS(`document.getElementById('input').value`);
-  ck('c) 生成中点别处发送被拦 + 草稿保留', kept === '生成中不该发', `draft=${kept}`);
-  await clickRow(LONG_SID);          // 看长会话（run 还挂着）
-  await until('长会话历史', s => s.nmsgs === 50, 8000);
-  await evalJS('viewLive()');        // 切回实时
-  const live = await evalJS(`!!document.querySelector('#list .msg.streaming')`);
-  ck('c) 切回实时视图流式泡还在（live DOM 不销毁）', live, '');
-  await evalJS(`closePhantom('probe-run'); 'ok'`);   // 清伪造 run
+  ck('c) 草稿保留', kept === '生成中不该发', `draft=${kept}`);
+  ck('c) 看历史期间慢流跑完（流式泡收口）',
+    await untilEv('慢流收口', () => evalJS(`!document.querySelector('#list .msg.streaming')`), 15000) === true, '');
+  await evalJS('viewLive()');                      // 切回实时
+  // 收口时终文本直接渲进气泡本身（renderBody(r.el, …)），不再挂在 .txt 子节点下。
+  const liveText = await evalJS(`[...document.querySelectorAll('#list .msg.seek')].map(e => e.textContent).join('|')`);
+  ck('c) 切回实时：慢流 8 段全文完整（看历史期间的增量不丢）', liveText.includes(SLOW_FULL), liveText.slice(-140));
+  const after = await evalJS(`(() => ({ ph: document.getElementById('input').placeholder,
+    streaming: !!document.querySelector('#list .msg.streaming') }))()`);
+  ck('c) 流收口后闸解除（占位复位）', !after.ph.includes('生成中') && !after.streaming, JSON.stringify(after));
+  const cLog = (await stubLog()).slice(nA);
+  ck('c) 看历史期间只有「慢流」出了门（回车那条没发出去）',
+    cLog.length === 1 && cLog[0].includes('慢流') && !cLog.some(l => l.includes('生成中不该发')), JSON.stringify(cLog));
 
   // b) 发送先 /resume 再正文：以 TINY 为例（当前无绑定会话 → /resume TINY）
   await clickRow(TINY_SID);
   await until('短会话历史', s => s.nmsgs === 2, 8000);
-  await evalJS(`(() => { const el = document.getElementById('input'); el.value = '接着这条说'; el.dispatchEvent(new Event('input')); })()`);
-  await evalJS(`document.getElementById('send').click()`);
-  const stB = await until('/resume 生效', async () => {
-    const st = await evalJS(`fetch('/state', {headers: {'X-Seek-Conversation':
-      localStorage.getItem('seek-web-conv') || ''}}).then(r => r.json())`);
+  await typeIn('接着这条说'); await clickSend();
+  const stB = await untilEv('/resume 生效', async () => {
+    const st = await state();
     return st.session === TINY_SID ? st : null;
   }, 12000);
   ck('b) 发送触发 /resume（绑定切到所看会话）', !!stB, JSON.stringify(stB && stB.session));
   const v = await until('回实时面', s => !s.detail, 5000);
   ck('b) 收口后回实时视图（正文在直播面）', !v.detail, '');
+  const bLines = await untilEv('正文被子进程执行', async () => {
+    const hit = (await stubLog()).filter(l => l.includes('接着这条说'));
+    return hit.length >= 1 ? hit : null;
+  }, 12000);
+  ck('b) 正文在 /resume 生效之后才出门：子进程带所看会话的 -resume，且只拉起一次',
+    bLines.length === 1 && bLines[0].includes('-resume ' + TINY_SID), JSON.stringify(bLines));
+  const order = await untilEv('/resume 应答先于正文', () => evalJS(`(() => {
+    const kids = [...document.querySelectorAll('#list > *')];
+    const ack = kids.findIndex(k => k.textContent.includes('已续接会话'));
+    const you = kids.findIndex(k => k.classList.contains('user') && k.textContent.includes('接着这条说'));
+    return ack >= 0 && you > ack ? { ack, you } : null; })()`), 8000);
+  ck('b) 顺序：/resume 的服务端应答在转录区里先于正文', !!order, JSON.stringify(order));
+  const bReply = await untilEv('桩应答', () => listText().then(t => t.includes('桩应答：接着这条说')), 8000);
+  ck('b) 正文送达并被应答', bReply === true, (await listText()).slice(-80));
+
+  // b 失败路径) /resume 出错 → 草稿保留、转录区出一行红字、正文不发（卡面做②）。
+  // 服务端对存在的 sid 不会拒 /resume，这里在页面侧把那一次 POST 拦成 500。
+  await clickRow(LONG_SID);                        // 绑定已是 TINY → 看长会话 = 看别处
+  await until('长会话历史', s => s.nmsgs === 50, 8000);
+  await evalJS(`(() => { window.__origFetch = window.fetch;
+    window.fetch = (u, o) => (o && o.body && String(o.body).includes('/resume ') && String(u).includes('/msg')
+      ? Promise.resolve(new Response('', {status: 500})) : window.__origFetch(u, o));
+    return 'ok'; })()`);
+  await typeIn('这条不该发出去'); await clickSend();
+  const err = await untilEv('可见的红色错误行', () => evalJS(`(() => {
+    const e = document.querySelector('#hist .msg.err');
+    if (!e || !e.textContent.includes('草稿已保留') || e.getClientRects().length === 0) return '';
+    const probe = document.createElement('span'); probe.style.color = 'var(--seek-err)'; document.body.appendChild(probe);
+    const red = getComputedStyle(probe).color; probe.remove();
+    return getComputedStyle(e).color === red ? e.textContent : 'not-red:' + getComputedStyle(e).color; })()`), 5000);
+  ck('b 失败路径) 看历史态的错误行落在可见的 #hist，且是红字', !!err && !String(err).startsWith('not-red:'), String(err));
+  await evalJS(`(() => { window.fetch = window.__origFetch; return 'ok'; })()`);   // 无论断言结果都还原
+  const keptE = await evalJS(`document.getElementById('input').value`);
+  ck('b 失败路径) 草稿保留', keptE === '这条不该发出去', `draft=${keptE}`);
+  const stE = await state();
+  const sentE = (await stubLog()).filter(l => l.includes('这条不该发出去'));
+  ck('b 失败路径) 绑定未切、正文没出门', stE.session === TINY_SID && sentE.length === 0,
+    JSON.stringify({ session: stE.session, sent: sentE }));
+  await evalJS(`(() => { const el = document.getElementById('input'); el.value = ''; el.dispatchEvent(new Event('input')); viewLive(); return 'ok'; })()`);
 } catch (e) { ck('懒 resume 景', false, e.message); await dump(); }
 
 // 景 7：回聊天 —— 会话正文收起，聊天面/输入框原样（侧栏是加法，零回归）。
