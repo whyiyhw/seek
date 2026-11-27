@@ -33,7 +33,7 @@ seek 支持把图片**原样**发给多模态模型：剪贴板截图、本地�
 **能力判定只有一处**：`internal/modelcap.Vision(model)`。两层来源——
 
 1. 编译期静态表：各车道的默认模型（`deepseek-flash` / OpenCode 与 OpenDesign 的 `deepseek-v4.1-flash` / `claude-*` / `gpt-4o*` / `gemini-*`），外加 OpenDesign 菜单里每个实测能收图的 id（见 [guide-config.md](guide-config.md) §3）。
-2. 运行时 grant：OpenCode Go 的目录刷新（`internal/opencatalog`）按网关自己声明的 `modalities.input` 装进来——所以该车道里任何标了 `vision` 的模型（`kimi-k3`、`glm-5.3-flash`、`hy4`…）开箱可用，不用等 seek 发版。grant 只做**升级**不做降级（旧缓存里根本没有这个字段，缺席不能当成"不支持"）。OpenDesign 车道**没有**动态刷新，它的能力全部落在静态表里。
+2. 运行时 grant：OpenCode Go 的目录刷新（`internal/opencatalog`）按网关自己声明的 `modalities.input` 装进来——所以该车道里任何标了 `vision` 的模型（`kimi-k3`、`glm-5.3-flash`、`hy4`、`hy4-flash-free`…）开箱可用，不用等 seek 发版。**安装条件是「这台机器有 OpenCode 凭证」，不是「本次启动落在 opencode 车道」**：「deepseek 启动 + 会话内 `session/set_config_option` 切到 opencode 模型」这种形态同样会装，否则目录独有的 id 会被按 deny-by-default 判成不支持视觉（c_nfeloo）。grant 只做**升级**不做降级（旧缓存里根本没有这个字段，缺席不能当成"不支持"）。OpenDesign 车道**没有**动态刷新，它的能力全部落在静态表里。
 
 未知模型按"不支持"处理（宁可一条 in-band 提示，也不要一个 400 毁掉整回合）。让某个自定义 id 收图：若它在 OpenCode 目录里，刷新即生效；否则等静态表补行。
 

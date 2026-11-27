@@ -68,7 +68,7 @@ write → plan(complete) → /exit → `-resume` 状态折叠**。判分全部�
 `record_only: false` + `lane-release.txt` 取消本行注释。**在此之前不进
 release lane**：名单每一行都当闸门读，把 record-only 案例写进闸门只会让闸门
 永久绿。本表 2026-11-25 的假 key 5 轮复跑（5/5 绿，`RECORD … record-only`，
-证据 `.butler-evidence-c_3xyt7w/plan-e2e-5round-run.log`）证明 fixture 侧确定性，
+证据 `docs/evidence/c_3xyt7w/plan-e2e-5round-run.log`）证明 fixture 侧确定性，
 **不是**真 key baseline。
 
 ## 首跑即抓到真 bug（baseline 的意义）
