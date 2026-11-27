@@ -1,6 +1,6 @@
 ### README hero SVG clipped on the right on GitHub — its monospace is wider than local Menlo
-- **Saw**: a hand-authored terminal-style banner (`examples/hero.svg`) fit perfectly when rasterised locally (qlmanage / Menlo), but GitHub's README render clipped the right edge — the tagline lost its last word and the status strip was cut off
-- **Why**: GitHub renders `<text>` in an inline-referenced SVG with ITS OWN (wider) monospace, not the macOS Menlo that `qlmanage` uses, so lines sized to "just fit" the 1200 viewBox locally overflow it on GitHub. Compounding it: adding `width`/`height` attrs to a viewBox-only SVG made `qlmanage` mis-scale (zoom + clip), which masked the real cause
-- **Fix**: keep the SVG **viewBox-only** (no `width`/`height`) and shorten every text line well under the viewBox width so any reasonable monospace fits with margin to spare. `examples/hero.svg`
-- **Lesson**: never size SVG `<text>` to "just fit" against a local rasteriser — the consumer (GitHub, another OS) picks a different font with a different advance width and overflows. Leave generous horizontal margin, or convert text to paths if exact width matters. `qlmanage` is NOT a faithful preview of GitHub's SVG font; verify the actual GitHub render
+- **Saw**: a hand-authored terminal banner (`examples/hero.svg`) fit when rasterised locally (qlmanage / Menlo) but GitHub's README render clipped the right edge — tagline lost its last word, status strip cut off.
+- **Why**: GitHub renders `<text>` with its own wider monospace, so lines sized to just fit the 1200 viewBox locally overflow on GitHub; adding `width`/`height` to a viewBox-only SVG also made `qlmanage` mis-scale, masking the cause.
+- **Fix**: keep the SVG viewBox-only (no `width`/`height`) and shorten every text line well under the viewBox width so any monospace fits with margin. `examples/hero.svg`
+- **Lesson**: never size SVG `<text>` to just fit against a local rasteriser — the consumer picks a different advance width; leave margin or convert to paths. `qlmanage` is not a faithful preview of GitHub's SVG font.
 - **Refs**: `examples/hero.svg`; sibling entry above (pixel block-art portability)

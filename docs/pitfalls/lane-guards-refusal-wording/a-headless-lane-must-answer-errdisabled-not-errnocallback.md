@@ -1,6 +1,6 @@
 ### 无头车道要给模型 ErrDisabled（可执行指令），不是 ErrNoCallback（"程序错误"）
-- **Saw**: 2026-11-23，paseo 驱动的 `seek acp` 会话里模型调 `ask_user`，工具结果回来是 `askuser: no callback registered (programming error)`。模型视之为自己的用法错误，重试同一个调用。同一条文案在 `-p` print 车道、`seek -rpc`、`goal`、`autopilot` 全部成立（坑 #1133 / FC-1 记过 print 半边）。
-- **Why**: `askPolicy := askuser.New(askuser.ModeAsk)` 在 `cmd/seek/main.go` 分支之前构造，所有车道共用；只有 TUI 路径在 `tui.Run` 之前 `SetAskFn`。`acpOptions` 里根本没有 askPolicy 字段——结构上就接不到。于是「有人可问」与「没人可问」两种情形落进同一个分支，报的却是最少见的那种原因（接线错误）。
-- **Fix**: 默认反转。`askPolicy` 出生即 `askuser.ModeDisabled`，TUI 在自己入口（`tui.Run` 前那段接线）显式 `askPolicy.SetMode(askuser.ModeAsk)`。无头车道因此拿到 `ErrDisabled`——"interactive question not available in this mode — rephrase as a plain-text question in your reply"，模型据此把问题改写进正文。钉死用例 `cmd/seek/askuser_lane_test.go`：真二进制跑 print 与 ACP 两条车道，断言 `tool_end` / `tool_call_update.rawOutput` 含 rephrase 文案且**不含** `no callback registered`（改回 ModeAsk 即红，2026-11-23 已验证）。
-- **Lesson**: 两个错误值有不同受众时，**默认值就该站在绝大多数车道那一侧**。`ModeAsk` 的语义是"有一个只有 TUI 能提供的东西"——把它当默认，等于让每条新车道先继承一个不可能满足的前提，再各自补一个 `SetMode`。判定标准：这条错误文案是给模型读的指令，还是给开发读的日志？前者必须可执行（"改成文本提问"），后者才允许说"程序错误"。
+- **Saw**: 2026-11-23 paseo 驱动的 `seek acp` 会话，模型调 `ask_user` 得 `askuser: no callback registered (programming error)`，当用法错误重试；同一文案在 `-p`、`seek -rpc`、`goal`、`autopilot` 全成立（坑 #1133 / FC-1 记过 print 半边）。
+- **Why**: `askPolicy := askuser.New(askuser.ModeAsk)` 在分支前构造、全车道共用，只有 TUI 在 `tui.Run` 前 `SetAskFn`；`acpOptions` 无 askPolicy 字段——两种情形落进同一分支，报的是最少见的原因。
+- **Fix**: 默认反转：出生即 `askuser.ModeDisabled`，TUI 入口显式 `SetMode(askuser.ModeAsk)`；无头车道拿 `ErrDisabled`（"interactive question not available in this mode — rephrase as a plain-text question in your reply"），模型据此把问题改写进正文。真二进制测试跑 print 与 ACP 车道，断言含 rephrase 文案且不含 `no callback registered`（改回 ModeAsk 即红）。
+- **Lesson**: 两个错误值受众不同时，默认站在多数车道一侧；给模型的错误必须是可执行指令，「程序错误」只留给开发日志。
 - **Refs**: `cmd/seek/main.go`（`askPolicy` 构造点 + TUI 接线块）、`internal/askuser/askuser.go`（`ErrDisabled` / `ErrNoCallback`）、`cmd/seek/askuser_lane_test.go`、`docs/guide-zed.md` §5.3、`docs/pitfalls-triage.md` FC-1

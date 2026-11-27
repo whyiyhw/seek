@@ -12,6 +12,7 @@ import (
 
 	"github.com/whyiyhw/seek/internal/cache"
 	"github.com/whyiyhw/seek/internal/permission"
+	"github.com/whyiyhw/seek/internal/pricing"
 	"github.com/whyiyhw/seek/internal/session"
 	"github.com/whyiyhw/seek/internal/subagent"
 	"github.com/whyiyhw/seek/internal/worktree"
@@ -856,6 +857,65 @@ func TestTool_SchemaProviderEnumIncludesOpenDesign(t *testing.T) {
 	for _, v := range prov.Enum {
 		if _, err := subagent.ResolveRoute(v, ""); err != nil {
 			t.Errorf("enum value %q is not routable: %v", v, err)
+		}
+	}
+}
+
+// TestTool_Execute_OpenCodeMenuRoutable is c_tnzudu acceptance ④: the
+// provider description tells the model to "pass both when the gateway
+// matters", so that mode has to WORK end to end — every id the Go lane's
+// menu carries must spawn with provider="opencode", and every id BOTH
+// gateway menus carry must spawn under either provider name. Asserted at
+// the tool surface (Execute → Manager.Spawn) rather than on ResolveRoute
+// alone: the spawn path is what the model actually reaches, and the wire
+// format is what tells it whether the pair was accepted.
+func TestTool_Execute_OpenCodeMenuRoutable(t *testing.T) {
+	var got struct {
+		provider, model string
+	}
+	tl := newToolWithStubRunner(t, func(ctx context.Context, j subagent.RunnerJob) (subagent.RunnerResult, error) {
+		got.provider, got.model = j.Provider, j.Model
+		return subagent.RunnerResult{Summary: "ok", Turns: 1}, nil
+	})
+
+	// The menu is big; one id per family is enough to prove the entry is
+	// the menu rather than a hand-picked few (the exhaustive sweep lives
+	// in internal/subagent's TestResolveRoute_MenusAreRoutable).
+	for _, id := range []string{
+		"kimi-k2.7-code",
+		"glm-5.2",
+		"hy4-flash-free",
+		"step-5-preview",
+		"mimo-v2.6-pro",
+	} {
+		out, err := tl.Execute(context.Background(), json.RawMessage(
+			`{"description": "routed", "prompt": "p", "provider": "opencode", "model": "`+id+`"}`))
+		if err != nil {
+			t.Fatalf("Execute(%s): %v", id, err)
+		}
+		if strings.HasPrefix(out, "[agent: failed") {
+			t.Errorf("provider=opencode + %q failed to spawn:\n%s", id, out)
+			continue
+		}
+		if got.provider != subagent.ProviderOpenCode || got.model != id {
+			t.Errorf("%q: RunnerJob route = %q/%q, want opencode/%q", id, got.provider, got.model, id)
+		}
+	}
+
+	// A shared id must reach BOTH gateways by name — that is the whole
+	// point of the description's advice.
+	for _, lane := range []string{"opencode", "opendesign"} {
+		out, err := tl.Execute(context.Background(), json.RawMessage(
+			`{"description": "shared", "prompt": "p", "provider": "`+lane+`", "model": "`+pricing.ModelOpenCodeV41Flash+`"}`))
+		if err != nil {
+			t.Fatalf("Execute(%s, shared): %v", lane, err)
+		}
+		if strings.HasPrefix(out, "[agent: failed") {
+			t.Errorf("shared id on provider=%s failed to spawn:\n%s", lane, out)
+			continue
+		}
+		if got.provider != lane {
+			t.Errorf("shared id on provider=%s routed to %q — the named gateway must win", lane, got.provider)
 		}
 	}
 }

@@ -743,7 +743,8 @@ func TestModelChoices_LiveCatalogue(t *testing.T) {
 		t.Fatalf("live rows = %+v, want the injected catalogue", got)
 	}
 
-	// A getter that returns nothing (lane not active) falls back rather
+	// A getter that returns nothing (no OpenCode credential on this
+	// machine — cmd/seek's startup gate, c_nfeloo) falls back rather
 	// than emptying the picker.
 	m.opts.OpenCodeModels = func() []pricing.OpenCodeGoModel { return nil }
 	if got := m.modelChoices(); len(got) != len(pricing.OpenCodeGoModels) {

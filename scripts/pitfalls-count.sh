@@ -31,7 +31,9 @@
 #   ② 目录名不合法（须为小写 kebab / CJK，无空格下划线大写点号）；
 #   ③ 同 slug 出现在两个目录（grep 指路会有歧义）；
 #   ④ absorbed/ 文件缺 `- **已吸收**` 指针行；
-#   ⑤ docs/pitfalls.md 桩里混进了 `### ` 条目（该跑 pitfalls-split.sh）。
+#   ⑤ docs/pitfalls.md 桩里混进了 `### ` 条目（该跑 pitfalls-split.sh）；
+#   ⑥ 条目文件里出现 `## ` 段落头——一条目一文件的正文只有 `### ` 标题 + 字段
+#      bullet，`## ` 是拆分时漏下的残件（2026-11-26 扫出 5 处，c_bohzri）。
 #
 # 旧机制的「同前缀段」检查（TUI / terminal + TUI / session stats）随段结构
 # 一起退役：目录化后新段是显式决定，不再从散文里长回来。
@@ -151,6 +153,12 @@ cmd_check() { # cmd_check <dir>
     for k in Saw Why Fix Lesson; do
       grep -q "^- \*\*$k" "$f" || { errln "${f}：缺 \`- **${k}…\` 字段行"; rc=1; }
     done
+    # ⑥ 条目正文不该有 `## ` 段落头（一条目一文件的残件，拆分漏网的旧段名）
+    # 用行号点名，方便直接删；README 不是条目，已在 find 里排除。
+    while IFS= read -r hit; do
+      errln "${f}：正文出现 \`## \` 段落头（拆分残件，删掉这一行）：${hit}"
+      rc=1
+    done < <(grep -n '^## ' "$f" || true)
     case $f in
       */absorbed/*)
         grep -q '^- \*\*已吸收\*\*' "$f" \
@@ -264,9 +272,18 @@ cmd_selftest() {
   bash "$0" --check "$dir" >"$d/o9" 2>&1 \
     || { echo "✗ 自测9：变体 Fix 标签应算字段"; sed 's/^/      /' "$d/o9"; rc=1; }
 
+  # 10) 正文里有 `## ` 段落头 → 红且带行号（拆分残件，c_bohzri）。
+  { printf '### Leaked section header\n- **Saw**: s\n- **Why**: w\n- **Fix**: f\n'
+    printf -- '- **Lesson**: l\n## Old section name\n'; } >"$dir/tooling/leaked.md"
+  bash "$0" --check "$dir" >"$d/o10" 2>&1 \
+    && { echo "✗ 自测10：正文 \`## \` 段落头应红"; rc=1; }
+  grep -qF 'leaked.md' "$d/o10" && grep -q '## ' "$d/o10" \
+    || { echo "✗ 自测10：报错应指名文件与段落头"; sed 's/^/      /' "$d/o10"; rc=1; }
+  rm "$dir/tooling/leaked.md"
+
   rm -rf "$d"
   if [ "$rc" -eq 0 ]; then
-    echo "pitfalls-count selftest: PASS（报表/绿/缺字段/重复slug/坏目录名/无标题/absorbed指针/桩内条目/变体标签）"
+    echo "pitfalls-count selftest: PASS（报表/绿/缺字段/重复slug/坏目录名/无标题/absorbed指针/桩内条目/变体标签/段落头残件）"
   else
     echo "pitfalls-count selftest: FAIL" >&2
   fi
