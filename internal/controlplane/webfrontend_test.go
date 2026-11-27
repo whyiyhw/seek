@@ -1266,6 +1266,18 @@ func TestWeb_PageComposerW64(t *testing.T) {
 	if !strings.Contains(page, "#send:disabled { opacity: .4; }") {
 		t.Error("round send lacks its 40% disabled treatment (W6-4 ①)")
 	}
+	// 空态会话头以主栏为包含块（#center 不定位时它横穿侧栏、盖住品牌行）；面板
+	// 打开按内容态处理。W6-4 首版缺陷，2026-11-27 返工；几何由
+	// scripts/web-composer-manual.sh 无头量测。
+	for _, need := range []string{
+		"body.chat-empty-on #center { justify-content: center; position: relative; }",
+		"body.browsing.chat-empty-on #conv-head { position: static; }",
+		"body.browsing #composer-meta { display: none; }",
+	} {
+		if !strings.Contains(page, need) {
+			t.Errorf("embedded page lost the W6-4 empty-state geometry rule %q (c_ljtmy4 rework)", need)
+		}
+	}
 }
 
 // TestWeb_PageInputEnhancements pins the c_7lsngm input contract: a

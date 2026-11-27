@@ -965,8 +965,15 @@
      撑满、conv-head 绝对化让位（不参与居中也不消失——顶上仍有一条头）。
      首条消息落地（dropChatEmpty）摘类即落回底部；淡出 0.3s，
      reduced-motion 关停。 */
-  body.chat-empty-on #center { justify-content: center; }
+  /* 绝对定位的会话头以主栏为包含块：#center 不定位时 left/right 落到页面两端，
+     会话头横穿侧栏、盖住品牌行（W6-4 首版缺陷，2026-11-27 返工）。 */
+  body.chat-empty-on #center { justify-content: center; position: relative; }
   body.chat-empty-on #conv-head { position: absolute; top: 0; left: 0; right: 0; }
+  /* 面板打开也是内容态，空态布局不跟进：聊天面整体让位（含 composer 下的计量行），
+     会话头回文档流、内容顶对齐。 */
+  body.browsing #composer-meta { display: none; }
+  body.browsing.chat-empty-on #center { justify-content: flex-start; }
+  body.browsing.chat-empty-on #conv-head { position: static; }
   body.chat-empty-on #list { flex: 0 0 auto; }
   body.chat-empty-on #composer-meta { display: none; }   /* 空态无计量，别垫高 */
   /* composer 在组底，裸居中会让它的中心落在视口中线下 60px——底下垫
