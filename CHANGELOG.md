@@ -37,6 +37,7 @@
 - c_mxura4：web 无头脚本族：18 个 headless 脚本跑完删一次性 Chrome profile，收尾抽成公共函数
 - c_pozbmd：W6-1 web 视觉底座：全页等宽字体换系统无衬线 + token 值对齐 dsh 实测（只改 CSS，不动结构）
 - c_onxxge：W6-2 web 骨架换成 dsh 形：删顶部两条横栏，侧栏接管品牌/新会话/导航/设置，主区只留一条会话头
+- c_nwrqjk：seek·通用：侧栏会话行的模型名被截成「d…」（16 张桌面镜头）
 
 ## v0.13.1（2026-11-24）
 
