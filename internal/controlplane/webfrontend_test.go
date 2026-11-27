@@ -1238,6 +1238,30 @@ func TestWeb_PageChatFlowW63(t *testing.T) {
 			t.Errorf("page still carries the retired W4/W5 renderer piece %q (W6-3 must delete, not stack)", gone)
 		}
 	}
+	// 旧消息类的单类规则随四形态一并删除（返工第 1 轮，2026-11-27）：留着会命中
+	// 新类名——`.seek { background }` 让每条助手回复整块灰底，`.hint { italic }`
+	// 让系统灰行变斜体。用户气泡右对齐的是阅读列里的气泡：消息盒上不能有
+	// align-self（会把整个 768 盒推到容器右缘，气泡跑出阅读列）。#sess-msgs 的
+	// 内边距只由对话流那段的容器规则给，自己的规则里不能再写 padding。
+	for _, gone := range []string{
+		"\n  .you {",
+		"\n  .seek {",
+		"\n  .hint {",
+		".msg.user { align-self",
+		"#sess-msgs { flex: 1; overflow-y: auto; padding",
+	} {
+		if strings.Contains(page, gone) {
+			t.Errorf("page still carries the retired message rule %q (W6-3 must delete, not stack)", gone)
+		}
+	}
+	for _, need := range []string{
+		".msg.user { display: flex; flex-direction: column;",
+		"#sess-msgs { flex: 1; overflow-y: auto; }",
+	} {
+		if !strings.Contains(page, need) {
+			t.Errorf("embedded page lost the W6-3 reading-column geometry rule %q (c_ovly6d rework)", need)
+		}
+	}
 }
 
 // TestWeb_PageComposerW64 pins the W6-4 composer card + empty hero
