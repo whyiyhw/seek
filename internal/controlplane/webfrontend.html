@@ -366,7 +366,9 @@
           padding: 16px 32px; }
   #list > * { width: 100%; max-width: 768px; }
   .msg { position: relative; margin: 2px 0; max-width: 100%; }
-  .msg.user { align-self: flex-end; display: flex; flex-direction: column;
+  /* 用户气泡右对齐的是阅读列里的气泡，不是整条消息：消息盒由上面的容器规则居中在
+     768 列里，align-self:flex-end 会把整个 768 盒推到容器右缘——气泡就跑出阅读列。 */
+  .msg.user { display: flex; flex-direction: column;
               align-items: flex-end; max-width: 80%; }
   .msg.user .bub { background: var(--seek-user-bubble); border-radius: 22px;
                    padding: 10px 16px; white-space: pre-wrap; word-break: break-word; }
@@ -426,9 +428,6 @@
   .msg ol, #ag-last ol, #mem-content ol { margin: 4px 0; padding-left: 1.6em;
     list-style-position: outside; }
   .msg a, #ag-last a, #mem-content a { color: var(--seek-link); }
-  .you { margin-left: auto; background: var(--seek-accent); }
-  .seek { background: var(--seek-soft); }
-  .hint { color: var(--seek-fg-dim); font-style: italic; }
 
   /* ---- 流式气泡 + 工具行折叠（W2.1）---- */
   /* 轮末悬停 meta（W6-3 ⑥）：复制（+实时轮的收口时间）。绝对定位在轮
