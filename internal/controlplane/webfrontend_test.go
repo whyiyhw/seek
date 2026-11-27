@@ -1119,6 +1119,26 @@ func TestWeb_PageVisualBase(t *testing.T) {
 			t.Errorf("border-radius %spx is outside the 8/12/22/24/999 scale", m[1])
 		}
 	}
+
+	// ⑤ 悬停行的行内操作组不靠底色盖字。行底被 --seek-hover 提过一档之后，
+	// 一块 --seek-panel 底的补丁会在行上显形（亮偏浅、暗偏深）——让位改由
+	// 行自己的 padding 承担。这个形态静态截图容易漏，先钉在这里。
+	actsIdx := strings.Index(stripped, "\n  .sess-acts {")
+	if actsIdx < 0 {
+		t.Fatalf(".sess-acts rule not found in the style block")
+	}
+	actsEnd := strings.Index(stripped[actsIdx:], "}")
+	if actsEnd < 0 {
+		t.Fatal(".sess-acts rule unterminated")
+	}
+	if strings.Contains(stripped[actsIdx:actsIdx+actsEnd], "background:") {
+		t.Errorf(".sess-acts paints its own background — a mask colour cannot follow the hover/selected/archived row layers")
+	}
+	yieldIdx := strings.Index(stripped, ".sess-row:hover, .sess-row:focus-within { padding-right: 68px; }")
+	editingIdx := strings.Index(stripped, ".sess-row.editing { padding-right: 12px; }")
+	if yieldIdx < 0 || editingIdx < yieldIdx {
+		t.Errorf("hover row must yield to its inline actions, and the editing state must opt out AFTER it (same specificity): yield=%d editing=%d", yieldIdx, editingIdx)
+	}
 }
 
 var (
