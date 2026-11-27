@@ -359,9 +359,11 @@ try {
   ck('刷新后收起状态保持（验收②）', r.collapsed && r.sideW <= 48, `collapsed=${r.collapsed} w=${r.sideW}`);
   ck('收起态下侧栏仍按 30 行挂载（展开即用）', r.rows.length === SESS_PAGE, `rows=${r.rows.length}`);
   await clickSel('#side-toggle');
-  // 宽度是 150ms 过渡：等类翻面 + 宽度落定再断言（读同一份快照即可）。
-  const e = await until('展开', s => !s.collapsed && s.sideW > 200, 5000);
-  ck('展开回 260px 且列表可见', !e.collapsed && e.sideW > 200 && e.listShown && e.rows.length >= SESS_PAGE,
+  // 宽度是 150ms 过渡：等类翻面 + 宽度落到 280 再断言（读同一份快照即可）。
+  // 旧写法等到「>200」就算展开——W5 的 260 时代留下的宽口径，W6-2 起 280；
+  // 在动画中途量到 262 也算过，文案与判据都对不上。
+  const e = await until('展开落定', s => !s.collapsed && Math.abs(s.sideW - 280) <= 1 && s.rows.length >= SESS_PAGE, 5000);
+  ck('展开回 280px 且列表可见（W6-2 起侧栏宽 280）', !e.collapsed && Math.abs(e.sideW - 280) <= 1 && e.listShown && e.rows.length >= SESS_PAGE,
     `w=${e.sideW} listShown=${e.listShown} rows=${e.rows.length}`);
   await evalJS('location.reload(), "ok"');
   await delay(400);
