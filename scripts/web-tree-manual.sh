@@ -181,7 +181,7 @@ page=$(curl -s "$BASE")
 ck "GET / 200+页面" "yes" "$(printf '%s' "$page" | grep -q 'id="form"' && echo yes || echo no)"
 ck "页面含流式工具树部件（toolTreeRow）" "yes" "$(has "$page" "toolTreeRow")"
 ck "页面含耗时排版（fmtDur）" "yes" "$(has "$page" "fmtDur")"
-ck "页面含会话树部件（ttree/tnode）" "yes" "$(has "$page" "ttree")"
+ck "页面含会话树部件（W6-3：tcall）" "yes" "$(has "$page" "tcall")"
 ck "页面含复制全文按钮" "yes" "$(has "$page" "复制全文")"
 ck "页面含渲染兜底占位" "yes" "$(has "$page" "（消息渲染失败）")"
 ck "XSS 静态：无 innerHTML" "no" "$(has "$page" "innerHTML")"

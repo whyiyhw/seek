@@ -247,8 +247,8 @@ try {
   const before = readArgvLog().split('\n').length;
   await sendViaPage('看图');
   const s2 = await until('消息气泡缩略图',
-    st => st.msgs.some(m => m.cls.includes('you') && m.thumbs >= 1), 15000);
-  const bubble = s2.msgs.find(m => m.cls.includes('you') && m.thumbs >= 1);
+    st => st.msgs.some(m => m.cls.includes('user') && m.thumbs >= 1), 15000);
+  const bubble = s2.msgs.find(m => m.cls.includes('user') && m.thumbs >= 1);
   ck('点击入口：用户气泡带图片缩略图', !!bubble, JSON.stringify(s2.msgs));
   ck('点击入口：气泡正文仍是用户原文（@路径不进气泡）',
     !!bubble && bubble.txt.startsWith('看图') && !bubble.txt.includes('@/'), bubble && bubble.txt);

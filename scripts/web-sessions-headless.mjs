@@ -168,14 +168,15 @@ const snapshot = () => evalJS(`(() => {
     browserShown: vis(document.getElementById('browser')),
     chatShown: vis(document.getElementById('list')),
     formShown: vis(document.getElementById('form')),
-    nmsgs: document.getElementById('sess-msgs').childElementCount,
+    nmsgs: Number(document.getElementById('sess-msgs').dataset.loaded || 0)
+      || document.getElementById('sess-msgs').childElementCount,
     meta: document.getElementById('sess-meta').textContent,
     foot: document.getElementById('sess-foot').textContent,
     footBtn: !!document.querySelector('#sess-foot button'),
     chatText: document.getElementById('list').textContent,
-    firstMsg: document.querySelector('#sess-msgs .smsg')?.textContent || '',
-    lastMsg: [...document.querySelectorAll('#sess-msgs .smsg')].at(-1)?.textContent || '',
-    msgAt50: document.querySelectorAll('#sess-msgs .smsg')[50]?.textContent || '',
+    firstMsg: (b => b ? b.className + '|' + b.textContent : '')(document.querySelector('#sess-msgs .msg')),
+    lastMsg: [...document.querySelectorAll('#sess-msgs .msg')].at(-1)?.textContent || '',
+    msgAt50: document.querySelector('#sess-msgs [data-mi="51"]')?.textContent || '',
     nscript: document.scripts.length,
     nimg: document.querySelectorAll('img').length,
     xss1: typeof window.__xss, xss2: typeof window.__xss2,
@@ -268,7 +269,8 @@ try {
     s.meta.includes('deepseek-chat') && s.meta.includes('617 轮')
     && s.meta.includes('270000 tokens') && s.meta.includes('/tmp/w44-fixture'), s.meta);
   ck('foot「加载更多（已显示 50 条）」', s.foot.includes('已显示 50 条'), s.foot);
-  ck('首条是第 1 条用户消息', s.firstMsg.includes('user') && s.firstMsg.includes('第 1 条'), s.firstMsg);
+  ck('首条是第 1 条用户消息（W6-3：按块类名判角色，无角色标签）',
+    s.firstMsg.startsWith('msg user|') && s.firstMsg.includes('第 1 条'), s.firstMsg);
   ck('侧栏当前项高亮（恰一条，且是长会话）',
     s.rows.filter(r => r.cur).length === 1 && s.rows.find(r => r.cur)?.sid === LONG_SID,
     JSON.stringify(s.rows.filter(r => r.cur).map(r => r.sid)));

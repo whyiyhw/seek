@@ -988,7 +988,7 @@ func TestWeb_RunForbiddenAddr(t *testing.T) {
 // markdown-card gap this card closed (see the pitfalls entry): a fenced
 // block in a session transcript must ride the same horizontal-scroll
 // rule as .msg pre — that container is .sbody (the card first wrote
-// .smsg, which the merge narrowed: .sbody covers the same nodes with
+// .msg.seek > .txt (W6-3), which the merge narrowed: covers the same nodes with
 // lower specificity, leaving the tool-tree .tpre rules intact).
 // All additive strings — a rename strands the
 // behaviour silently, so they are pinned the way W5's other cards are.
@@ -1000,7 +1000,7 @@ func TestWeb_PageMobileResponsive(t *testing.T) {
 		"matchMedia('(max-width: 480px)')", // JS breakpoint == CSS breakpoint
 		"drawerClose()",                    // row pick closes the drawer
 		"flex-wrap: wrap",                  // command bar wraps, nothing unreachable
-		".msg pre, .sbody pre",             // code-block h-scroll covers ALL body containers
+		".msg pre, #ag-last pre",           // code-block h-scroll covers ALL body containers (W6-3: .sbody retired)
 		"--seek-scrim",                     // scrim colour is a themed token
 		"body.side-collapsed #side-head { flex-direction: column", // 44px rail stacks its icons
 	} {
@@ -1204,6 +1204,81 @@ func TestWeb_PageSkeletonW62(t *testing.T) {
 	iWsNew := strings.Index(page, `id="side-ws-new"`)
 	if iFind < 0 || iArch < iFind || iWsNew < iArch {
 		t.Errorf("sidebar header icon order drifted: want #side-find < #side-arch < #side-ws-new, got %d/%d/%d", iFind, iArch, iWsNew)
+	}
+}
+
+// TestWeb_PageChatFlowW63 pins the W6-3 conversation-flow unification
+// (c_ovly6d): one 768px reading column, the four message forms (user
+// right-aligned bubble on a themed token, frameless assistant, one-line
+// tool calls, gray system lines), and — the load-bearing retirement —
+// the page no longer emits the "tool · " role label anywhere, and the
+// two renderers (live addMsg/runBubble + history histTurn) share one
+// class vocabulary.
+func TestWeb_PageChatFlowW63(t *testing.T) {
+	page := string(webPage)
+	if strings.Contains(page, "tool · ") {
+		t.Error("page still emits the 'tool · ' role label — W6-3 retired it (results merge into the call row)")
+	}
+	for _, need := range []string{
+		"max-width: 768px",           // the reading column
+		"var(--seek-user-bubble)",    // user bubble rides a themed token, not a bare hex
+		"--seek-user-bubble:#1f2a44", // dark value pinned
+		"--seek-user-bubble:#edf3fe", // light value pinned
+		".tcall",                     // the one tool-call row shape (live + history)
+		"function histTurn",          // history renderer rides the same forms
+		"turn-meta",                  // per-turn hover copy affordance
+		"dataset.mi",                 // message-index stamp (blocks ≠ messages now)
+	} {
+		if !strings.Contains(page, need) {
+			t.Errorf("embedded page lost the W6-3 chat-flow piece %q (c_ovly6d)", need)
+		}
+	}
+	for _, gone := range []string{".smsg", ".swho", ".stool", ".ttree", ".tnode", "appendMsgPlain", "appendMsgTree"} {
+		if strings.Contains(page, gone) {
+			t.Errorf("page still carries the retired W4/W5 renderer piece %q (W6-3 must delete, not stack)", gone)
+		}
+	}
+	// 旧消息类的单类规则随四形态一并删除（返工第 1 轮，2026-11-27）：留着会命中
+	// 新类名——`.seek { background }` 让每条助手回复整块灰底，`.hint { italic }`
+	// 让系统灰行变斜体。用户气泡右对齐的是阅读列里的气泡：消息盒上不能有
+	// align-self（会把整个 768 盒推到容器右缘，气泡跑出阅读列）。#sess-msgs 的
+	// 内边距只由对话流那段的容器规则给，自己的规则里不能再写 padding。
+	for _, gone := range []string{
+		"\n  .you {",
+		"\n  .seek {",
+		"\n  .hint {",
+		".msg.user { align-self",
+		"#sess-msgs { flex: 1; overflow-y: auto; padding",
+	} {
+		if strings.Contains(page, gone) {
+			t.Errorf("page still carries the retired message rule %q (W6-3 must delete, not stack)", gone)
+		}
+	}
+	for _, need := range []string{
+		".msg.user { display: flex; flex-direction: column;",
+		"#sess-msgs { flex: 1; overflow-y: auto; }",
+	} {
+		if !strings.Contains(page, need) {
+			t.Errorf("embedded page lost the W6-3 reading-column geometry rule %q (c_ovly6d rework)", need)
+		}
+	}
+	// 返工第 2 轮（2026-11-27）：80% 上限必须落在气泡规则上。写进 `.msg.user`
+	// 是白写——`#list > *, #sess-msgs > *` 的 (1,0,0) 会盖掉 (0,2,0) 的
+	// max-width，长气泡照旧撑满 768 列（图解 06/13/20 实证）。移动端的 94%
+	// 同理，一起钉住，别让它下次又落回消息盒上。
+	if !strings.Contains(page, ".msg.user .bub { background: var(--seek-user-bubble); border-radius: 22px;\n                   padding: 10px 16px; max-width: 80%;") {
+		t.Errorf("user bubble rule lost max-width: 80%% — the cap must sit on .msg.user .bub, not on the (1,0,0)-outranked .msg.user box (c_ovly6d rework 2)")
+	}
+	for _, gone := range []string{
+		"\n              align-items: flex-end; max-width: 80%; }",
+		"    .msg.user { max-width: 94%",
+	} {
+		if strings.Contains(page, gone) {
+			t.Errorf("page still caps the user MESSAGE box instead of the bubble (%q) — #list > * outranks it, the cap never applies (c_ovly6d rework 2)", gone)
+		}
+	}
+	if !strings.Contains(page, ".msg.user .bub { max-width: 94%; }") {
+		t.Error("mobile user bubble lost its own max-width: 94% rule (c_ovly6d rework 2)")
 	}
 }
 

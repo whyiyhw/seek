@@ -423,7 +423,7 @@ const facesAt = async (theme) => {
   // 会话正文：点 fixture 行（两条消息 + 代码块）。
   clickSel(`#sess-list .sess-row[data-sid="${SID}"]`);
   await until('会话正文开', `document.body.classList.contains('sess-detail')
-    && document.querySelectorAll('#sess-msgs .smsg').length>=2`);
+    && document.querySelectorAll('#sess-msgs .msg').length>=2`);
   await checkFace(theme, '会话正文', '#browser');
   await ensureChat();
 };

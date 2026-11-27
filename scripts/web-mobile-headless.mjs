@@ -247,7 +247,7 @@ for (const theme of ['dark', 'light']) {
   // 代码块协同：夹具正文带围栏长行——pre 自己当横滚容器（长行滚着看，
   // 不越气泡被 #sess-msgs 硬裁）。首测这里靠目检抓到 .smsg pre 缺规则。
   const pre = await evalJS(`(() => {
-    const p = document.querySelector('.smsg pre');
+    const p = document.querySelector('#sess-msgs .msg pre');
     return p ? { ox: getComputedStyle(p).overflowX,
                  scrolls: p.scrollWidth > p.clientWidth } : 'no-pre';
   })()`);
