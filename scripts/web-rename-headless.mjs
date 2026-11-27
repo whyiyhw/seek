@@ -127,7 +127,8 @@ const snapshot = () => evalJS(`(() => {
     renActs: ren ? [...ren.querySelectorAll('.sess-acts button')].map(b => b.title) : [],
     arcGone: !arc,
     arcArch: arc ? arc.classList.contains('arch') : null,
-    arcT2: arc ? (arc.querySelector('.t2')?.textContent || '') : null,
+    arcT2: arc ? (arc.querySelector('.t-when')?.textContent || '') : null,
+    arcTip: arc ? (arc.title || '') : null,
     arcUnarchBtn: arc ? !!arc.querySelector('.sess-acts button[title="取消归档"]') : false,
     editOpen: !!document.querySelector('.sess-edit'),
     editVal: document.querySelector('.sess-edit')?.value ?? null,
@@ -218,8 +219,9 @@ try {
   await clickSel('#side-arch');
   s = await until('切查看后归档行回来', s => !s.arcGone, 8000);
   ck('头部 🗄 亮 + 行回来', s.archOn && !s.arcGone, '');
-  ck('归档行变淡 + 「已归档 ·」前缀 + ⤴ 钮', s.arcArch && s.arcT2.includes('已归档 ·') && s.arcUnarchBtn,
-    `arch=${s.arcArch} t2=${s.arcT2}`);
+  ck('归档行变淡 + title 提示带「已归档」+ ⤴ 钮（W6-3 起前缀在 title）',
+    s.arcArch && (s.arcTip || '').includes('已归档') && s.arcUnarchBtn,
+    `arch=${s.arcArch} tip=${s.arcTip}`);
   ck('归档行沉底（活跃行在上）', s.rows.at(-1).sid === ARC_SID, JSON.stringify(s.rows.map(r => r.sid)));
 } catch (e) { ck('归档往返', false, e.message); await dump(); }
 

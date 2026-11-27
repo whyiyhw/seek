@@ -501,11 +501,12 @@ func TestWeb_PageSessionSidebar(t *testing.T) {
 		"localStorage.setItem(SIDE_KEY", // ... written back on toggle
 		"innerWidth < 1024",             // narrow viewport defaults to collapsed
 		"SESS_PAGE = 30",                // row page size (filter+page are client-side)
-		"sess-detail",                   // main area swaps to a transcript on row click
+		"viewing", // W6-5 history view body class (was sess-detail)
 		// the tree itself: groups, collapsed-group memory, the two gestures
 		"wsGroups", "ws-head", "WS_CLOSED_KEY", "treeBind", "treeNewSession",
-		// browse vs continue are deliberately two actions
-		`id="sess-continue"`,
+		// W6-5: click-a-session enters the history view; lazy /resume keeps
+		// the browse-vs-continue safety (see TestWeb_PageLazyResumeW65)
+		"viewing", `id="hist"`,
 	} {
 		if !strings.Contains(page, need) {
 			t.Errorf("embedded page lost the sidebar piece %q (W5 c_txz6vz / workspace tree)", need)
@@ -1230,6 +1231,34 @@ func TestWeb_PageComposerW64(t *testing.T) {
 	}
 	if !strings.Contains(page, "#send:disabled { opacity: .4; }") {
 		t.Error("round send lacks its 40% disabled treatment (W6-4 ①)")
+	}
+}
+
+// TestWeb_PageLazyResumeW65 pins the W6-5 click-to-enter flow (c_mo7quv):
+// the read-only browser (#browser/#sess-detail/#sess-back/#sess-continue) is
+// GONE, the history renders into #hist with the same four-form renderer, and
+// — the load-bearing safety — sending from a viewed session routes through
+// ensureContext, which posts "/resume <sid>" (or the lazy /new · /bind)
+// BEFORE the body and gives up (keeping the draft) on failure.
+func TestWeb_PageLazyResumeW65(t *testing.T) {
+	page := string(webPage)
+	for _, gone := range []string{"sess-continue", "sess-back", "sess-detail", `id="browser"`, `id="sess-msgs"`} {
+		if strings.Contains(page, gone) {
+			t.Errorf("page still carries the retired read-only browser piece %q (W6-5 must delete, not stack)", gone)
+		}
+	}
+	for _, need := range []string{
+		"ensureContext",                   // the lazy-context split lives in one function
+		"'/resume ' + sid",                // the resume POST is built before the body
+		"pendingFresh",                    // lazy /new · /bind for the new-session buttons
+		"body.viewing #list",              // history view hides (not destroys) the live DOM
+		`id="hist"`,                      // history renders into #hist
+		`id="fresh-hero"`,                // the lazy new-session empty state
+		"草稿已保留",                          // failure path keeps the draft
+	} {
+		if !strings.Contains(page, need) {
+			t.Errorf("embedded page lost the W6-5 lazy-resume piece %q (c_mo7quv)", need)
+		}
 	}
 }
 

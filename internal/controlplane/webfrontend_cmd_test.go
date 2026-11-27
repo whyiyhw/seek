@@ -247,7 +247,7 @@ func TestWeb_PageCommandSurface(t *testing.T) {
 		"sendText('/bind ' + root, false)",
 		"sendText('/resume ' + sid, false)",
 		// …and a header's ＋ resets the session inside the project.
-		"sendText(here === root ? '/new' : '/bind ' + root, false)",
+		"pendingFresh = here === root ? { kind: 'new' } : { kind: 'bind', root };", // W6-5 lazy: first message fires the /new · /bind
 		"typed.startsWith('/')", // command POST → immediate /state refresh
 		"body.startsWith('/')",
 		"es.onopen = () => { connSet(true); refreshState(); apResync(); };", // reconnect restores the binding display + the approval card stack (W5 c_n37tnr) + the conn light (W5 c_oyp2qf)

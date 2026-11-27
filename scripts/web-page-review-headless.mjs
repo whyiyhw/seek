@@ -237,7 +237,7 @@ async function backToChat() {
         return;
       }
     }
-    if (cl.contains('sess-detail')) document.getElementById('sess-back').click();
+    if (cl.contains('viewing')) evalJS('viewLive()');
   })()`);
   await delay(150);
 }
@@ -255,12 +255,11 @@ async function navigate(panel) {
     await backToChat();
     if (!RICH_SID) throw new Error('未传 --rich-sid');
     await evalJS(`document.querySelector('.sess-row[data-sid="${RICH_SID}"]').click()`);
-    await until('会话正文', `document.querySelectorAll('#sess-msgs .smsg').length >= 4`
-      + ` && ${$id('sess-meta')}.textContent.length > 0`);
-    // 展开第一行工具树：参数/结果面板进 DOM（懒建），夹具的「工具树行」
+    await until('会话正文（W6-5 #hist）', `document.querySelectorAll('#hist .msg').length >= 4`);
+    // 展开第一行工具调用：参数/结果面板进 DOM（懒建），夹具的「工具行」
     // 易烂元素才算进了镜头。
     await evalJS(`(() => {
-      const row = document.querySelector('.ttree .tnode');
+      const row = document.querySelector('#hist .tcall');
       if (row) row.click();
       return !!row;
     })()`);
@@ -280,7 +279,7 @@ async function navigate(panel) {
     await until(`面板类 ${panel.cls}`, `document.body.classList.contains('${panel.cls}')`, 2500);
   } catch {
     await evalJS(`(() => {
-      document.body.classList.remove('sess-detail');
+      evalJS('closePanes()');
       document.body.classList.add('${panel.cls}', 'browsing');
       ${panel.loadFn}();
     })()`);

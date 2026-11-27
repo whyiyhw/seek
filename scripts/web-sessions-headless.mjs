@@ -164,19 +164,18 @@ const snapshot = () => evalJS(`(() => {
       addBtn: !!h.querySelector('.ws-acts button'),
     })),
     searchVal: document.getElementById('side-search').value,
-    detail: document.body.classList.contains('sess-detail'),
-    browserShown: vis(document.getElementById('browser')),
+    detail: document.body.classList.contains('viewing'),
+    browserShown: vis(document.getElementById('hist')),
     chatShown: vis(document.getElementById('list')),
     formShown: vis(document.getElementById('form')),
-    nmsgs: Number(document.getElementById('sess-msgs').dataset.loaded || 0)
-      || document.getElementById('sess-msgs').childElementCount,
-    meta: document.getElementById('sess-meta').textContent,
-    foot: document.getElementById('sess-foot').textContent,
-    footBtn: !!document.querySelector('#sess-foot button'),
+    nmsgs: Number(document.getElementById('hist').dataset.loaded || 0)
+      || document.getElementById('hist').childElementCount,
+    foot: document.getElementById('hist-foot').textContent,
+    footBtn: !!document.querySelector('#hist-foot button'),
     chatText: document.getElementById('list').textContent,
-    firstMsg: (b => b ? b.className + '|' + b.textContent : '')(document.querySelector('#sess-msgs .msg')),
-    lastMsg: [...document.querySelectorAll('#sess-msgs .msg')].at(-1)?.textContent || '',
-    msgAt50: document.querySelector('#sess-msgs [data-mi="51"]')?.textContent || '',
+    firstMsg: (b => b ? b.className + '|' + b.textContent : '')(document.querySelector('#hist .msg')),
+    lastMsg: [...document.querySelectorAll('#hist .msg')].at(-1)?.textContent || '',
+    msgAt50: document.querySelector('#hist [data-mi="51"]')?.textContent || '',
     nscript: document.scripts.length,
     nimg: document.querySelectorAll('img').length,
     xss1: typeof window.__xss, xss2: typeof window.__xss2,
@@ -261,13 +260,10 @@ try {
 trace('景 1：长会话首页');
 try {
   await clickRow(LONG_SID);
-  const s = await until('首页 50 条', s => s.detail && s.nmsgs === 50 && s.meta, 10000);
-  ck('点行切中栏正文（聊天面/输入框让位，侧栏不动）',
-    s.detail && s.browserShown && !s.chatShown && !s.formShown && s.listShown, '');
+  const s = await until('首页 50 条', s => s.detail && s.nmsgs === 50, 10000);
+  ck('点行=进入历史视图（W6-5：#hist 亮、实时面让位、composer 可用）',
+    s.detail && s.browserShown && !s.chatShown && s.formShown, '');
   ck('首页恰 50 条（不整读 1234）', s.nmsgs === 50, `got ${s.nmsgs}`);
-  ck('元信息行 model/轮次/tokens/cwd',
-    s.meta.includes('deepseek-chat') && s.meta.includes('617 轮')
-    && s.meta.includes('270000 tokens') && s.meta.includes('/tmp/w44-fixture'), s.meta);
   ck('foot「加载更多（已显示 50 条）」', s.foot.includes('已显示 50 条'), s.foot);
   ck('首条是第 1 条用户消息（W6-3：按块类名判角色，无角色标签）',
     s.firstMsg.startsWith('msg user|') && s.firstMsg.includes('第 1 条'), s.firstMsg);
@@ -287,7 +283,7 @@ try {
     if (s.foot.includes('失败')) throw new Error('foot 报错：' + s.foot);
     const before = s.nmsgs;
     const t0 = Date.now();
-    await clickSel('#sess-foot button');
+    await clickSel('#hist-foot button');
     await until('下一页', s => s.nmsgs > before, PAGE_TIMEOUT);
     times.push(Date.now() - t0);
   }
@@ -397,19 +393,77 @@ try {
     JSON.stringify(after.groups.map(g => g.name + '|' + g.cur)));
 } catch (e) { ck('组头去工作区', false, e.message); await dump(); }
 
+// 景 L（W6-5 懒 resume 四则）：a) 看≠切；b) 发送先 /resume 再正文；
+// c) 生成中看别处/切回不丢；d) ＋新会话懒执行。
+trace('景 L：懒 resume');
+try {
+  // d) ＋ 新会话：只落空态 Hero，不发 /new（此刻无绑定会话在跑、也不该有指令出门）
+  await evalJS(`document.getElementById('side-new').click()`);   // 夹具已绑定（景 6）→ 走 fresh 懒路径
+  const freshOn = await until('fresh 空态', () => evalJS(`document.body.classList.contains('fresh')`), 5000);
+  ck('d) ＋新会话只落空态 Hero（不发 /new）', !!freshOn, '');
+  const noCmd = await evalJS(`document.getElementById('list').textContent`);
+  ck('d) fresh 态转录区静默（无 /new 回执）', !noCmd.includes('新会话已开') && !noCmd.includes('/new'), noCmd.slice(-80));
+  // d 续) 发第一条才真正 /new：草稿箱里打字发送 → /state 会话清空
+  await evalJS(`(() => { const el = document.getElementById('input'); el.value = '懒新会话第一条'; el.dispatchEvent(new Event('input')); })()`);
+  await evalJS(`document.getElementById('send').click()`);
+  const st1 = await until('/new 生效', async () => {
+    const st = await evalJS(`fetch('/state', {headers: {'X-Seek-Conversation':
+      localStorage.getItem('seek-web-conv') || ''}}).then(r => r.json())`);
+    return !st.session ? st : null;
+  }, 10000);
+  ck('d) 第一条消息触发 /new（绑定会话清空）', !!st1, '');
+  await evalJS('viewLive()');
+
+  // a) 看历史不动绑定
+  await clickRow(TINY_SID);
+  await until('短会话历史', s => s.nmsgs === 2, 8000);
+  const stA = await evalJS(`fetch('/state', {headers: {'X-Seek-Conversation':
+    localStorage.getItem('seek-web-conv') || ''}}).then(r => r.json())`);
+  ck('a) 看历史：/state 绑定不变（看≠切）', !stA.session, JSON.stringify(stA.session));
+
+  // c) 生成中闸 + 切回不丢：伪造活跃 run（runBubble 直接进 runs 表）
+  await evalJS(`runBubble('probe-run'); 'ok'`);
+  await evalJS(`(() => { const el = document.getElementById('input'); el.value = '生成中不该发'; el.dispatchEvent(new Event('input')); })()`);
+  await evalJS(`document.getElementById('send').click()`);
+  await until('生成中提示', () => evalJS(`document.getElementById('list').textContent.includes('生成中')`), 5000);
+  const kept = await evalJS(`document.getElementById('input').value`);
+  ck('c) 生成中点别处发送被拦 + 草稿保留', kept === '生成中不该发', `draft=${kept}`);
+  await clickRow(LONG_SID);          // 看长会话（run 还挂着）
+  await until('长会话历史', s => s.nmsgs === 50, 8000);
+  await evalJS('viewLive()');        // 切回实时
+  const live = await evalJS(`!!document.querySelector('#list .msg.streaming')`);
+  ck('c) 切回实时视图流式泡还在（live DOM 不销毁）', live, '');
+  await evalJS(`closePhantom('probe-run'); 'ok'`);   // 清伪造 run
+
+  // b) 发送先 /resume 再正文：以 TINY 为例（当前无绑定会话 → /resume TINY）
+  await clickRow(TINY_SID);
+  await until('短会话历史', s => s.nmsgs === 2, 8000);
+  await evalJS(`(() => { const el = document.getElementById('input'); el.value = '接着这条说'; el.dispatchEvent(new Event('input')); })()`);
+  await evalJS(`document.getElementById('send').click()`);
+  const stB = await until('/resume 生效', async () => {
+    const st = await evalJS(`fetch('/state', {headers: {'X-Seek-Conversation':
+      localStorage.getItem('seek-web-conv') || ''}}).then(r => r.json())`);
+    return st.session === TINY_SID ? st : null;
+  }, 12000);
+  ck('b) 发送触发 /resume（绑定切到所看会话）', !!stB, JSON.stringify(stB && stB.session));
+  const v = await until('回实时面', s => !s.detail, 5000);
+  ck('b) 收口后回实时视图（正文在直播面）', !v.detail, '');
+} catch (e) { ck('懒 resume 景', false, e.message); await dump(); }
+
 // 景 7：回聊天 —— 会话正文收起，聊天面/输入框原样（侧栏是加法，零回归）。
 trace('景 7：回聊天');
 try {
   // 先开一条会话正文，再点 💬 聊天 收回。
   await clickRow(LONG_SID);
   await until('正文打开', s => s.detail && s.nmsgs === 50, 8000);
-  await clickSel('#sess-back');
-  const s = await until('回聊天面', s => !s.detail, 5000);
-  ck('💬 聊天：会话正文收起、聊天面/输入框回来',
+  await evalJS('viewLive()');
+  const s = await until('回实时面', s => !s.detail, 5000);
+  ck('回实时面：历史视图收起、聊天面/输入框回来（W6-5）',
     !s.detail && !s.browserShown && s.chatShown && s.formShown, '');
   ck('回聊天后侧栏仍在（常驻面）', s.listShown && s.rows.length >= SESS_PAGE, `rows=${s.rows.length}`);
-  ck('刚才那条会话仍高亮（当前项随会话走）', s.rows.find(r => r.cur)?.sid === LONG_SID,
-    JSON.stringify(s.rows.filter(r => r.cur).map(r => r.sid)));
+  const cur7 = s.rows.filter(r => r.cur);
+  ck('回实时后恰一条高亮（当前项=绑定会话，W6-5 语义）',
+    cur7.length === 1, JSON.stringify(cur7.map(r => r.sid)));
 } catch (e) { ck('回聊天', false, e.message); await dump(); }
 
 console.log(fails.length ? `\n${fails.length} 项断言失败` : '\n全部断言通过（W5 c_txz6vz 会话侧栏无头验收）');

@@ -220,12 +220,12 @@ try {
   await evalJS(`(document.querySelector(${JSON.stringify(
     `#sess-list .sess-row[data-sid="${treeSid}"]`)})||{click(){}}).click(),'ok'`);
   const treeSnap = () => evalJS(`(() => ({
-    tnodes: [...document.querySelectorAll('#sess-msgs .tcall')].map(t => ({
+    tnodes: [...document.querySelectorAll('#hist .tcall')].map(t => ({
       nm: t.querySelector('.nm').textContent,
       sm: t.querySelector('.sm').textContent,
       rs: t.querySelector('.rs').textContent,
     })),
-    ntoolBubble: document.querySelectorAll('#sess-msgs .msg.tool').length,
+    ntoolBubble: document.querySelectorAll('#hist .msg.tool').length,
     nscript: document.scripts.length,
     xssTree: typeof window.__xssTree,
   }))()`);
@@ -255,9 +255,9 @@ try {
 
   // 展开 read 行：参数全文 + 结果摘要截断（END_MARK 不进 DOM）。
   const openDetail = async () => {
-    await evalJS(`[...document.querySelectorAll('#sess-msgs .tcall')][0].click(),'ok'`);
+    await evalJS(`[...document.querySelectorAll('#hist .tcall')][0].click(),'ok'`);
     return evalJS(`(() => {
-      const d = [...document.querySelectorAll('#sess-msgs .tcall')][0]
+      const d = [...document.querySelectorAll('#hist .tcall')][0]
         .nextElementSibling;
       return {
         hidden: d.hidden,
@@ -294,7 +294,7 @@ try {
       return oe(c, ...r);
     };
   })();'ok'`);
-  await evalJS(`[...document.querySelectorAll('#sess-msgs .tcall')][0]
+  await evalJS(`[...document.querySelectorAll('#hist .tcall')][0]
     .nextElementSibling.querySelectorAll('.tcopy')[1].click(),'ok'`);
   await delay(200);
   const sink = await evalJS(`window.__copySink`);
@@ -303,8 +303,8 @@ try {
     `sink.len=${sink && sink.length}`);
 
   // 收起：再点行 → hidden。
-  await evalJS(`[...document.querySelectorAll('#sess-msgs .tcall')][0].click(),'ok'`);
-  const hidden = await evalJS(`[...document.querySelectorAll('#sess-msgs .tcall')][0]
+  await evalJS(`[...document.querySelectorAll('#hist .tcall')][0].click(),'ok'`);
+  const hidden = await evalJS(`[...document.querySelectorAll('#hist .tcall')][0]
     .nextElementSibling.hidden`);
   ck('收起：再点行面板隐藏', hidden === true, `got ${hidden}`);
 } catch (e) { ck('景 B 会话调用树', false, e.message); await dump(); }
@@ -313,7 +313,7 @@ try {
 trace('景 C：毒消息兜底');
 try {
   const fb = await evalJS(`(() => {
-    const box = document.getElementById('sess-msgs');
+    const box = document.getElementById('hist');
     const before = box.childElementCount;
     appendMsg({ get role() { return 'assistant'; },
                 get content() { return 'poison'; },
