@@ -1019,6 +1019,141 @@ func TestWeb_PageMobileResponsive(t *testing.T) {
 	}
 }
 
+// TestWeb_PageVisualBase pins the W6-1 card (c_pozbmd): the page's whole
+// visual base moves to dsh's measured shell values, with the type stack
+// as the load-bearing piece. Four assertions, each structural:
+//
+//  1. the BODY rule carries no monospace family — the old
+//     `font: 14px/1.5 ui-monospace, Menlo, monospace` is what made the
+//     entire app read like a terminal log, and one `font: inherit` user
+//     was enough to spread it everywhere;
+//  2. in the style block (comments stripped — prose names the stack too)
+//     `monospace` appears ZERO times and `Menlo` exactly ONCE, on the
+//     --seek-mono declaration: the code stack deliberately has no bare
+//     `monospace` tail (Windows CJK drops to SimSun, spec §b);
+//  3. `ui-monospace` is gone from the page entirely — the old body
+//     shorthand was its only home, and the token stack deliberately
+//     starts at SF Mono instead;
+//  4. the design-scale tokens are converged: font sizes come from the
+//     14/13/12 + 21/19/18 title ladder (16px is the documented iOS
+//     input-zoom guard inside the ≤640px block), weights from
+//     400/500/600/700, radii from 8/12/22/999.
+//
+// Raw-hex discipline is pinned by TestWeb_PageThemeSettings; this test
+// only guards the places W6-1 rewrote, so a later card cannot quietly
+// bring the mono body or a stray 11px back.
+func TestWeb_PageVisualBase(t *testing.T) {
+	page := string(webPage)
+	start := strings.Index(page, "\n<style>\n")
+	end := strings.Index(page, "</style>")
+	if start < 0 || end < start {
+		t.Fatalf("style block shape changed: start=%d end=%d", start, end)
+	}
+	style := page[start:end]
+	// Comments are stripped FIRST: the token block's own comment spells
+	// out "monospace" while explaining why the stack must not use it.
+	stripped := cssCommentRE.ReplaceAllString(style, "")
+
+	// ① the body rule: no mono family, and the sans stack comes from the token.
+	bodyIdx := strings.Index(stripped, "\n  body {")
+	if bodyIdx < 0 {
+		t.Fatalf("body rule not found in the style block")
+	}
+	bodyEnd := strings.Index(stripped[bodyIdx:], "}")
+	if bodyEnd < 0 {
+		t.Fatal("body rule unterminated")
+	}
+	body := stripped[bodyIdx : bodyIdx+bodyEnd]
+	for _, gone := range []string{"monospace", "Menlo", "ui-monospace"} {
+		if strings.Contains(body, gone) {
+			t.Errorf("body rule still names %q — the page-wide mono body is exactly the W6-1 defect", gone)
+		}
+	}
+	for _, need := range []string{"font-family: var(--seek-sans)", "font-size: 14px", "line-height: 24px"} {
+		if !strings.Contains(body, need) {
+			t.Errorf("body rule lost %q (W6-1: 14/24 on the system sans stack)", need)
+		}
+	}
+
+	// ② the mono stack exists exactly once, and it has no bare `monospace`.
+	if n := strings.Count(stripped, "monospace"); n != 0 {
+		t.Errorf("style block names monospace %d time(s) — the code stack must stop at Consolas (Windows CJK falls to SimSun, spec §b)", n)
+	}
+	if n := strings.Count(stripped, "Menlo"); n != 1 {
+		t.Errorf("Menlo must appear exactly once (inside --seek-mono), got %d", n)
+	}
+	if !strings.Contains(stripped, `--seek-mono: "SF Mono", "JetBrains Mono", Menlo, Consolas;`) {
+		t.Errorf("--seek-mono is missing or its stack changed — pre/code/kbd/.mono all ride this token")
+	}
+	// ③ `ui-monospace` must be gone from the page: it was the old body
+	// shorthand's family, and the token stack starts at SF Mono instead.
+	// (The comments (already stripped above) name the old rule while
+	// explaining the fix, which is why this checks `stripped`.)
+	if n := strings.Count(stripped, "ui-monospace"); n != 0 {
+		t.Errorf("ui-monospace appears %d time(s) — the page's mono face is --seek-mono only (W6-1 §2)", n)
+	}
+	// Mono may only be reached through the token: a literal family anywhere
+	// else means a second stack sneaked in beside the token.
+	for _, line := range strings.Split(stripped, "\n") {
+		if !strings.Contains(line, "font-family:") {
+			continue
+		}
+		if strings.Contains(line, "var(--seek-sans)") || strings.Contains(line, "var(--seek-mono)") {
+			continue
+		}
+		t.Errorf("literal font-family outside the token layer: %q", strings.TrimSpace(line))
+	}
+
+	// ④ the design scale is converged (the ladder the manifest counts).
+	allowedSize := map[string]bool{"12": true, "13": true, "14": true, "16": true, "18": true, "19": true, "21": true}
+	for _, m := range reFontSize.FindAllStringSubmatch(stripped, -1) {
+		if !allowedSize[m[1]] {
+			t.Errorf("font-size %spx is outside the 14/13/12 + 21/19/18 ladder (16px = iOS input-zoom guard only)", m[1])
+		}
+	}
+	for _, m := range reFontWeight.FindAllStringSubmatch(stripped, -1) {
+		switch m[1] {
+		case "400", "500", "600", "700":
+		default:
+			t.Errorf("font-weight %q is outside the 400/500/600/700 set", m[1])
+		}
+	}
+	for _, m := range reBorderRadius.FindAllStringSubmatch(stripped, -1) {
+		switch m[1] {
+		case "8", "12", "22", "24", "999":
+		default:
+			t.Errorf("border-radius %spx is outside the 8/12/22/24/999 scale", m[1])
+		}
+	}
+
+	// ⑤ 悬停行的行内操作组不靠底色盖字。行底被 --seek-hover 提过一档之后，
+	// 一块 --seek-panel 底的补丁会在行上显形（亮偏浅、暗偏深）——让位改由
+	// 行自己的 padding 承担。这个形态静态截图容易漏，先钉在这里。
+	actsIdx := strings.Index(stripped, "\n  .sess-acts {")
+	if actsIdx < 0 {
+		t.Fatalf(".sess-acts rule not found in the style block")
+	}
+	actsEnd := strings.Index(stripped[actsIdx:], "}")
+	if actsEnd < 0 {
+		t.Fatal(".sess-acts rule unterminated")
+	}
+	if strings.Contains(stripped[actsIdx:actsIdx+actsEnd], "background:") {
+		t.Errorf(".sess-acts paints its own background — a mask colour cannot follow the hover/selected/archived row layers")
+	}
+	yieldIdx := strings.Index(stripped, ".sess-row:hover, .sess-row:focus-within { padding-right: 68px; }")
+	editingIdx := strings.Index(stripped, ".sess-row.editing { padding-right: 12px; }")
+	if yieldIdx < 0 || editingIdx < yieldIdx {
+		t.Errorf("hover row must yield to its inline actions, and the editing state must opt out AFTER it (same specificity): yield=%d editing=%d", yieldIdx, editingIdx)
+	}
+}
+
+var (
+	cssCommentRE   = regexp.MustCompile(`/\*[\s\S]*?\*/`)
+	reFontSize     = regexp.MustCompile(`font-size:\s*([\d.]+)px`)
+	reFontWeight   = regexp.MustCompile(`font-weight:\s*([\w.]+)`)
+	reBorderRadius = regexp.MustCompile(`border-radius:\s*([\d.]+)px`)
+)
+
 // TestWeb_PageInputEnhancements pins the c_7lsngm input contract: a
 // multi-line input that sends on Enter and newlines on Shift+Enter, a
 // registry-driven '/' command menu (↑↓ / Tab / Enter / Esc), and an '@'

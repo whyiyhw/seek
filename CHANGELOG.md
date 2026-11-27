@@ -35,6 +35,7 @@
   - ⚠️ 无头车道需设 `SEEK_ACP_ASK_TIMEOUT=5`：以前立刻拿 ErrDisabled，现在会真弹窗等到超时。
 - c_cq77nj：doc-slim：docs/prd 超预算 104KB — 归档名单定案（archive 余量只够 65KB，需人拍是否调预算）
 - c_mxura4：web 无头脚本族：18 个 headless 脚本跑完删一次性 Chrome profile，收尾抽成公共函数
+- c_pozbmd：W6-1 web 视觉底座：全页等宽字体换系统无衬线 + token 值对齐 dsh 实测（只改 CSS，不动结构）
 
 ## v0.13.1（2026-11-24）
 

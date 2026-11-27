@@ -327,7 +327,9 @@ await waitReady();
   ck('light 方向首帧底色=白（不是暗底）', ff.bg === 'rgb(255, 255, 255)', JSON.stringify(ff));
   ck('light 方向刷新后稳定', s.now === 'light', s.now);
 }
-// dark 方向：记忆位=dark → reload → 首帧 dark + #14161a 底（不闪白）。
+// dark 方向：记忆位=dark → reload → 首帧 dark + #151517 底（不闪白）。
+// 底色跟着 --seek-inset 走：W6-1 c_pozbmd 把暗底从 #14161a 换成 dsh 实测的 #151517，
+// 这条断言是「首帧不是白底」的运行时证据，钉的值只是当前 token 值。
 if (!await openSettings()) ck('设置面板重开', false, 'set-body 未落定');
 clickMode('dark');
 await until('记忆位=dark', `localStorage.getItem('seek-theme')==='dark'`);
@@ -343,7 +345,7 @@ await waitReady();
   const ff = s.ff || {};
   ck('记忆位=dark', s.stored === 'dark', `stored=${s.stored}`);
   ck('dark 方向首帧 theme=dark（不闪白）', ff.theme === 'dark', JSON.stringify(ff));
-  ck('dark 方向首帧底色=#14161a（不是白底）', ff.bg === 'rgb(20, 22, 26)', JSON.stringify(ff));
+  ck('dark 方向首帧底色=#151517（不是白底）', ff.bg === 'rgb(21, 21, 23)', JSON.stringify(ff));
   ck('dark 方向刷新后稳定', s.now === 'dark', s.now);
 }
 

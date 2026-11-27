@@ -201,71 +201,108 @@
   /* ---- 主题 token（W5 卡 c_ni7mzw）----
      两套值、一个属性开关：`html[data-theme="light"]` 只翻变量层，组件
      CSS 一律 var(--seek-*)，没有任何裸色值（dsh 的三层体系缩成两层：
-     静态色板与语义别名在 seek 这个体量上合成一层就够）。缺省=暗色，
-     与 W5 之前逐字节同色（c_ni7mzw 之前是硬编码 hex，值原样搬过来）。
+     静态色板与语义别名在 seek 这个体量上合成一层就够）。缺省=暗色；
+     色值自 W6-1（c_pozbmd）起按 dsh 页面实测重定，不再是 W5 之前的旧值。
      首屏由 <head> 里的内联 bootstrap 在样式表解析前写好 data-theme，
      故不存在「先画暗再翻亮」的闪烁；CSP 对该内联块的 sha256 由
      webfrontend_static.go 从同一份 embed 现算，手改页面不会失配。 */
   :root {
     color-scheme: dark;
-    --seek-inset: #14161a;   /* 页面底/代码块底/输入框底 */
-    --seek-panel: #1b1e24;   /* 顶栏/状态栏/侧栏/卡片/表单底 */
-    --seek-soft:  #242830;   /* 气泡/统计卡/次级按钮底 */
-    --seek-accent:#2c3d5f;   /* 用户气泡/当前行/主按钮底 */
-    --seek-line:  #2a2e36;   /* 主分隔线/边框 */
-    --seek-line-2:#22252c;   /* 列表行分隔线（更淡一档） */
+    /* 字族（W6-1 c_pozbmd，口径=notes-web-w6-dsh-shell §2 的真 dsh 实测）：
+       正文=系统无衬线栈（PingFang SC 全覆盖中文），等宽只给代码/日志。
+       等宽栈刻意不带裸 `monospace` 尾——Windows CJK 下裸 monospace 会掉
+       进 SimSun（notes-dsh-ui-spec §b）。 */
+    --seek-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    --seek-mono: "SF Mono", "JetBrains Mono", Menlo, Consolas;
+    --seek-inset: #151517;   /* 主区底/输入框底（dsh bg-base） */
+    --seek-panel: #1b1b1c;   /* 顶栏/状态栏/侧栏/表单底（dsh layer-1） */
+    --seek-soft:  #232324;   /* 气泡/卡片/次级按钮底（dsh layer-2） */
+    --seek-accent:#1f2a44;   /* 用户气泡底（品牌蓝低饱和，≥4.5:1） */
+    --seek-sel:   rgba(255,255,255,.10);  /* 选中行/开关态（dsh selected） */
+    --seek-hover: rgba(255,255,255,.08);  /* 悬停行 */
+    --seek-brand:#679efe;    /* 品牌蓝：链接/选中标记/徽标（deepseek-400） */
+    --seek-cta:   #679efe;   /* 发送钮底（品牌蓝，配 --seek-cta-fg 7.1:1） */
+    --seek-cta-fg:#0f1115;
+    /* 主按钮（单色，dsh 的 brand-primary）：彩色只留状态语义，主 CTA 不抢
+       品牌色的语义位——暗=近白底黑字（18.1:1），亮=近黑底白字（18.9:1）。 */
+    --seek-primary:#f9fafb;
+    --seek-primary-fg:#0f1115;
+    --seek-line:  rgba(255,255,255,.12);  /* 主分隔线/边框（l2） */
+    --seek-line-2:rgba(255,255,255,.06);  /* 列表行分隔线（l1，更淡一档） */
     --seek-line-focus:#4b586b; /* 输入聚焦边框 */
-    --seek-fg:    #d7dae0;   /* 正文 */
-    --seek-fg-dim:#8f959f;   /* 次级文字：门槛是「压得住所有常见底」——
-                                panel(#1b1e24) 5.3、soft(#242830) 4.75。
-                                首版 #858b93 在 soft 上 4.3 红（设置卡/
-                                统计卡的 k 列都长在 soft 上）；accent 底
-                                上的次级文字由组件规则升主文色，不靠这条 */
-    --seek-fg-soft:#9aa0a8;  /* 工具行/徽标/卡片标题 */
-    --seek-ok:    #7ec699;
-    --seek-warn:  #d8a657;
+    --seek-fg:    #f9fafb;   /* 正文（dsh bluish-50；inset 17.5:1） */
+    /* 次级/三级：dsh 暗列 bluish-300/400 档，逐对压 inset/panel/soft/accent
+       均 ≥4.5:1（soft #232324 上 7.3 / 5.1）。 */
+    --seek-fg-soft:#b6bcc4;  /* 次级：工具行/徽标/卡片标题 */
+    --seek-fg-dim:#979da6;   /* 三级：元信息/字段名 */
+    --seek-ok:    #22c55e;   /* green-500 */
+    --seek-warn:  #f59e0b;   /* amber-500 */
     --seek-warn-bg:#3a3222;  /* 警示条底（SSE 断线提示）——底色与前景分开
                                 成对，亮色主题才好各自调值 */
-    --seek-err:   #d8756f;
-    --seek-link:  var(--seek-ok);
+    --seek-err:   #fb7575;   /* red-400 提亮一档：red-500 #f25a5a 在行内码底
+                                (#2c2c2e) 只有 4.24，卡片上的错误色不达 AA */
+    --seek-link:  #679efe;   /* 链接=品牌蓝（与 --seek-brand 同值） */
     --seek-rec:   #8f4a4a;   /* 录音中按钮底 */
     --seek-rec-fg:#f0d7b8;
     /* 成本数字专用色（c_jf3grt）：$ 与命中率/健康度是两套语义，早先
        共用 --seek-ok 绿——同屏一张卡里「花了多少钱」和「缓存命中多好」
        同色，读起来像同一种好坏。选信息蓝：与 ok/warn/err 三色语义不撞，
-       压 soft(#242830) 6.8:1、panel(#1b1e24) 7.7:1（AA 正文有余）。 */
+       压 soft(#2c2c2e) 6.4:1、panel(#1b1b1c) 7.9:1（AA 正文有余）。 */
     --seek-usd:   #8fb3e0;
+    --seek-code-bg:#1b1b1c;     /* 代码块底（§2 表：= 侧栏底一档） */
+    --seek-code-inline:#2c2c2e; /* 行内码底（§2 表：layer-3） */
     --seek-scrim: rgba(0,0,0,.5);   /* 窄屏抽屉遮罩（c_lqtt2m） */
     --seek-shadow:0 4px 14px rgba(0,0,0,.45);
   }
   /* 亮色：同一组语义名换值，快捷键只有 data-theme 一个属性。选值口径
-     = 每对文字/底色 ≥4.5:1（WCAG AA 正文），面板间不靠色相只靠明度差。 */
+     = 每对文字/底色 ≥4.5:1（WCAG AA 正文），面板间不靠色相只靠明度差。
+     值取 dsh 亮列（notes-web-w6-dsh-shell §2 / notes-dsh-ui-spec §b）：
+     主区白、侧栏 f9fafb、行内码 ebeef2、用户气泡 edf3fe（见下方各 token）。 */
   :root[data-theme="light"] {
     color-scheme: light;
     --seek-inset: #ffffff;
-    --seek-panel: #f4f5f7;
-    --seek-soft:  #eceef2;
-    --seek-accent:#dbe5fb;
-    --seek-line:  #d6dae1;
-    --seek-line-2:#e6e9ee;
+    --seek-panel: #f9fafb;
+    --seek-soft:  #ebeef2;
+    --seek-accent:#edf3fe;
+    --seek-sel:   rgba(38,49,72,.06);
+    --seek-hover: rgba(0,0,0,.06);
+    --seek-brand:#4176e6;
+    --seek-cta:   #3565d2;   /* 发送钮：品牌蓝压深一档，白字 5.3:1 */
+    --seek-cta-fg:#ffffff;
+    --seek-primary:#0f1115;
+    --seek-primary-fg:#ffffff;
+    --seek-line:  rgba(0,0,0,.10);
+    --seek-line-2:rgba(0,0,0,.04);
     --seek-line-focus:#7b8798;
-    --seek-fg:    #1b1e24;
-    --seek-fg-dim:#5b6270;
-    --seek-fg-soft:#4b5361;
-    --seek-ok:    #1f7a43;
+    --seek-fg:    #0f1115;
+    /* 次级取 §2 亮列 #61666b（白/panel/soft/accent 四底最低 4.98:1）。三级
+       的实测值 #81858c 在四个亮底上只有 3.2–3.7（AA 正文不达标），故取
+       仍比次级浅一档、但四底都 ≥4.5 的 #666b71（最低 4.62，soft 上）。 */
+    --seek-fg-soft:#61666b;
+    --seek-fg-dim: #666b71;
+    /* 状态色不取 §2 亮列：dsh 的 ok #22c55e / warn #f59e0b 在白底只有
+       2.3 / 2.2，err #ec1313 白底 4.5 但压 panel/soft 只有 4.3 / 3.9——亮底
+       上一律不过 AA，沿用 W5 的深值（白/panel/soft 三底均 ≥5:1）。暗底
+       反差大，才用 dsh 的饱和档。 */
+    --seek-ok:    #14703c;
     --seek-warn:  #8a5a00;
     --seek-warn-bg:#fbf0d5;
     --seek-err:   #b3261e;
-    --seek-link:  #1a56c4;
+    --seek-link:  #2f5fc4;   /* 链接蓝压深一档（品牌 #4176e6 在白底 4.2:1） */
     --seek-rec:   #b3261e;
     --seek-rec-fg:#ffffff;
-    /* 同暗色：成本走信息蓝，亮底 5.8:1（soft #eceef2）——与 ok 绿分流 */
+    /* 同暗色：成本走信息蓝，压 soft 5.8:1（行内码底同档）——与 ok 绿分流 */
     --seek-usd:   #1f5ba8;
+    --seek-code-bg:#f9fafb;
+    --seek-code-inline:#ebeef2;
     --seek-scrim: rgba(15,17,21,.28);
     --seek-shadow:0 4px 14px rgba(0,0,0,.12);
   }
   * { box-sizing: border-box; }
-  body { margin: 0; font: 14px/1.5 ui-monospace, Menlo, monospace;
+  /* 正文字族 = 系统无衬线（dsh 同款），14/24。等宽只出现在 pre/code/kbd 与
+     显式 .mono（路径/hash/token 数字列）——整页等宽就是「终端日志」观感，
+     这是 W6-1 改动量最大的一条。 */
+  body { margin: 0; font-family: var(--seek-sans); font-size: 14px; line-height: 24px;
          background: var(--seek-inset); color: var(--seek-fg); display: flex; flex-direction: column;
          height: 100vh; }
   /* 双段状态栏（W2.3）：左段绑定/连接态可截断，右段 usage 计量恒完整 */
@@ -292,7 +329,7 @@
      title 与 aria-label 同步。 */
   #conn { flex: none; display: inline-flex; align-items: center; gap: 5px;
           color: var(--seek-fg-dim); font-size: 12px; }
-  #conn .dot { width: 8px; height: 8px; border-radius: 50%; flex: none;
+  #conn .dot { width: 8px; height: 8px; border-radius: 999px; flex: none;
                background: var(--seek-fg-dim); }
   #conn.ok .dot { background: var(--seek-ok); }
   #conn.warn .dot { background: var(--seek-warn); }
@@ -303,28 +340,34 @@
              color: var(--seek-warn); border-bottom: 1px solid var(--seek-line);
              font-size: 13px; }
   #connbar[hidden] { display: none; }
-  #connbar button { padding: 3px 12px; font-size: 13px; background: var(--seek-accent); }
+  #connbar button { padding: 3px 12px; font-size: 13px; background: var(--seek-soft); }
   #ctx { flex: none; display: flex; align-items: center; gap: 6px;
          white-space: nowrap; color: var(--seek-fg-dim); }
   #ctx[hidden] { display: none; }
   #ctx .bar { width: 56px; height: 5px; flex: none; background: var(--seek-line);
-              border-radius: 3px; overflow: hidden; }
+              border-radius: 999px; overflow: hidden; }
   #ctx .bar i { display: block; height: 100%; width: 0; background: var(--seek-ok); }
   #ctx.warn { color: var(--seek-warn); }
   #ctx.warn .bar i { background: var(--seek-warn); }
   #ctx.crit { color: var(--seek-err); }
   #ctx.crit .bar i { background: var(--seek-err); }
   #list { flex: 1; overflow-y: auto; padding: 14px; }
-  .msg { max-width: 86%; margin: 4px 0; padding: 8px 12px; border-radius: 8px;
+  .msg { max-width: 86%; margin: 4px 0; padding: 8px 12px; border-radius: 22px;
          white-space: pre-wrap; word-break: break-word; }
   /* pre 的横滚/配色四个正文容器同款。c_k3pnlw（markdown 卡）把选择器从 .msg 扩到
      .sbody——会话正文的 markdown 产物挂在 .smsg > .sbody 下，.sbody 这条即覆盖；
      c_lqtt2m 在更早基点上补的 .smsg 命中面与之重复，且特异性 (0,1,1) 会盖掉调用树
      .tpre（(0,1,0)，元素同在 .smsg 内）的 pre-wrap/max-height，故合并取窄的那条。 */
-  .msg pre, .sbody pre { background: var(--seek-inset); border: 1px solid var(--seek-line); border-radius: 6px;
+  /* 代码/等宽场景（W6-1）：只 pre/code/kbd 与显式 .mono（路径/hash/token
+     数字列）走 --seek-mono，UI 文本一律无衬线。代码 12/19（§2 档位）。 */
+  .msg pre, .sbody pre, #ag-last pre, #mem-content pre, .apcard pre {
+             background: var(--seek-code-bg); border: 1px solid var(--seek-line); border-radius: 8px;
              padding: 8px 10px; margin: 6px 0; overflow-x: auto;
-             white-space: pre; font: inherit; }
-  .msg code, .sbody code { background: var(--seek-panel); border-radius: 4px; padding: 0 4px; }
+             white-space: pre; font-family: var(--seek-mono); font-size: 12px; line-height: 19px; }
+  .msg code, .sbody code, #ag-last code, #mem-content code, kbd {
+             background: var(--seek-code-inline); border-radius: 8px; padding: 0 4px;
+             font-family: var(--seek-mono); font-size: 12px; }
+  .mono { font-family: var(--seek-mono); font-variant-numeric: tabular-nums; }
   /* ---- markdown 子集排版（W5 卡 c_x2au4t；c_k3pnlw 返工补段落/引用/表格/悬挂缩进）----
      标题在气泡内取收敛尺寸（浏览器 h1 默认 2em 会撑爆聊天行高）；
      段落 <p> 出薄边距、首末段贴泡边；引用条对齐 dsh 视觉（左竖条 +
@@ -339,16 +382,22 @@
     margin: 6px 0; padding: 2px 0 2px 12px;
     border-left: 3px solid var(--seek-line-focus); color: var(--seek-fg-soft); }
   .md-tbl { max-width: 100%; overflow-x: auto; margin: 6px 0; }
-  .md-tbl table { border-collapse: collapse; font-size: .95em; }
+  .md-tbl table { border-collapse: collapse; font-size: 13px; line-height: 20px; }
   .md-tbl th, .md-tbl td { padding: 4px 10px; text-align: left; vertical-align: top;
     border-bottom: 1px solid var(--seek-line); white-space: normal; overflow-wrap: anywhere; }
   .md-tbl th { border-bottom-color: var(--seek-line-focus); color: var(--seek-fg-soft); font-weight: 600; }
-  .msg h1, .sbody h1, #ag-last h1, #mem-content h1 { font-size: 1.3em; margin: 10px 0 4px; }
-  .msg h2, .sbody h2, #ag-last h2, #mem-content h2 { font-size: 1.2em; margin: 10px 0 4px; }
-  .msg h3, .sbody h3, #ag-last h3, #mem-content h3,
+  /* 标题阶梯（W6-1，§2）：h1 21/30、h2 19/28、h3 18/26、h4+ 14/24，
+     全部 700——em 相对值在 14px 基准上落不到整数档，故写死 px。 */
+  .msg h1, .sbody h1, #ag-last h1, #mem-content h1 {
+    font-size: 21px; line-height: 30px; font-weight: 700; margin: 10px 0 4px; }
+  .msg h2, .sbody h2, #ag-last h2, #mem-content h2 {
+    font-size: 19px; line-height: 28px; font-weight: 700; margin: 10px 0 4px; }
+  .msg h3, .sbody h3, #ag-last h3, #mem-content h3 {
+    font-size: 18px; line-height: 26px; font-weight: 700; margin: 8px 0 4px; }
   .msg h4, .sbody h4, #ag-last h4, #mem-content h4,
   .msg h5, .sbody h5, #ag-last h5, #mem-content h5,
-  .msg h6, .sbody h6, #ag-last h6, #mem-content h6 { font-size: 1.1em; margin: 8px 0 4px; }
+  .msg h6, .sbody h6, #ag-last h6, #mem-content h6 {
+    font-size: 14px; line-height: 24px; font-weight: 700; margin: 8px 0 4px; }
   .msg ul, .sbody ul, #ag-last ul, #mem-content ul,
   .msg ol, .sbody ol, #ag-last ol, #mem-content ol { margin: 4px 0; padding-left: 1.6em;
     list-style-position: outside; }
@@ -363,7 +412,7 @@
   }
   @keyframes caret { 50% { opacity: 0; } }
   .trow { display: flex; align-items: center; gap: 4px; min-width: 0;
-          color: var(--seek-fg-soft); font-size: 12px; padding: 1px 0; }
+          color: var(--seek-fg-soft); font-size: 13px; line-height: 20px; padding: 1px 0; }
   .trow .tt { min-width: 0; word-break: break-word; }
   .trow.bad { color: var(--seek-warn); }
   .trow.bad .ic { color: var(--seek-err); }
@@ -373,23 +422,24 @@
   .ttree { display: flex; flex-direction: column; gap: 4px; margin: 6px 0 2px; }
   .tnode { display: flex; align-items: baseline; gap: 8px; width: 100%;
            text-align: left; background: var(--seek-panel); border: 1px solid var(--seek-line);
-           border-radius: 6px; padding: 4px 10px; font: inherit;
-           font-size: 12px; color: var(--seek-fg-soft); cursor: pointer; }
+           border-radius: 8px; padding: 4px 10px; font: inherit;
+           font-size: 13px; color: var(--seek-fg-soft); cursor: pointer; }
   .tnode:hover { border-color: var(--seek-line-focus); }
   .tnode .nm { flex: none; display: inline-flex; align-items: center; gap: 3px;
                color: var(--seek-warn); }
   .tnode .sm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
                white-space: nowrap; }
   .tnode .rs { flex: none; color: var(--seek-fg-dim); white-space: nowrap; }
-  .tdetail { background: var(--seek-inset); border: 1px solid var(--seek-line); border-radius: 6px;
+  .tdetail { background: var(--seek-inset); border: 1px solid var(--seek-line); border-radius: 8px;
              padding: 8px 10px; }
-  .tlabel { display: flex; align-items: baseline; gap: 8px; font-size: 11px;
+  .tlabel { display: flex; align-items: baseline; gap: 8px; font-size: 12px;
             color: var(--seek-fg-dim); margin: 2px 0; }
-  .tlabel .tcopy { margin-left: auto; padding: 1px 10px; font-size: 11px; }
-  .tpre { background: var(--seek-panel); border-radius: 4px; padding: 6px 8px;
+  .tlabel .tcopy { margin-left: auto; padding: 1px 10px; font-size: 12px; }
+  .tpre { background: var(--seek-code-bg); border-radius: 8px; padding: 6px 8px;
           margin: 2px 0 8px; overflow: auto; white-space: pre-wrap;
-          word-break: break-all; max-height: 220px; font: inherit;
-          font-size: 12px; color: var(--seek-fg-soft); }
+          word-break: break-all; max-height: 220px;
+          font-family: var(--seek-mono); font-size: 12px; line-height: 19px;
+          color: var(--seek-fg-soft); }
   /* 中断收口标注（c_5m3fm6）：保留的半截气泡尾部一行灰字，流状态可见地终止 */
   .msg .cut { color: var(--seek-fg-soft); font-size: 12px; padding-top: 2px; }
   /* 输入区底对齐（c_7lsngm）：按钮跟到多行输入的底边；position:relative
@@ -400,15 +450,15 @@
   /* 多行输入（c_7lsngm）：Enter 发送 / Shift+Enter 换行——textarea 才有
      换行；高度按内容长（grow() 写 style.height），上限 CSS 兜底滚动 */
   #input { flex: 1; background: var(--seek-inset); color: inherit; border: 1px solid var(--seek-line);
-           border-radius: 6px; padding: 8px 10px; font: inherit; outline: none;
-           resize: none; line-height: 1.45; min-height: 36px; max-height: 40vh;
+           border-radius: 12px; padding: 8px 10px; font: inherit; outline: none;
+           resize: none; line-height: 24px; min-height: 40px; max-height: 40vh;
            overflow-y: auto; }
   #input:focus { border-color: var(--seek-line-focus); }
   /* ---- 输入增强弹层（c_7lsngm）：'/' 指令补全 + '@' 会话引用 ----
      绝对定位贴在表单上沿（form 是定位父级），文档流不位移。 */
   #menu { position: absolute; left: 14px; right: 14px; bottom: 100%;
           margin-bottom: 2px; max-height: 46vh; overflow-y: auto;
-          background: var(--seek-panel); border: 1px solid var(--seek-line); border-radius: 8px;
+          background: var(--seek-panel); border: 1px solid var(--seek-line); border-radius: 12px;
           box-shadow: 0 -6px 18px rgba(0,0,0,.35); }
   #menu[hidden] { display: none; }
   #menu .mi { display: flex; gap: 10px; align-items: baseline;
@@ -416,10 +466,9 @@
               border-bottom: 1px solid var(--seek-line); }
   #menu .mi:last-child { border-bottom: 0; }
   #menu .mi .ic { width: 15px; height: 15px; align-self: center; flex: none; }
-  #menu .mi.hl { background: var(--seek-accent); }
-  /* 高亮行的次级文字升主文色（c_lbys7d）：accent 底压 fg-dim 只有 3.59:1、
-     fg-soft 4.11:1（暗侧），主文色 7.73——同 .sess-row.cur 的口径；亮色侧
-     本已 4.85/6.13，一并对齐只会更稳。 */
+  #menu .mi.hl { background: var(--seek-sel); }
+  /* 高亮行的次级文字升主文色（c_lbys7d）：选中层压 fg-dim 的余量本来就薄，
+     升到主文色后同 .sess-row.cur 的口径；dsh 的菜单高亮行同款做法。 */
   #menu .mi.hl .nm, #menu .mi.hl .ds, #menu .mi.hl .sid { color: var(--seek-fg); }
   #menu .mi .nm { color: var(--seek-fg-soft); white-space: nowrap; }
   #menu .mi .ds { color: var(--seek-fg-dim); font-size: 12px; overflow: hidden;
@@ -435,12 +484,12 @@
                            color: var(--seek-fg-dim); font-size: 12px; }
   #menu .dirtop button { flex: none; padding: 3px 10px; font-size: 12px; }
   #menu .dirfilter { width: 100%; box-sizing: border-box; padding: 4px 8px;
-                     border: 1px solid var(--seek-line); border-radius: 6px;
+                     border: 1px solid var(--seek-line); border-radius: 8px;
                      background: var(--seek-inset); color: var(--seek-fg); font-size: 12px; }
   #menu .dirfilter:focus { border-color: var(--seek-line-focus); outline: none; }
   /* 弹层头行（c_lnsdvu 项目点选候源专用）：固定告知文案，不是可点行 */
-  #menu .mh { padding: 6px 12px; color: var(--seek-fg-dim); font-size: 12px;
-              line-height: 1.5; border-bottom: 1px solid var(--seek-line); }
+  #menu .mh { padding: 6px 12px; color: var(--seek-fg-dim); font-size: 13px;
+              line-height: 20px; border-bottom: 1px solid var(--seek-line); }
   /* 窄屏降级（验收 ③）：弹层满宽、条目换行、输入 16px 防 iOS 聚焦缩放 */
   @media (max-width: 640px) {
     #menu { left: 0; right: 0; bottom: 100%; border-radius: 8px 8px 0 0; }
@@ -455,12 +504,14 @@
      纯图标钮挂 .btn-icon（26×26 方框，收窄 .sm 用于行内操作）。
      状态高亮只用 .on / .held / .rec / .stop，不另造按钮样式。
      inline-flex 让图标与文字统一基线对齐（纯文字按钮不受影响）。 */
-  button { background: var(--seek-soft); color: inherit; border: 0; border-radius: 6px;
+  button { background: var(--seek-soft); color: inherit; border: 0; border-radius: 12px;
            padding: 8px 16px; font: inherit; cursor: pointer;
            display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
   button:disabled { opacity: .4; cursor: default; }
   button:focus-visible { outline: 2px solid var(--seek-line-focus); outline-offset: 1px; }
-  .btn-primary { background: var(--seek-accent); }
+  /* 主按钮=单色（W6-1，dsh brand-primary）：亮=近黑底白字、暗=近白底黑字。
+     彩色只留状态语义（链接/选中/发送/徽标），主 CTA 不占品牌色的语义位。 */
+  .btn-primary { background: var(--seek-primary); color: var(--seek-primary-fg); }
   .btn-icon { width: 26px; height: 26px; padding: 0; flex: none;
               background: var(--seek-soft); }
   .btn-icon .ic { width: 16px; height: 16px; }
@@ -488,6 +539,9 @@
      上只有 ~2.6:1（两主题对比度抽查红）；接上专用前景后两主题 ≥4.5:1
      （ap-badge 同款接线，两处共用同一对 token）。 */
   #mic.rec { background: var(--seek-rec); color: var(--seek-rec-fg); }
+  /* 发送钮（W6-1）：品牌蓝实底——全页唯一被允许用品牌色的按钮（dsh 同款
+     口径：蓝只出现在「业务态」）。#id 选择器压过 .btn-primary，无需 !important。 */
+  #send { background: var(--seek-cta); color: var(--seek-cta-fg); }
   /* 停止键态（c_5m3fm6）：生成中 #send 变停止键——与录音态共用同一对
      --seek-rec token（同色系 + 两主题都过对比度，见上条注释） */
   #send.stop { background: var(--seek-rec); color: var(--seek-rec-fg); }
@@ -501,20 +555,19 @@
                display: flex; flex-direction: column; gap: 8px;
                max-height: 60vh; overflow-y: auto; }
   #approvals:empty { display: none; }
-  .apcard { background: var(--seek-panel); border: 1px solid var(--seek-line); border-radius: 8px;
+  .apcard { background: var(--seek-panel); border: 1px solid var(--seek-line); border-radius: 12px;
             padding: 10px 12px; box-shadow: 0 4px 14px var(--seek-shadow); }
   .apcard .apt { display: flex; align-items: center; gap: 5px;
                  color: var(--seek-warn); font-size: 12px; margin-bottom: 4px; }
   .apcard .apt .ic { width: 13px; height: 13px; }
   .apcard .aps { margin: 0 0 4px; white-space: pre-wrap; word-break: break-word; }
-  .apcard pre { background: var(--seek-inset); border: 1px solid var(--seek-line); border-radius: 6px;
-                padding: 6px 8px; margin: 4px 0; overflow: auto;
-                white-space: pre-wrap; word-break: break-all; font: inherit;
+  .apcard pre { padding: 6px 8px; margin: 4px 0; overflow: auto;
+                white-space: pre-wrap; word-break: break-all;
                 max-height: 120px; }
   .apcard .apb { display: flex; gap: 8px; margin-top: 8px; }
   .apcard .apb button { flex: 1; padding: 5px 8px; font-size: 13px; }
   #ap-badge { flex: none; align-self: center; background: var(--seek-rec); color: var(--seek-rec-fg);
-              border-radius: 10px; padding: 2px 10px; font-size: 12px;
+              border-radius: 999px; padding: 2px 10px; font-size: 12px;
               white-space: nowrap; }
   #ap-badge[hidden] { display: none; }
   /* ---- 附件（W5 c_56yrcj）：托盘 + 气泡缩略图 ----
@@ -526,14 +579,14 @@
   #tray.has { display: flex; }
   body.browsing #tray { display: none; }
   .chip { display: flex; align-items: center; gap: 6px; max-width: 260px;
-          background: var(--seek-soft); border: 1px solid var(--seek-line); border-radius: 6px;
+          background: var(--seek-soft); border: 1px solid var(--seek-line); border-radius: 8px;
           padding: 4px 6px; position: relative; overflow: hidden; }
-  .chip .tn { width: 28px; height: 28px; object-fit: cover; border-radius: 4px;
+  .chip .tn { width: 28px; height: 28px; object-fit: cover; border-radius: 8px;
               flex: none; background: var(--seek-inset); }
   .chip .nm { font-size: 12px; overflow: hidden; text-overflow: ellipsis;
               white-space: nowrap; }
   .chip .ic { width: 14px; height: 14px; color: var(--seek-fg-dim); }
-  .chip .pc { font-size: 11px; color: var(--seek-fg-dim); flex: none; }
+  .chip .pc { font-size: 12px; color: var(--seek-fg-dim); flex: none; }
   .chip .rm { padding: 0 2px; background: transparent; color: var(--seek-fg-dim);
               font-size: 14px; line-height: 1; }
   .chip .rm .ic { width: 12px; height: 12px; }
@@ -544,11 +597,11 @@
   .chip.bad { border-color: var(--seek-err); }
   .chip.bad .pc { color: var(--seek-err); }
   .msg .thumbs { display: flex; gap: 8px; flex-wrap: wrap; margin: 6px 0 2px; }
-  .msg .thumbs img { max-width: 220px; max-height: 180px; border-radius: 6px;
+  .msg .thumbs img { max-width: 220px; max-height: 180px; border-radius: 8px;
                      border: 1px solid var(--seek-line); }
   .msg .thumbs .doc { display: inline-flex; align-items: center; gap: 4px;
                       font-size: 12px; color: var(--seek-fg); background: var(--seek-panel);
-                      border: 1px solid var(--seek-line); border-radius: 6px; padding: 4px 8px; }
+                      border: 1px solid var(--seek-line); border-radius: 8px; padding: 4px 8px; }
   .msg .thumbs .doc .ic { width: 14px; height: 14px; }
   body.dropping form { outline: 2px dashed var(--seek-line-focus); outline-offset: -4px; }
 
@@ -575,20 +628,21 @@
   #side-head { display: flex; align-items: center; gap: 6px; padding: 8px 10px;
                border-bottom: 1px solid var(--seek-line); }
   #side-title { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap;
-                color: var(--seek-fg-soft); font-size: 12px; letter-spacing: .04em; }
+                color: var(--seek-fg-soft); font-size: 13px; font-weight: 500;
+                letter-spacing: .02em; }
   #side-head button { height: 26px; padding: 0 8px; font-size: 13px; flex: none; }
   #side-head .btn-icon { width: 26px; padding: 0; }
   #side-head .ic { width: 16px; height: 16px; }
-  #side-arch.on { background: var(--seek-accent); }  /* 归档可见位：高亮记开关态 */
+  #side-arch.on { background: var(--seek-sel); }  /* 归档可见位：高亮记开关态 */
   #side-ws-new { margin: 0; display: flex; gap: 6px; align-items: center;
               justify-content: center; }
   #side-search { margin: 0 10px 8px; background: var(--seek-inset); color: inherit;
-                 border: 1px solid var(--seek-line); border-radius: 6px; padding: 5px 8px;
+                 border: 1px solid var(--seek-line); border-radius: 8px; padding: 5px 8px;
                  font: inherit; font-size: 13px; outline: none; }
   #side-search:focus { border-color: var(--seek-line-focus); }
   #sess-list { flex: 1; overflow-y: auto; min-height: 0; }
   #side-foot { border-top: 1px solid var(--seek-line); }
-  #side-foot button { width: 100%; border-radius: 0; font-size: 12px; padding: 6px; }
+  #side-foot button { width: 100%; border-radius: 0; font-size: 13px; padding: 6px; }
   /* 收起态：标题/搜索/列表/翻页让位，新建与折叠钮收成图标轨 */
   body.side-collapsed #side-title, body.side-collapsed #side-search,
   body.side-collapsed #sess-list, body.side-collapsed #side-foot,
@@ -618,8 +672,8 @@
   #browser-body { flex: 1; display: flex; min-height: 0; }
   /* 行元素是 div（role=button）：行内还要装改名/归档操作钮与改名输入框，
      button 套 button/input 是非法嵌套，div 承载才装得下（W5 c_rqcuaa）。
-     底色仍显式透明落回 panel（别吃全局 button 的 accent 底）；
-     .cur 的 accent 底在各自规则里。 */
+     底色仍显式透明落回 panel（别吃全局 button 的软底）；
+     .cur 的选中底在各自规则里。 */
   .sess-row { display: block; width: 100%; text-align: left; border-radius: 0;
               border-bottom: 1px solid var(--seek-line-2); padding: 8px 12px;
               background: transparent; cursor: pointer; position: relative; }
@@ -627,13 +681,20 @@
                   white-space: nowrap; }
   /* t2 行是两段（左=时间/轮次/模型，右=per-session cost 列，c_6xktw4）：
      flex 让 cost 右贴不换行，左段自己省略。cost 走 --seek-usd（c_jf3grt：
-     成本不是健康度，别和绿撞语义）；数字用等宽数字列，改名/翻页时不抖。 */
+     成本不是健康度，别和绿撞语义）；数字用 tabular-nums 保列宽，但字族
+     跟着 body 的无衬线走（W6-1：会话列表元信息是 UI 文本，不是代码）。 */
   .sess-row .t2 { display: flex; gap: 8px; justify-content: space-between;
-                  color: var(--seek-fg-dim); font-size: 12px; margin-top: 2px; }
+                  color: var(--seek-fg-dim); font-size: 13px; line-height: 20px; margin-top: 2px; }
   .sess-row .t2l { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .sess-row .t2c { flex: none; color: var(--seek-usd); font-variant-numeric: tabular-nums; }
-  .sess-row.cur { background: var(--seek-accent); }
-  /* 选中行的 t2 升主文色：accent 底压 dim 只有 ~3.2:1（暗侧），fg 上 7.6 */
+  .sess-row .t2c { flex: none; color: var(--seek-usd);
+                   font-variant-numeric: tabular-nums; }
+  /* 悬停行（W6-1，dsh interactive-bg-hover）：列表行悬停提一档底色。
+     排在 .cur 之前：选中行自己的 --seek-sel 更亮，悬停不该把它盖掉；
+     .arch:not(.cur) 在更后面，归档行悬停也不翻回 normal 底。 */
+  .sess-row:hover:not(.cur) { background: var(--seek-hover); }
+  .sess-row.cur { background: var(--seek-sel); }
+  /* 选中行仍升主文色：选中层是 alpha 叠层（不是实色），升到 fg 后两主题都
+     留足余量（暗 13.3、亮 15.9）；dsh 的选中行同款做法。 */
   .sess-row.cur .t2 { color: var(--seek-fg); }
   .sess-row.cur .t2c { color: var(--seek-fg); }
   /* 归档行（c_lbys7d）：不再用整行 opacity——.55 叠在 panel 上合成后 t2
@@ -641,20 +702,26 @@
      降一档（inset 是「页面底」那一档，暗更暗、亮更白，两个方向都表示
      「非活动面」），文字保持 fg/fg-dim：t1 12.9/16.7、t2 6.0/6.1。归档态
      另由 t2 的「已归档 ·」前缀与行内归档钮表达，不靠整体透明度。
-     :not(.cur) 是让「归档 + 选中」仍吃 accent 底（.cur 与 .arch 同特异
+     :not(.cur) 是让「归档 + 选中」仍吃选中底（.cur 与 .arch 同特异
      性，本规则在其后，不排除会盖掉选中底）。 */
   .sess-row.arch:not(.cur) { background: var(--seek-inset); }
   .sess-row:focus-visible { outline: 1px solid var(--seek-line-focus); }
-  /* 悬停/聚焦才亮的行内操作组：底色取侧栏底，盖住底下文字避免叠字 */
+  /* 悬停/聚焦才亮的行内操作组。行有了悬停层之后它不能再靠底色盖字：补丁色
+     跟不了悬停层/选中层/归档底，会在提过一档的行上显出一块异色（亮偏浅、
+     暗偏深）。改成行自己让位——padding 落在行上而不是 .t1/.t2 上，行内布局
+     怎么改都成立。68 = 原右内边距 12 + 操作组占位 56（right 6 + 两钮 46 +
+     组内边距 4）。 */
   .sess-acts { position: absolute; right: 6px; top: 50%;
                transform: translateY(-50%); display: none; gap: 2px;
-               background: var(--seek-panel); padding: 2px; border-radius: 6px; }
+               padding: 2px; border-radius: 8px; }
+  .sess-row:hover, .sess-row:focus-within { padding-right: 68px; }
+  .sess-row.editing { padding-right: 12px; }   /* 改名态操作组已隐藏，输入框不让位 */
   .sess-row:hover .sess-acts, .sess-row:focus-within .sess-acts { display: flex; }
   .sess-acts button { padding: 0; font-size: 12px; }
   .sess-acts .ic { width: 13px; height: 13px; }
   /* 行内改名：编辑态下标题/操作让位给输入框（Enter 提交 / Esc 取消） */
   .sess-edit { display: none; width: calc(100% - 16px); background: var(--seek-inset);
-               color: inherit; border: 1px solid var(--seek-line-focus); border-radius: 6px;
+               color: inherit; border: 1px solid var(--seek-line-focus); border-radius: 8px;
                padding: 4px 8px; font: inherit; font-size: 13px; outline: none; }
   .sess-row.editing .sess-edit { display: block; }
   .sess-row.editing .t1, .sess-row.editing .t2,
@@ -667,14 +734,14 @@
   .ws-head { display: flex; align-items: center; gap: 4px; padding: 6px 6px 6px 2px;
              background: var(--seek-inset); cursor: pointer;
              border-bottom: 1px solid var(--seek-line-2); }
-  .ws-head.cur { box-shadow: inset 2px 0 0 var(--seek-accent); }
-  .ws-head .ws-caret { display: inline-flex; flex: none; padding: 2px; background: transparent; border-radius: 4px; }
+  .ws-head.cur { box-shadow: inset 2px 0 0 var(--seek-brand); }  /* 选中标记=品牌蓝（dsh nav-active） */
+  .ws-head .ws-caret { display: inline-flex; flex: none; padding: 2px; background: transparent; border-radius: 8px; }
   .ws-head .ic { width: 14px; height: 14px; flex: none; color: var(--seek-fg-dim); }
   .ws-head .ws-caret .ic { width: 13px; height: 13px; }
   .ws-head .ws-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
-                      white-space: nowrap; color: var(--seek-fg-soft); font-size: 12px;
+                      white-space: nowrap; color: var(--seek-fg-soft); font-size: 13px;
                       letter-spacing: .02em; }
-  .ws-head .ws-cnt { flex: none; color: var(--seek-fg-dim); font-size: 11px;
+  .ws-head .ws-cnt { flex: none; color: var(--seek-fg-dim); font-size: 12px;
                      font-variant-numeric: tabular-nums; }
   .ws-head .ws-acts { flex: none; display: none; gap: 2px; }
   .ws-head:hover .ws-acts, .ws-head:focus-within .ws-acts { display: flex; }
@@ -689,13 +756,13 @@
   #sess-meta { flex: 1; min-width: 0; color: var(--seek-fg-dim); white-space: nowrap;
                overflow: hidden; text-overflow: ellipsis; }
   #sess-msgs { flex: 1; overflow-y: auto; padding: 14px; }
-  .smsg { margin: 6px 0; padding: 8px 12px; border-radius: 8px;
+  .smsg { margin: 6px 0; padding: 8px 12px; border-radius: 22px;
           background: var(--seek-soft); white-space: pre-wrap; word-break: break-word; }
   .smsg.user { background: var(--seek-accent); }
   .smsg.user .swho { color: var(--seek-fg); }   /* 同 .cur：accent 底不压 dim */
   .smsg.tool { background: var(--seek-panel); color: var(--seek-fg-soft); }
   .smsg.tool pre { background: var(--seek-inset); }
-  .swho { font-size: 11px; color: var(--seek-fg-dim); margin-bottom: 4px; }
+  .swho { font-size: 12px; color: var(--seek-fg-dim); margin-bottom: 4px; }
   .stool { display: flex; align-items: center; gap: 4px; min-width: 0;
            word-break: break-word; color: var(--seek-warn); }
   /* 工具结果限高：单条大输出不把整页 paint 撑爆（分页外的第二道界） */
@@ -717,16 +784,16 @@
   .ag-row { display: block; width: 100%; text-align: left; border-radius: 0;
             border-bottom: 1px solid var(--seek-line-2); padding: 8px 12px;
             background: transparent; }
-  .ag-row.cur { background: var(--seek-accent); }
+  .ag-row.cur { background: var(--seek-sel); }
   .ag-row .t1 { display: flex; gap: 6px; align-items: baseline; }
   .ag-row .desc { flex: 1; overflow: hidden; text-overflow: ellipsis;
                   white-space: nowrap; }
   .ag-row .t2 { display: block; color: var(--seek-fg-dim); font-size: 12px; margin-top: 2px; }
-  /* 选中行的 t2 升主文色（c_lbys7d）：同 .sess-row.cur——accent 底压 dim
-     只有 3.59:1（暗侧），fg 上 7.73；亮色侧 4.85 一并对齐（13.2）。 */
+  /* 选中行的 t2 升主文色（c_lbys7d）：同 .sess-row.cur——选中层压 dim 的余量
+     薄，升到主文色后两主题都留足。 */
   .ag-row.cur .t2 { color: var(--seek-fg); }
   .ag-badge { display: inline-flex; align-items: center; gap: 2px;
-              font-size: 11px; flex: none; white-space: nowrap; }
+              font-size: 12px; flex: none; white-space: nowrap; }
   .ag-badge .ic { width: 10px; height: 10px; }
   /* 三态徽标（卡 c_4doebx）：running/done/error 走类名而不是内联色——
      颜色一处定义，无头验收读 class/dataset.status 即断言面。值走 token
@@ -746,10 +813,6 @@
   .ag-field .v { color: var(--seek-fg); overflow: hidden; text-overflow: ellipsis;
                  white-space: nowrap; }
   #ag-last { flex: 1; overflow-y: auto; padding: 14px; }
-  #ag-last pre { background: var(--seek-inset); border: 1px solid var(--seek-line); border-radius: 6px;
-                 padding: 8px 10px; margin: 6px 0; overflow-x: auto;
-                 white-space: pre; font: inherit; }
-  #ag-last code { background: var(--seek-panel); border-radius: 4px; padding: 0 4px; }
 
   /* ---- 记忆浏览器 + 统计视图（W4.5 资产面 UI·二）---- */
   .pane { flex: 1; display: flex; flex-direction: column; min-height: 0; }
@@ -758,7 +821,7 @@
   .pane-head { display: flex; gap: 8px; align-items: center; padding: 6px 14px;
                border-bottom: 1px solid var(--seek-line); }
   .pane-head select { background: var(--seek-inset); color: inherit; border: 1px solid var(--seek-line);
-                      border-radius: 6px; padding: 4px 8px; font: inherit;
+                      border-radius: 8px; padding: 4px 8px; font: inherit;
                       max-width: 60%; }
   .pane-head .cnt { color: var(--seek-fg-dim); font-size: 12px; }
   #mem-body { flex: 1; display: flex; min-height: 0; }
@@ -767,7 +830,7 @@
   .mem-row { display: block; width: 100%; text-align: left; border-radius: 0;
              border-bottom: 1px solid var(--seek-line-2); padding: 8px 12px;
              background: transparent; }
-  .mem-row.cur { background: var(--seek-accent); }
+  .mem-row.cur { background: var(--seek-sel); }
   .mem-row .t1 { display: flex; align-items: center; gap: 4px; min-width: 0;
                  overflow: hidden; }
   .mem-row .t1 .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -776,8 +839,8 @@
                  font-size: 12px; margin-top: 2px; min-width: 0; }
   .mem-row .t2 .tx { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .mem-row .t2 .ic { width: 12px; height: 12px; color: var(--seek-warn); flex: none; }
-  /* 选中行 t2 升主文色（c_lbys7d）：accent 底压 dim 只有 3.59:1（暗侧），
-     fg 上 7.73。.t2 .ic 的 warn 是图标位（4.9:1，1.4.11 的 3:1 门槛），
+  /* 选中行 t2 升主文色（c_lbys7d）：选中层压 dim 的余量薄，升到主文色同
+     .sess-row.cur。.t2 .ic 的 warn 是图标位（1.4.11 的 3:1 门槛），
      它直接声明在 svg 上，不受父级这条 color 影响，语义色保留。 */
   .mem-row.cur .t2 { color: var(--seek-fg); }
   #mem-detail { flex: 1; display: flex; flex-direction: column; min-width: 0; }
@@ -787,14 +850,10 @@
   #mem-meta { padding: 6px 14px; border-bottom: 1px solid var(--seek-line); color: var(--seek-fg-dim); }
   #mem-tags { padding: 4px 14px; border-bottom: 1px solid var(--seek-line); }
   #mem-tags .chip { display: inline-block; background: var(--seek-panel); border: 1px solid var(--seek-line);
-                    border-radius: 10px; padding: 0 8px; margin: 2px 4px 2px 0;
+                    border-radius: 999px; padding: 0 8px; margin: 2px 4px 2px 0;
                     font-size: 12px; color: var(--seek-fg-soft); }
   #mem-content { flex: 1; overflow-y: auto; padding: 14px;
                  white-space: pre-wrap; word-break: break-word; }
-  #mem-content pre { background: var(--seek-inset); border: 1px solid var(--seek-line); border-radius: 6px;
-                     padding: 8px 10px; margin: 6px 0; overflow-x: auto;
-                     white-space: pre; font: inherit; }
-  #mem-content code { background: var(--seek-panel); border-radius: 4px; padding: 0 4px; }
   /* 统计面板节奏（c_jf3grt）：卡片间距/内边距原本靠每张卡 12px margin 堆，
      末卡还多一截尾巴、三张快照卡竖排到 1/3 屏以下。改成「容器管间隙、
      卡不管外边距」的单一节奏（column gap 12 + 面板 padding 14，与设置面板
@@ -806,14 +865,14 @@
   #stat-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
                 gap: 12px; align-items: start; }
   #stat-cards > .pane-hint { grid-column: 1 / -1; padding: 0 2px; }
-  .stat-card h3 { margin: 0 0 8px; font-size: 13px; color: var(--seek-fg-soft); font-weight: normal; }
+  .stat-card h3 { margin: 0 0 8px; font-size: 14px; color: var(--seek-fg-soft); font-weight: 600; }
   .stat-row { display: flex; justify-content: space-between; gap: 12px;
               padding: 3px 0; }
   .stat-row .v { color: var(--seek-fg); font-variant-numeric: tabular-nums; }
   /* 成本数字走 --seek-usd（c_jf3grt）：命中率条/趋势的绿是「健康度」，
      钱不是健康度——同色会让「花了 $3」读成「缓存命得好」。 */
   .stat-row .v.usd { color: var(--seek-usd); }
-  .stat-bar { height: 10px; border-radius: 5px; background: var(--seek-accent); overflow: hidden;
+  .stat-bar { height: 10px; border-radius: 999px; background: var(--seek-line); overflow: hidden;
               margin-top: 8px; }
   .stat-bar .hit { height: 100%; background: var(--seek-ok); }
   /* ---- 主区空态（c_jf3grt）----
@@ -823,11 +882,11 @@
   .chat-empty { display: flex; flex-direction: column; align-items: center;
                 justify-content: center; gap: 10px; min-height: 100%;
                 padding: 24px 16px; text-align: center; }
-  .chat-empty .ce-t { color: var(--seek-fg-soft); font-size: 15px; }
-  .chat-empty .ce-x { color: var(--seek-fg-dim); font-size: 13px; line-height: 1.7;
+  .chat-empty .ce-t { color: var(--seek-fg-soft); font-size: 21px; line-height: 30px; font-weight: 600; }
+  .chat-empty .ce-x { color: var(--seek-fg-dim); font-size: 13px; line-height: 20px;
                       max-width: 46ch; }
   .chat-empty .ce-x code { background: var(--seek-panel); border: 1px solid var(--seek-line);
-                           border-radius: 4px; padding: 0 4px; color: var(--seek-fg-soft); }
+                           border-radius: 8px; padding: 0 4px; color: var(--seek-fg-soft); }
   .chat-empty .ce-acts { margin-top: 2px; }
   .chat-empty .ce-acts button { font-size: 13px; padding: 6px 14px; }
 
@@ -840,8 +899,8 @@
   .tseg { display: inline-flex; gap: 4px; }
   /* 窗口钮长在软底统计卡内：同 #set-theme，取 panel 一档留边界。 */
   .tbtn { color: var(--seek-fg-soft); background: var(--seek-panel);
-          border-radius: 6px; padding: 2px 8px; font: inherit; font-size: 12px; }
-  .tbtn.on { color: var(--seek-fg); background: var(--seek-accent); }
+          border-radius: 12px; padding: 2px 8px; font: inherit; font-size: 12px; }
+  .tbtn.on { color: var(--seek-fg); background: var(--seek-sel); }
   #trend-plot { position: relative; min-height: 96px; margin-top: 8px; }
   #trend-plot svg { display: block; width: 100%; height: 96px; }
   .axis { stroke: var(--seek-line); stroke-width: 1; }
@@ -854,9 +913,9 @@
   .tguide { stroke: var(--seek-fg-dim); stroke-width: 1; stroke-dasharray: 2 2; }
   /* 轴标签（c_lbys7d）：9px 是全文件最小字号，任何 DPR 下都读不动；
      11px 与 .tlabel（工具详情的字段标签）同档，是次级文字的最小可读档。 */
-  .tlab { fill: var(--seek-fg-dim); font-size: 11px; }
+  .tlab { fill: var(--seek-fg-dim); font-size: 12px; }
   #trend-tip { position: absolute; z-index: 2; background: var(--seek-inset);
-               border: 1px solid var(--seek-line); border-radius: 6px; padding: 4px 8px;
+               border: 1px solid var(--seek-line); border-radius: 8px; padding: 4px 8px;
                font-size: 12px; color: var(--seek-fg); pointer-events: none;
                white-space: nowrap; }
 
@@ -872,25 +931,29 @@
   #set-body { flex: 1; overflow-y: auto; padding: 14px; }
   .set-card { background: var(--seek-soft); border-radius: 8px; padding: 12px 14px;
               margin-bottom: 12px; }
-  .set-card h3 { margin: 0 0 8px; font-size: 13px; color: var(--seek-fg-soft);
-                 font-weight: normal; }
+  .set-card h3 { margin: 0 0 8px; font-size: 14px; color: var(--seek-fg-soft);
+                 font-weight: 600; }
   .set-row { display: flex; justify-content: space-between; gap: 12px;
              padding: 3px 0; }
   .set-row .k { color: var(--seek-fg-dim); }
-  .set-row .v { color: var(--seek-fg); text-align: right; word-break: break-all; }
-  .set-note { color: var(--seek-fg-dim); font-size: 12px; margin-top: 6px;
-              line-height: 1.45; }
+  /* 设置行的值（W6-1 口径）：这是 UI 文本行——provider 名、开关态、tokens
+     数、路径混排，整块读的是「配置长什么样」而不是代码，故跟 body 的无衬线
+     走，只有数字列用 tabular-nums 对齐。等宽只留给 pre/code/kbd/显式 .mono。 */
+  .set-row .v { color: var(--seek-fg); text-align: right; word-break: break-all;
+                font-variant-numeric: tabular-nums; }
+  .set-note { color: var(--seek-fg-dim); font-size: 13px; margin-top: 6px;
+              line-height: 20px; }
   /* 主题三态切换（亮/暗/跟随系统）：按钮组，当前态高亮。次操作钮
      在软底卡内取 panel 一档（c_25d2ey）：soft-on-soft 没有边界，
      面板底色随主题两向都留一档明度差。 */
   #set-theme { display: flex; gap: 8px; flex-wrap: wrap; }
   #set-theme button { padding: 5px 12px; font-size: 13px; background: var(--seek-panel); }
-  #set-theme button.on { background: var(--seek-accent); }
+  #set-theme button.on { background: var(--seek-sel); }
 
   /* ---- hooks 审计面板（W5 c_xz2bey 实时审计视图）---- */
   body:not(.hooks-view) #hooks { display: none; }
   #hk-log { flex: 1; overflow-y: auto; padding: 8px 14px;
-            font: 12px/1.8 ui-monospace, Menlo, Consolas, monospace; }
+            font-family: var(--seek-mono); font-size: 12px; line-height: 19px; }
   .hk-row { display: flex; gap: 10px; white-space: nowrap; }
   .hk-row .hk-ts { color: var(--seek-fg-dim); flex: none; }
   .hk-row .hk-hook { color: var(--seek-ok); flex: none; max-width: 180px;
@@ -901,7 +964,7 @@
   #hk-cnt { cursor: default; }
   #hk-cnt.fresh { color: var(--seek-warn); cursor: pointer; }
   #hk-pause { padding: 4px 12px; font-size: 13px; }
-  #hk-pause.held { background: var(--seek-accent); }
+  #hk-pause.held { background: var(--seek-sel); }
 
   /* ---- 390px 手机宽响应式（W5 卡 c_lqtt2m）----
      单一 ≤480px 断点管全部窄屏降级（640px 块只管输入弹层，互不吞）。
@@ -958,18 +1021,19 @@
      icon-style-consistent）。消息正文里的 emoji 是用户/模型内容，不属于
      本 sprite 管辖。图标随文字色走 currentColor：底色深浅由所在按钮档位
      决定，不另设图标色 token。
-     ==== 按钮三档（card c_25d2ey 收敛口径，全页一套语言）====
+     ==== 按钮三档（card c_25d2ey 收敛口径，全页一套语言；W6-1 改主 CTA 配色）====
        0. 缺省 = 次操作：soft 底（--seek-soft）文字钮——顶栏指令组/视图组、
           主题三选、加载更多、#sess-back、#hk-pause、审批卡 n/a、目录
           浏览器。图标 14px + 文字。CSS 基线即此档，各钮不再自造底色。
-       1. 主操作：.btn-primary（accent 实底）——每屏唯一主 CTA：#send
-          （生成中变 .stop 停止键）、#reconn 手动重连、审批卡「允许」。
-          不加图标（文字即语义）。
+       1. 主操作：.btn-primary（单色，--seek-primary/--seek-primary-fg）——
+          亮=近黑底白字、暗=近白底黑字；每屏唯一主 CTA：#reconn 手动重连、
+          审批卡「允许」。#send 是品牌蓝实底（--seek-cta，全页唯一蓝按钮），
+          生成中变 .stop 停止键。不加图标（文字即语义）。
        2. 图标钮：.btn-icon（soft 底 26×26 方框，.sm=22×22 行内档）——
           侧栏 新建/归档/折叠、会话行 改名/归档、附件、麦克风。SVG 16px
           居中，title+aria-label 双挂（icon-only button 必须 aria-label，
           ui-ux-pro-max aria-labels）。开关态用 .on / .rec / .stop 高亮底
-          （accent / rec），不换图标语义。 -->
+          （--seek-sel / --seek-rec），不换图标语义。 -->
 <svg class="sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
   <defs>
     <symbol id="i-brain" viewBox="0 0 24 24"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z"/></symbol>
