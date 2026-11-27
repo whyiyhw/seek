@@ -1184,10 +1184,10 @@ func TestWeb_PageSkeletonW62(t *testing.T) {
 		}
 	}
 	for _, need := range []string{
-		`id="conv-head"`,                                       // the one conversation header
-		`id="composer-meta"`,                                   // meter row under the composer
-		`id="side-new"`,                                        // full-width new-session button
-		`id="side-find"`,                                       // search toggle (collapsed #side-search)
+		`id="conv-head"`,     // the one conversation header
+		`id="composer-meta"`, // meter row under the composer
+		`id="side-new"`,      // full-width new-session button
+		`id="side-find"`,     // search toggle (collapsed #side-search)
 		`<header id="status" class="warn" aria-live="polite">`, // hidden but alive
 		`clip-path: inset(50%)`,                                // the visually-hidden pattern itself
 		`fmtAgo`,                                               // relative time on session rows
