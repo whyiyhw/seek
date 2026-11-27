@@ -29,7 +29,10 @@
 - c_nfeloo：修 ACP/TUI 非 opencode 启动时 modelcap 视觉误判：catalogue grants 只在 provLabel==OpenCode 装
 - c_bohzri：doc-slim：docs/pitfalls 超预算 169KB — 按「book-overlap 编辑」既定口径降到 533500B
 - c_zib76h：web 审查脚本与资产面小修：截图等侧栏过渡 / 后台夹具路径规范化 / 记忆空态边框 / 统计图「$ $」
-- c_7bqiq5：seek acp × Paseo：ask_user/propose 恒 ErrDisabled — Paseo 0.17.4 不申报 elicitation.form，也不实现 createElicitation handler
+- c_7bqiq5：seek acp × Paseo：ask_user/propose 双路承载——申报 elicitation.form 的客户端走表单（Zed 零变化），其余客户端退到 session/request_permission（每题一个选择题弹窗，取消/超时/-32601 一律 cancelled）
+  - 第一段（已进 main 13db227e）：Paseo 0.17.4 不申报 elicitation.form 且**没有 createElicitation handler**（读 app.asar 实证），所以「在 paseo config 里补 capability」是死路——声明能到线上，请求只会拿 -32601、被合流成 cancelled，模型误读成「用户跳过了」。文档改实测结论。
+  - 第二段（本分支）：`acpAskUser` 在 initialize 按能力挑通道。fallback = `session/request_permission`，每题一个 popup，选项全 `allow_once` + 末尾 `seek:skip` 作 `reject_once`——≥2 个同种 allow 正是客户端 chooser 判据，同时关掉 unattended 宿主的 auto-accept。**多选不承载**（每项拆 yes/no 会退化成普通审批对，被 auto-accept 静默全选 = 伪造答案），直接 cancelled + stderr 说明；Skip 只跳该题，协议级收尾停整批。新增 `acp.ParsePermissionSelection`（取原始 id，不做权限词汇分类——否则 "project" 会被当未知回显判 deny）与 `acp.MethodRequestPermission`（审批道与问句道共用一个常量）。
+  - ⚠️ 无头车道需设 `SEEK_ACP_ASK_TIMEOUT=5`：以前立刻拿 ErrDisabled，现在会真弹窗等到超时。
 
 ## v0.13.1（2026-11-24）
 

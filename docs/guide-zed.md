@@ -124,7 +124,7 @@ seek 出现在 **Agent 面板**里，不在 Extensions：
 | **session resume** | **已修**：`agentCapabilities.loadSession=true`（有持久化时），`session/load` 会读出那份 JSONL transcript、重新锚定 cwd、恢复会话模型车道、把整段历史按 `user_message_chunk` / `agent_message_chunk` / `tool_call(_update)` 回放给客户端，并在回放**之后**才回响应。`session/new` 返回的 `sessionId` 现在是**持久 transcript id**（客户端存下来才能继续；这也是 paseo 存 native session id 的依据）。paseo 据此开启 session.persistence。`--no-save` 在 ACP 车道够不到（flag 停在 `acp` 位置参数），所以实际部署里 `loadSession` 恒为 true；无持久化的兜底路径会退回项目名并申报 false。 | **已修**（c_chzxgg，2026-11-21）：initialize 现在同时申报 `sessionCapabilities.list`（schema 形状是对象 `{}`，在场即"支持"，不是布尔；与 loadSession 同一道持久化闸），`session/list` 扫 transcript 存储返回 `{sessions:[{sessionId,cwd,title,updatedAt}]}`——数据源与 `session/load` 同一个 store（列出的 id 必可 load），标题取首条 user message 首行（80 rune 截断，与 serve `/rpc session/list` 同一派生），mtime 是 header 的 UpdatedAt（RFC3339）。空仓答 `sessions:[]`（数组恒在，不是 null）；`cwd` 过滤可选；不分页（单页全量，不回 nextCursor）。**未申报 `sessionCapabilities.delete`**——删 transcript 走 TUI/文件系统，不在协议上开口。 |
 | **会话数** | **已修（P1-2，backlog ③）**：一个 `seek` 进程可同时服务 **N 个会话**——`session/new` 第二次调用**新开一会话**（新的持久 transcript id，首个完成的回合后落盘），不再重锚定已有会话；第一个会话仍延续启动时的 transcript（单会话行为不变）。**per-session 各自独立的是四根轴**：cwd 锚（每次该会话的回合把进程+权限策略锚到它的目录）、权限策略的会话轴（plan 模式 + `[a]` 常许清单，各会话互不影响）、历史栈（各写各的 transcript）、模型车道（一个会话换模型不动另一个）。实现是**回合级时间复用**：agent/工具注册表/进程 cwd 是一台共享机器，跨会话的回合在 turn 闸上排队串行（两会话并发 prompt 不串扰，但不同时跑）；`session/set_config_option` / `set_mode` / `session/load` 的「回合间才受理」窗口相应变为「任一会话无回合在跑时」。**仍是进程级（非 per-session）的**：系统提示/memory/skills/checkpoint 子代理挂载——都按启动目录焊死，与会话 cwd 无关（单会话时代即如此）。ACP v1 无 session/delete，会话状态随进程存亡。 | 并行回合（每会话独立 agent+注册表）需要把 1700 行启动接线按会话重建，收益是跨会话真并发——当前回合串行对 Zed/paseo 的人机节奏无感，若出现跨会话长回合互等的真实场景再立卡。 |
 | **slash 命令** | **已修（P2，backlog ④）**：`/plan` 经 **session mode 通道**协议化——`session/new`/`session/load` 回 `modes` 能力（`currentModeId` + `availableModes: [default, plan]`），客户端用 `session/set_mode` 切换，成功后 `current_mode_update` 通知先于 `{}` 响应（§5.3）。**其余 slash 维持 TUI-only**（选型理由逐条列在 §5.3）。模型选择早已有协议通道（§5.2 configOptions）。 | 后续若接 propose 的人工审批门（plan 态 propose→approve 的协议承载），plan-execute 子态才有 ACP 形态；当前 ACP 下 plan 态 = 只读分析 + 计划文本，执行需切回 default。 |
-| **capabilities** | **已修（P1-3）**：`initialize` 申报 `promptCapabilities.image=true` + `agentCapabilities.loadSession`（按持久化能力申报），并做**真正的版本协商**——响应带「客户端请求 ∩ seek 支持」里的最高版（现状只有 1），请求更高版则降级申报（响应即申报，stderr 另记一行 `acp: initialize negotiated requested=N answered=1 (downgrade)`）。embedded context 仍未申报（seek 不处理该块类型）。**读侧**：`initialize` 现在也解 `clientCapabilities`，只读 `elicitation.form`——它是 ask_user 车道能否可达的唯一开关（§5.7）。 | embedded-context 块（编辑器选中的代码片段）若要支持，另加 capability + 解析分支。 |
+| **capabilities** | **已修（P1-3）**：`initialize` 申报 `promptCapabilities.image=true` + `agentCapabilities.loadSession`（按持久化能力申报），并做**真正的版本协商**——响应带「客户端请求 ∩ seek 支持」里的最高版（现状只有 1），请求更高版则降级申报（响应即申报，stderr 另记一行 `acp: initialize negotiated requested=N answered=1 (downgrade)`）。embedded context 仍未申报（seek 不处理该块类型）。**读侧**：`initialize` 现在也解 `clientCapabilities`，只读 `elicitation.form`——它决定 ask_user 走表单还是走 `session/request_permission` fallback（§5.7）。 | embedded-context 块（编辑器选中的代码片段）若要支持，另加 capability + 解析分支。 |
 | **per-session cwd** | **已修**：`session/new` 的 `cwd` 生效——进程与权限策略一起切到该目录（Zed 传的就是启动目录，行为不变）。多会话下（P1-2）cwd 是**会话轴**：每个会话的回合把两半锚（进程 chdir + policy reanchor）切到自己的目录，回合间不漂移（见 §5 会话数行）。 | — |
 | **MCP 透传** | **已修**：`session/new`（以及 `session/load`）的 `mcpServers` 现在生效——stdio 条目按声明起子进程、接进 seek 的 MCP 客户端栈（与 `~/.seek/mcp.json` 同一套 `pkg/mcp` 传输 + 握手 + `tools/list`），工具以 **`mcp__<server>__<tool>`** 进会话工具面（三段式，与 mcp.json 的 `<server>__<tool>` 可区分）；会话结束（stdin EOF / 进程退出）即断连回收子进程。http/sse/acp 变体跳过并在 stderr 说原因，**不**让 `session/new` 失败。不带 `mcpServers` 时零变化（见 §5.5）。 | 多 session 各自一套 roster（现多会话已落地但 roster 仍进程级共享，声明变化只告警不热换）。 |
 
@@ -202,11 +202,14 @@ wire 形状与参照实现出处：[`docs/prd/archive/feature-paseo-provider.md`
 
 **边界（诚实清单）**：plan 态模型被提醒词指示走 `propose`，但 propose 的人工审批门（TUI picker 四选项）在 ACP 车道无协议承载——ACP 下 plan 态的现实用途是**只读分析 + 计划文本产出**，人审后切回 `default` 执行。plan 态两态行为差异有真二进制 e2e 钉死（`cmd/seek/acp_mode_e2e_test.go`：plan 态 write 被拒不落盘 + 提醒词在轮内；default 态同一 write 落盘 + 提醒词消失）。
 
-**`ask_user` / `propose` 在 ACP 车道**（2026-11-25 更新：从「不存在」变成「客户端申报才存在」）。要点：**协议有自己的方法**——`elicitation/create`（form 模式），由 `initialize` 的 `clientCapabilities.elicitation.form` 门控。seek 现在就用它：客户端在握手里申报了 form elicitation，`askPolicy` 才在这一条车道上被点成 `ModeAsk`，`ask_user` / `propose` 的 2–4 选项（含 batch 多题、自由文本）渲染成客户端的表单；没申报的客户端**逐字节维持旧行为**（`ErrDisabled`）。§5.7 是完整说明。
+**`ask_user` / `propose` 在 ACP 车道**（2026-11-27 更新：双路承载）。要点：ACP 车道**永远有人**（编辑器里坐着的那位），所以这条车道总是把 `askPolicy` 点成 `ModeAsk`——问**怎么送到人面前**才分两条路：
 
-为什么默认不再走 `session/request_permission`：那个方法的语义被权限钉死（三选项 allow_once / allow_always / reject_once，无 free-text，无多题），硬塞会把它渲染成「是否允许」而不是「你选哪个」。`elicitation/create` 是协议为此设计的请求型方法，形状（属性名 / enum / 多选数组）由 seek 的 schema 决定，客户端只负责渲染。（未申报 elicitation 的客户端——Paseo 那种连 handler 都没有的——要不要退到它当承载，是 §5.7 末条那个未定取舍。）
+- **申报了 `clientCapabilities.elicitation.form` 的客户端**（真 Zed、zcode bridge）→ 走协议的 `elicitation/create` form 模式：一批问句渲染成一张表单，枚举 + 自由文本双字段，多选也是数组字段。这是 §5.7 前半的老路，行为一字未变。
+- **没申报的客户端**（Paseo 0.17.4 就是，它连 `createElicitation` handler 都没有）→ 退到 `session/request_permission`：**每题一个 popup**，选项就是问句自己的 2–4 行（全 `allow_once`）+ 末尾一行 Skip（`reject_once`）。选中的 id 就是答案。
 
-没申报 elicitation 的客户端（含 Paseo 0.17.4 的写死基线——它同时没有 handler，见 §5.7——以及所有现有测试的假客户端）行为是可预期的：`ask_user` / `propose` 返回 **`ErrDisabled`** ——「interactive question not available in this mode — rephrase as a plain-text question in your reply」，模型据此把问题改写进正文，回合照常完成。这条文案是有意的指令面（不是日志），2026-11-23 之前这里报的是 `ErrNoCallback`（"... (programming error)"），模型读到"程序错误"会重试同一个调用；现在 `askPolicy` 出生即 `ModeDisabled`，TUI 与申报了 elicitation 的 ACP 客户端各自在自己入口显式 `SetMode(ModeAsk)`，新加的车道默认继承正确姿态。钉死用例：`cmd/seek/askuser_lane_test.go`（print 与「不申报的 ACP」两条车道）+ `cmd/seek/acp_askuser_e2e_test.go`（申报的 ACP，四条 lane：答题 / 拒答 / 超时 / 不申报）。
+两条路的差别是刻意的，因为 `request_permission` 的语义被权限钉死成单选：多选承载不了（每项拆 yes/no 会被无人值守宿主的 auto-accept 全部静默答 yes——等于伪造用户答案），自由文本也没有承载位。遇到这两种问句，fallback 直接回 `cancelled:true` 并在 stderr 说明，模型据此把问题改写进正文——诚实胜过假答案。完整形状与收尾表见 §5.7。
+
+`print` / `rpc` / `goal` / `benchmark` 这些**真没人**的车道不受影响：`askPolicy` 仍出生 `ModeDisabled`，`ask_user` / `propose` 返回 **`ErrDisabled`**（"rephrase as a plain-text question in your reply"）——这条文案是有意的指令面，2026-11-23 之前这里报 `ErrNoCallback`（"... (programming error)"），模型读到"程序错误"会重试同一个调用。钉死用例：`cmd/seek/askuser_lane_test.go`（print 车道 ErrDisabled + ACP fallback 超时 → cancelled）+ `cmd/seek/acp_askuser_e2e_test.go`（申报的走表单、不申报的走 request_permission、decline、超时）+ `cmd/seek/acp_askuser_test.go`（两种弹窗形状与逐题收答案的单元层）。
 
 **①选型：为什么首批只协议化 /plan、其余维持 TUI-only**：
 
@@ -285,9 +288,9 @@ acp: mcp closed 1 server(s)
 
 ---
 
-### 5.7 `ask_user` / `propose` 的协议承载 `elicitation/create`
+### 5.7 `ask_user` / `propose` 的协议承载（双路：`elicitation/create` + `session/request_permission` fallback）
 
-**一句话**：客户端在 `initialize` 里申报 `clientCapabilities.elicitation.form`，ask_user/propose 就在这条车道上可达；不申报就维持 `ErrDisabled`。门控在能力上，不在车道名上。
+**一句话**：ACP 车道永远有人，所以 `askPolicy` 在这条车道上总是 `ModeAsk`；问句走哪条通道看客户端在 `initialize` 里申报了什么。申报 `clientCapabilities.elicitation.form` → 一张表单；不申报 → 每题一个 `session/request_permission` 弹窗（选择题形态）。门控在能力上，不在车道名上。
 
 **握手（客户端 → seek）**：
 
@@ -354,16 +357,61 @@ acp: mcp closed 1 server(s)
 | 客户端回 `-32601`（申报了但没实现） | 整批 Cancelled | 同上，带 JSON-RPC 错误文本 |
 | 断线 / turn 被 `session/cancel` | 整批 Cancelled | `acp: ask_user unanswered: …` |
 | 回合外被调用（不该发生） | 整批 Cancelled | `acp: ask_user not delivered: no active turn to ask in` |
+| **fallback**：该题选了 Skip | 该题 Cancelled，后续照问 | — |
+| **fallback**：协议级 cancelled / 超时 / 断线 / `-32601` | 整批停，余题 Cancelled | `acp: ask_user unanswered (request_permission): …` |
+| **fallback**：`multi_select` 问句 | 该题 Cancelled，**不发帧** | `acp: ask_user: multi-select question N not carried over session/request_permission …` |
 
-**为什么首选不是 `session/request_permission`**：那个方法的语义被权限钉死（三选项 allow_once / allow_always / reject_once，无 free-text，无多题）。`elicitation/create` 是协议为此设计的请求型方法，语义由 seek 的 schema 决定。（未申报 elicitation 的客户端要不要退到它当承载，见本段末尾那条未定取舍。）
+**退路：`session/request_permission`（客户端没申报 elicitation.form）**
+
+真 Zed / zcode bridge 走上面的表单；**没有 handler 的客户端（Paseo 0.17.4 就是）走这条**。它是唯一一个最小 ACP 客户端保证实现的"问人"方法——Paseo 实现了 `requestPermission`，还专门判「同种 allow 重复出现」的 **chooser** 形态（`isACPChooserRequest(options)`）并把 `toolCall.content` 当题干渲染，正好接得住选择题。
+
+**请求形状（seek → 客户端），每题一个**：
+
+```json
+{"jsonrpc":"2.0","id":"p1","method":"session/request_permission","params":{
+  "sessionId":"20261127-…",
+  "toolCall":{
+    "toolCallId":"ask-1",
+    "kind":"other",                       // 不是 execute/edit —— 这不是被门控的动作
+    "title":"Which scope?",               // 有的 overlay 只画这个
+    "content":[{"type":"content","content":{"type":"text","text":"user — private\nproject"}}]
+  },
+  "options":[
+    {"optionId":"user",      "name":"user — private", "kind":"allow_once"},
+    {"optionId":"project",   "name":"project",        "kind":"allow_once"},
+    {"optionId":"seek:skip", "name":"Skip this question", "kind":"reject_once"}
+  ]}}
+```
+
+每条形状都有一处落点，不只是风格：
+
+- **选项全 `allow_once`、Skip 是 `reject_once`**：≥2 个同种 allow 正是 Paseo 的 chooser 判据，它同时做两件事——关掉 auto-accept（无人值守宿主不会替你答题）并把 `content` 当题干渲染。只有一个选项的问句（模型给的选项最少 2 个，所以正常路径不会出现）会退化成普通审批观感。
+- **题干同时写进 `title` 和 `content`**：martty 一类 overlay 只画 title，Paseo/Zed 的详情面板画 content。
+- **选项描述折进 `name`**：`request_permission` 的选项只有一个 `name` 字符串，没有次级文本。
+- **`toolCallId` = `ask-<n>`**：一批多题时逐题唯一（schema 要求）。
+
+**响应**：`{"outcome":{"outcome":"selected","optionId":"project"}}`。解码用 `acp.ParsePermissionSelection`（拿**原始 id**，不做权限词汇分类）——不能用 `ParsePermissionOutcome`，那会把 `"project"` 当成未知回显判 deny。
+
+逐题语义：
+
+- 选了某个选项 → 该题 `ChosenIDs=[id]`。
+- 选了 Skip（`seek:skip`）→ **该题** `Cancelled:true`，**后面几题照问**（Skip 是"这题我不答"，不是"别问了"）。
+- 协议级收尾（`{"outcome":{"outcome":"cancelled"}}` / 超时 / 断线 / `-32601`）→ **整批停**，剩下的题保持 `Cancelled`（通道已经没了，再问也是空等）。
+- 回一个**没提供过的 id** → 该题 `Cancelled`（闭合菜单，同 `ParsePermissionOutcome` 的姿态）。
+- **`multi_select:true` 的问句不承载** → 直接 `Cancelled` + stderr 一行说明，**不发帧**。理由：`request_permission` 是单选，zcode 那种「每项拆一对 Include/Skip」在无人值守宿主眼里只是普通 `[allow_once, reject_once]` 对，auto-accept 会静默全选——那是伪造用户答案，比 cancelled 差得多。
+- **自由文本没有承载位**：Skip 就是诚实收尾，模型据此把问题改写进正文。
+
+**超时**：与表单路径共用 `SEEK_ACP_ASK_TIMEOUT`（秒，默认 600）。⚠️ 无头车道要显式收紧（`SEEK_ACP_ASK_TIMEOUT=5`）：以前这类车道的 `ask_user` 立刻拿 `ErrDisabled`、模型马上改写正文；现在会真的弹窗，等到超时才取消。这是**用一次最多 5 秒的等待换"有人在场时能真答"**；env 是既有旋钮，不新增机制。
+
+**为什么表单仍是首选**：`request_permission` 的语义被权限钉死（无自由文本、无多选、单题）。`elicitation/create` 是协议为此设计的请求型方法，形状（属性名 / enum / 多选数组）由 seek 的 schema 决定。fallback 是给"连 handler 都没有"的客户端兜底，不是替代。
 
 **客户端现状（2026-11-27 复核实测，写下来免得下次重查）**：
 
 - **Paseo 0.17.4 不申报，而且没有 handler——「配置里补 capability」这条路是死的**。两条事实都是读它的打包产物 `app.asar` 得到的：(a) 客户端能力基线是写死的常量 `BASE_ACP_CLIENT_CAPABILITIES = {fs:{readTextFile:false,writeTextFile:false},terminal:true}`，无 elicitation；(b) 它的 ACP session 客户端类只实现 `requestPermission` / `sessionUpdate` / `readTextFile` / `writeTextFile` / `createTerminal` / `terminalOutput` / `waitForTerminalExit` / `releaseTerminal` / `killTerminal`——**没有 `createElicitation`**（该类 ±20KB 区域内 `elicitation` 字样 0 命中；SDK 侧只有 agent 用来发送的 `Client.createElicitation`）。
-- **所以「在 `~/.paseo/config.json` 的 seek provider 里补 `clientCapabilities.elicitation.form`」不能做。** 声明确实能到线上（`ACPProviderOptionsSchema` 是 `.passthrough()`，provider 的 `providerOptions.clientCapabilities ?? this.clientCapabilities` 会覆盖基线），但服务端没有 handler，请求只会拿到 `-32601`；`acp_askuser.go` 按上表判成 `Cancelled`，模型读到的是「用户跳过了这个问题」——比未申报时的 `ErrDisabled`（明确指示把问题改写进正文）**更差**：模型会以为人放弃了回答，而不是以为这条车道不支持提问。
-- 因此**本机 Paseo 车道从未真正跑起来过一次 ask_user**：`/tmp/seek-acp.log`（345 MB / 10170 次真实握手）里 seek→client 的 `elicitation/create` 是 0 帧。
-- **zcode bridge 已实现同一条判断**（`zcode-acp-server/dist/server.js:1313` 的 `supportsElicitationForm()`，注释自述"When true, AskUserQuestion / ExitPlanMode can use the richer elicitation/create form UI; otherwise they fall back to session/request_permission"）——elicitation 这条路在别的客户端上是活的，不是纸面协议；真 Zed 依旧走表单，行为不变。
-- **Paseo 里活着的那条通道是 `session/request_permission`**（它的客户端实现了 `requestPermission`；`isACPChooserRequest(options)` 专门判「同种 allow 重复出现」并把 `toolCall.content` 当题干渲染，正是给 chooser 形态准备的）。**要不要用它承载选择题——每题一个 popup、选项全 allow_once + 末尾 Skip、多选拆成每项 yes/no、取消/超时/-32601 一律 Cancelled、模型侧契约写明「选项之外的需求请改写进正文」——是一个未定的取舍**：它等于给一个语义被权限钉死的协议方法塞选择题。倾向是双路（申报 elicitation 的客户端走表单、其余落这个 fallback），但决定权在维护者，不是 agent 自行拍板（卡 c_7bqiq5）。
+- **所以「在 `~/.paseo/config.json` 的 seek provider 里补 `clientCapabilities.elicitation.form`」不要做。** 声明确实能到线上（`ACPProviderOptionsSchema` 是 `.passthrough()`，provider 的 `providerOptions.clientCapabilities ?? this.clientCapabilities` 会覆盖基线），但服务端没有 handler，请求只会拿到 `-32601`；`acp_askuser.go` 判成 `Cancelled`，模型读到的是「用户跳过了这个问题」——而**不申报**时它会走上面那条 request_permission fallback，得到真答案。声明一个没有 handler 的能力，等于把一条能用的路换成一条死路。
+- 因此**在双路落地前，本机 Paseo 车道从未真正跑起来过一次 ask_user**：`/tmp/seek-acp.log`（345 MB / 10170 次真实握手）里 seek→client 的 `elicitation/create` 是 0 帧——那段历史正是本卡（c_7bqiq5）存在的原因。
+- **zcode bridge 已实现同一条判断**（`zcode-acp-server/dist/server.js:1313` 的 `supportsElicitationForm()`，注释自述"When true, AskUserQuestion / ExitPlanMode can use the richer elicitation/create form UI; otherwise they fall back to session/request_permission"）——它和我们走的是同一条双路：有表单用表单，没有就退 request_permission。真 Zed 依旧走表单，行为不变。
+- **Paseo 里活着的那条通道就是 `session/request_permission`**（它的客户端实现了 `requestPermission`；`isACPChooserRequest(options)` 专门判「同种 allow 重复出现」并把 `toolCall.content` 当题干渲染，正是给 chooser 形态准备的）。这就是上面那条 fallback 的实证依据——不是推测，是它自己的代码在等这种形状。
 
 ---
 
