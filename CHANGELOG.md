@@ -28,6 +28,7 @@
 - c_4gw4rd：证据目录归位到 docs/evidence/：两个 .butler-evidence-* 目录 git mv + 全部引用一次性更新
 - c_nfeloo：修 ACP/TUI 非 opencode 启动时 modelcap 视觉误判：catalogue grants 只在 provLabel==OpenCode 装
 - c_bohzri：doc-slim：docs/pitfalls 超预算 169KB — 按「book-overlap 编辑」既定口径降到 533500B
+- c_zib76h：web 审查脚本与资产面小修：截图等侧栏过渡 / 后台夹具路径规范化 / 记忆空态边框 / 统计图「$ $」
 
 ## v0.13.1（2026-11-24）
 
