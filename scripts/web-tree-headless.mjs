@@ -128,6 +128,10 @@ const snapshot = () => evalJS(`(() => ({
     txt: el.textContent,
     trows: [...el.querySelectorAll('.tcall')].map(t => ({
       txt: t.textContent,
+      // 状态载体是图标位与 .bad 类，不在文字里（c_25d2ey 起 ✔/✘ 走 sprite）。
+      nm: t.querySelector('.nm')?.textContent || '',
+      dur: t.querySelector('.dur')?.textContent || '',
+      ic: (t.querySelector('use')?.getAttribute('href') || '').replace('#i-', ''),
       bad: t.classList.contains('bad'),
       ml: parseFloat(getComputedStyle(t).marginLeft) || 0,
     })),
@@ -191,12 +195,22 @@ try {
     ck('嵌套：read 缩进一层（区间包含），grep 顶层',
       !!grep && !!read && read.ml > grep.ml && grep.ml === 0,
       JSON.stringify(rows.map(r => [r.txt, r.ml])));
-    ck('耗时：grep 行冻结秒级实值（✔ + · N.Ns）',
-      !!grep && /✔ grep · \d+\.\d+s/.test(grep.txt), grep && grep.txt);
-    ck('耗时：read 行也有冻结值', !!read && /✔ read · \d+\.\d+s/.test(read.txt),
-      read && read.txt);
-    ck('✘ bash 行 bad 态', !!bash && bash.bad && /^✘ bash/.test(bash.txt),
-      bash && JSON.stringify(bash));
+    // 行尾耗时冻结 = 图标已从 loader 换成终态、.dur 是「· <fmtDur>」；成功行
+    // check 图标且无 .bad，失败行 x 图标且带 .bad。旧写法按「✔ grep ·」文字断言，
+    // 工具行图标化之后就一直红（main 上同样 3 条）。
+    const frozen = r => /^· \d+(\.\d+)?(ms|s)$/.test(r.dur);
+    const brief = r => JSON.stringify([r.ic, r.bad, r.nm, r.dur]);
+    ck('耗时：grep 行冻结秒级实值（check 图标 + 名 + · N.Ns）',
+      !!grep && grep.ic === 'check' && !grep.bad && grep.nm === 'grep'
+        && /^· \d+\.\d+s$/.test(grep.dur),
+      (grep && brief(grep)) || '无 grep 行');
+    ck('耗时：read 行也有冻结值',
+      !!read && read.ic === 'check' && !read.bad && read.nm === 'read'
+        && /^· \d+\.\d+s$/.test(read.dur),
+      (read && brief(read)) || '无 read 行');
+    ck('✘ bash 行 bad 态',
+      !!bash && bash.ic === 'x' && bash.bad && bash.nm === 'bash' && frozen(bash),
+      (bash && brief(bash)) || '无 bash 行');
   }
   ck('收口：整泡替换终文本（树完成。）+ trow 清零（零回归）',
     fin.ntrow === 0 && fin.msgs.some(m => m.txt.includes('树完成。')),
@@ -220,12 +234,12 @@ try {
   await evalJS(`(document.querySelector(${JSON.stringify(
     `#sess-list .sess-row[data-sid="${treeSid}"]`)})||{click(){}}).click(),'ok'`);
   const treeSnap = () => evalJS(`(() => ({
-    tnodes: [...document.querySelectorAll('#sess-msgs .tcall')].map(t => ({
+    tnodes: [...document.querySelectorAll('#hist .tcall')].map(t => ({
       nm: t.querySelector('.nm').textContent,
       sm: t.querySelector('.sm').textContent,
       rs: t.querySelector('.rs').textContent,
     })),
-    ntoolBubble: document.querySelectorAll('#sess-msgs .msg.tool').length,
+    ntoolBubble: document.querySelectorAll('#hist .msg.tool').length,
     nscript: document.scripts.length,
     xssTree: typeof window.__xssTree,
   }))()`);
@@ -255,9 +269,9 @@ try {
 
   // 展开 read 行：参数全文 + 结果摘要截断（END_MARK 不进 DOM）。
   const openDetail = async () => {
-    await evalJS(`[...document.querySelectorAll('#sess-msgs .tcall')][0].click(),'ok'`);
+    await evalJS(`[...document.querySelectorAll('#hist .tcall')][0].click(),'ok'`);
     return evalJS(`(() => {
-      const d = [...document.querySelectorAll('#sess-msgs .tcall')][0]
+      const d = [...document.querySelectorAll('#hist .tcall')][0]
         .nextElementSibling;
       return {
         hidden: d.hidden,
@@ -294,7 +308,7 @@ try {
       return oe(c, ...r);
     };
   })();'ok'`);
-  await evalJS(`[...document.querySelectorAll('#sess-msgs .tcall')][0]
+  await evalJS(`[...document.querySelectorAll('#hist .tcall')][0]
     .nextElementSibling.querySelectorAll('.tcopy')[1].click(),'ok'`);
   await delay(200);
   const sink = await evalJS(`window.__copySink`);
@@ -303,8 +317,8 @@ try {
     `sink.len=${sink && sink.length}`);
 
   // 收起：再点行 → hidden。
-  await evalJS(`[...document.querySelectorAll('#sess-msgs .tcall')][0].click(),'ok'`);
-  const hidden = await evalJS(`[...document.querySelectorAll('#sess-msgs .tcall')][0]
+  await evalJS(`[...document.querySelectorAll('#hist .tcall')][0].click(),'ok'`);
+  const hidden = await evalJS(`[...document.querySelectorAll('#hist .tcall')][0]
     .nextElementSibling.hidden`);
   ck('收起：再点行面板隐藏', hidden === true, `got ${hidden}`);
 } catch (e) { ck('景 B 会话调用树', false, e.message); await dump(); }
@@ -313,7 +327,7 @@ try {
 trace('景 C：毒消息兜底');
 try {
   const fb = await evalJS(`(() => {
-    const box = document.getElementById('sess-msgs');
+    const box = document.getElementById('hist');
     const before = box.childElementCount;
     appendMsg({ get role() { return 'assistant'; },
                 get content() { return 'poison'; },

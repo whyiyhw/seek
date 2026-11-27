@@ -138,7 +138,7 @@ const OVERFLOW_JS = `(() => {
   const vw = window.innerWidth;
   const doc = document.documentElement.scrollWidth - vw;
   const clipped = [];
-  for (const el of document.querySelectorAll('button, .k, .v, #status-l, #sess-meta, .t1')) {
+  for (const el of document.querySelectorAll('button, .k, .v, #status-l, .t1')) {
     const cs = getComputedStyle(el);
     if (cs.display === 'none' || cs.visibility === 'hidden') continue;
     const r = el.getBoundingClientRect();
@@ -232,7 +232,7 @@ for (const theme of ['dark', 'light']) {
     row.click();
     return new Promise(r => setTimeout(() => r(
       document.body.classList.contains('side-collapsed') &&
-      document.body.classList.contains('sess-detail') ? 'ok'
+      document.body.classList.contains('viewing') ? 'ok'
       : 'state=' + document.body.className), 600));
   })()`);
   ck(`${theme} 选中会话自动收抽屉`, closed === 'ok', closed);
@@ -245,16 +245,16 @@ for (const theme of ['dark', 'light']) {
   ck(`${theme} 会话正文零横向溢出`, o3.doc <= 0, 'doc=' + o3.doc);
   ck(`${theme} 会话正文无裁切元素`, o3.clipped.length === 0, o3.clipped.join('；'));
   // 代码块协同：夹具正文带围栏长行——pre 自己当横滚容器（长行滚着看，
-  // 不越气泡被 #sess-msgs 硬裁）。首测这里靠目检抓到 .smsg pre 缺规则。
+  // 不越气泡被转录区硬裁）。首测这里靠目检抓到 .smsg pre 缺规则。
   const pre = await evalJS(`(() => {
-    const p = document.querySelector('#sess-msgs .msg pre');
+    const p = document.querySelector('#hist .msg pre');
     return p ? { ox: getComputedStyle(p).overflowX,
                  scrolls: p.scrollWidth > p.clientWidth } : 'no-pre';
   })()`);
   ck(`${theme} 会话正文代码块自持横滚`, pre && pre !== 'no-pre' && pre.ox === 'auto',
     JSON.stringify(pre));
   await shot(`${theme === 'dark' ? '1' : '2'}3-sess`);
-  await evalJS(`document.getElementById('sess-back').click()`);
+  await evalJS(`viewLive()`);
   await delay(300);
 
   // 设置面板：堆叠 + ellipsis

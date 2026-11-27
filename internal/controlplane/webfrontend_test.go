@@ -501,11 +501,12 @@ func TestWeb_PageSessionSidebar(t *testing.T) {
 		"localStorage.setItem(SIDE_KEY", // ... written back on toggle
 		"innerWidth < 1024",             // narrow viewport defaults to collapsed
 		"SESS_PAGE = 30",                // row page size (filter+page are client-side)
-		"sess-detail",                   // main area swaps to a transcript on row click
+		"viewing",                       // W6-5 history view body class (was sess-detail)
 		// the tree itself: groups, collapsed-group memory, the two gestures
 		"wsGroups", "ws-head", "WS_CLOSED_KEY", "treeBind", "treeNewSession",
-		// browse vs continue are deliberately two actions
-		`id="sess-continue"`,
+		// W6-5: click-a-session enters the history view; lazy /resume keeps
+		// the browse-vs-continue safety (see TestWeb_PageLazyResumeW65)
+		"viewing", `id="hist"`,
 	} {
 		if !strings.Contains(page, need) {
 			t.Errorf("embedded page lost the sidebar piece %q (W5 c_txz6vz / workspace tree)", need)
@@ -1242,7 +1243,8 @@ func TestWeb_PageChatFlowW63(t *testing.T) {
 	// 新类名——`.seek { background }` 让每条助手回复整块灰底，`.hint { italic }`
 	// 让系统灰行变斜体。用户气泡右对齐的是阅读列里的气泡：消息盒上不能有
 	// align-self（会把整个 768 盒推到容器右缘，气泡跑出阅读列）。#sess-msgs 的
-	// 内边距只由对话流那段的容器规则给，自己的规则里不能再写 padding。
+	// 内边距只由对话流那段的容器规则给，自己的规则里不能再写 padding（W6-5 起
+	// 只读浏览器退役、#sess-msgs 不复存在，对它的正向钉只留在下面两层分支）。
 	for _, gone := range []string{
 		"\n  .you {",
 		"\n  .seek {",
@@ -1256,7 +1258,6 @@ func TestWeb_PageChatFlowW63(t *testing.T) {
 	}
 	for _, need := range []string{
 		".msg.user { display: flex; flex-direction: column;",
-		"#sess-msgs { flex: 1; overflow-y: auto; }",
 	} {
 		if !strings.Contains(page, need) {
 			t.Errorf("embedded page lost the W6-3 reading-column geometry rule %q (c_ovly6d rework)", need)
@@ -1290,6 +1291,8 @@ func TestWeb_PageChatFlowW63(t *testing.T) {
 // plain-text send opens the directory picker instead of posting.
 func TestWeb_PageComposerW64(t *testing.T) {
 	page := string(webPage)
+	// 空态会话头是绝对定位的，包含块必须是主栏——#center 不定位时它横穿侧栏、
+	// 盖住品牌行（W6-4 遗留，2026-11-27 返工）。
 	for _, need := range []string{
 		"border-radius: 22px",  // the card itself (form rule)
 		"max-width: 774px",     // card width == reading column frame
@@ -1300,6 +1303,7 @@ func TestWeb_PageComposerW64(t *testing.T) {
 		"chat-empty-on",        // the centering body class
 		"applyWsChip",          // chip/placeholder follow binding
 		"先选一个工作区",              // unbound plain-text send → picker copy
+		"body.chat-empty-on:not(.viewing) #center { position: relative; }",
 	} {
 		if !strings.Contains(page, need) {
 			t.Errorf("embedded page lost the W6-4 composer piece %q (c_ljtmy4)", need)
@@ -1308,18 +1312,64 @@ func TestWeb_PageComposerW64(t *testing.T) {
 	if !strings.Contains(page, "#send:disabled { opacity: .4; }") {
 		t.Error("round send lacks its 40% disabled treatment (W6-4 ①)")
 	}
-	// 空态会话头以主栏为包含块（#center 不定位时它横穿侧栏、盖住品牌行）；面板
-	// 打开与只读浏览器按内容态处理。W6-4 首版/二版缺陷，2026-11-27 返工；几何由
+	// 空态布局与「让聊天面让位的视图」的组合：面板打开按内容态处理（会话头回
+	// 文档流、内容顶对齐；W6-4 首版/二版缺陷，2026-11-27 返工）。看历史一态的
+	// 规则由 TestWeb_PageLazyResumeW65 钉，只读浏览器已随 W6-5 退役。几何由
 	// scripts/web-composer-manual.sh 无头量测。
 	for _, need := range []string{
-		"body.chat-empty-on #center { justify-content: center; position: relative; }",
+		"body.chat-empty-on #center { justify-content: center; }",
+		"body.browsing.chat-empty-on #center { justify-content: flex-start; }",
 		"body.browsing.chat-empty-on #conv-head { position: static; }",
-		"body.browsing #composer-meta { display: none; }",
-		"body.sess-detail.chat-empty-on #center { justify-content: flex-start; }",
-		"body.sess-detail.chat-empty-on #conv-head { position: static; }",
 	} {
 		if !strings.Contains(page, need) {
 			t.Errorf("embedded page lost the W6-4 empty-state geometry rule %q (c_ljtmy4 rework)", need)
+		}
+	}
+}
+
+// TestWeb_PageLazyResumeW65 pins the W6-5 click-to-enter flow (c_mo7quv):
+// the read-only browser (#browser/#sess-detail/#sess-back/#sess-continue) is
+// GONE, the history renders into #hist with the same four-form renderer, and
+// — the load-bearing safety — sending from a viewed session routes through
+// ensureContext, which posts "/resume <sid>" (or the lazy /new · /bind)
+// BEFORE the body and gives up (keeping the draft) on failure.
+func TestWeb_PageLazyResumeW65(t *testing.T) {
+	page := string(webPage)
+	for _, gone := range []string{"sess-continue", "sess-back", "sess-detail", `id="browser"`, `id="sess-msgs"`} {
+		if strings.Contains(page, gone) {
+			t.Errorf("page still carries the retired read-only browser piece %q (W6-5 must delete, not stack)", gone)
+		}
+	}
+	// 看历史是内容态（2026-11-27 返工）：实时列表空着时 chat-empty-on 还挂着，
+	// 空态布局（会话头绝对化/内容居中/composer 上浮）不能跟进历史视图。
+	// 提示可见 + 看历史闸（同日二次返工，验证 blocker ③）：看历史态 #list 是
+	// display:none，懒收口的提示/错误必须落到 #hist、错误行用红字；当前会话
+	// 生成中时发送钮禁用（停止去实时视图做）。W6-5 主提交还连带删了「面板打开
+	// 时聊天面让位」的规则（32 张面板镜头全破没人看，web-subagents 一族红）——
+	// 找回并钉住；面板从看历史态进入时会话头/高亮回实时口径。
+	for _, need := range []string{
+		"ensureContext",      // the lazy-context split lives in one function
+		"'/resume ' + sid",   // the resume POST is built before the body
+		"pendingFresh",       // lazy /new · /bind for the new-session buttons
+		"body.viewing #list", // history view hides (not destroys) the live DOM
+		`id="hist"`,          // history renders into #hist
+		`id="fresh-hero"`,    // the lazy new-session empty state
+		"草稿已保留",              // failure path keeps the draft
+		"body.viewing.chat-empty-on #conv-head { position: static; }",
+		"body.viewing.chat-empty-on #center { justify-content: flex-start; }",
+		"body.viewing.chat-empty-on form { margin-bottom: 10px; }",
+		"function ctxNotice(kind, text)",
+		"ctxNotice('err', '（' + e.message + '——草稿已保留）')",
+		".msg.err { color: var(--seek-err)",
+		"if (runs.size > 0) { send.disabled = viewingOther(); return; }",
+		"function gatedNow() { return runs.size > 0 && viewingOther(); }",
+		"body.browsing #list, body.browsing #hist, body.browsing #hist-foot,",
+		"body.browsing form, body.browsing #composer-meta { display: none; }",
+		"body.browsing.chat-empty-on #conv-head { position: static; }",
+		"if (wasViewing) markCur();",
+	} {
+		if !strings.Contains(page, need) {
+			t.Errorf("embedded page lost the W6-5 lazy-resume piece %q (c_mo7quv)", need)
 		}
 	}
 }

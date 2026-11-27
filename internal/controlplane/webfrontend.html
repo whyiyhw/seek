@@ -362,9 +362,9 @@
      居中；用户=右侧气泡（token 底，附件缩略图在气泡上方）、助手=无框
      markdown、工具=单行 .tcall、系统=灰行 .msg.hint。实时与历史同一套
      类名（两套渲染器在本卡收敛）。 */
-  #list, #sess-msgs { display: flex; flex-direction: column; align-items: center;
-                      padding: 16px 32px; }
-  #list > *, #sess-msgs > * { width: 100%; max-width: 768px; }
+  #list { display: flex; flex-direction: column; align-items: center;
+          padding: 16px 32px; }
+  #list > * { width: 100%; max-width: 768px; }
   .msg { position: relative; margin: 2px 0; max-width: 100%; }
   /* 用户气泡右对齐的是阅读列里的气泡，不是整条消息：消息盒由上面的容器规则居中在
      768 列里，align-self:flex-end 会把整个 768 盒推到容器右缘——气泡就跑出阅读列。
@@ -380,6 +380,10 @@
   .msg.seek { padding: 2px 0; }
   .msg.hint { color: var(--seek-fg-dim); font-size: 13px; line-height: 20px;
               padding: 2px 0; }
+  /* 懒收口失败的错误行（W6-5 做②）：与 hint 同排版、红字——「草稿已保留」
+     是要人立刻看见的失败，不能混在灰色系统行里。 */
+  .msg.err { color: var(--seek-err); font-size: 13px; line-height: 20px;
+             padding: 2px 0; }
   /* pre 的横滚/配色四个正文容器同款。c_k3pnlw（markdown 卡）把选择器从 .msg 扩到
      .txt——会话正文的 markdown 产物挂在 .msg.seek > .txt 下（W6-3 起实时/
      历史同一套类名）；.tpre 的 pre-wrap/max-height 在自己的规则里，不与此处
@@ -769,11 +773,22 @@
   /* 会话正文（主区）：点侧栏一条即亮，聊天面/输入框让位；聊天钮收回。
      三个资产面板（记忆/统计/后台）同一个「中栏一个面」口径：browsing 时
      聊天面也让位。 */
-  #browser { flex: 1; display: none; flex-direction: column; min-height: 0; }
-  body.sess-detail #browser { display: flex; }
-  body.sess-detail #list, body.sess-detail form,
-  body.browsing #list, body.browsing form { display: none; }
-  #browser-body { flex: 1; display: flex; min-height: 0; }
+  /* 历史视图（W6-5）：与实时互斥；live DOM 不销毁。 */
+  #hist { flex: 1; display: flex; flex-direction: column; align-items: center;
+          overflow-y: auto; min-height: 0; padding: 16px 32px; }
+  #hist > * { width: 100%; max-width: 768px; }
+  #hist[hidden] { display: none; }
+  #hist-foot { flex: none; padding: 8px 14px; text-align: center;
+               color: var(--seek-fg-dim); }
+  #hist-foot[hidden] { display: none; }
+  #hist-foot button { width: 100%; }
+  body.viewing #list { display: none; }
+  /* 懒新会话空态（W6-5 ④）：与 chat-empty 同款居中组。 */
+  #fresh-hero { display: none; }
+  body.fresh #list, body.fresh #hist, body.fresh #hist-foot { display: none; }
+  body.fresh #fresh-hero { display: flex; flex-direction: column; align-items: center;
+                           justify-content: center; flex: 1; gap: 10px;
+                           padding: 0 16px 12px; text-align: center; }
   /* 行元素是 div（role=button）：行内还要装改名/归档操作钮与改名输入框，
      button 套 button/input 是非法嵌套，div 承载才装得下（W5 c_rqcuaa）。
      底色仍显式透明落回 panel（别吃全局 button 的软底）；
@@ -842,19 +857,6 @@
   .ws-head .ws-acts .btn-icon.sm { width: 20px; height: 20px; }
   .ws-head .ws-acts .ic { width: 12px; height: 12px; }
   .ws-group .sess-row { padding-left: 24px; }
-  #sess-detail { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-  #browser-head { display: flex; gap: 10px; align-items: center; padding: 6px 10px;
-                  border-bottom: 1px solid var(--seek-line); }
-  #sess-back, #sess-continue { flex: none; padding: 4px 12px; font-size: 13px;
-                               background: var(--seek-soft); }
-  #sess-meta { flex: 1; min-width: 0; color: var(--seek-fg-dim); white-space: nowrap;
-               overflow: hidden; text-overflow: ellipsis; }
-  /* 内边距由对话流那段的 `#list, #sess-msgs` 规则给（16px 32px）：同特异性下后写的
-     规则胜出，这里再写 padding 会把它盖回去。 */
-  #sess-msgs { flex: 1; overflow-y: auto; }
-  #sess-foot { padding: 8px 14px; text-align: center; border-top: 1px solid var(--seek-line);
-               color: var(--seek-fg-dim); }
-  #sess-foot button { width: 100%; }
   .pane-hint { color: var(--seek-fg-dim); font-style: italic; padding: 14px; }
 
   /* ---- 任务面板（W3.3 编排 P1 可视化）---- */
@@ -969,24 +971,32 @@
      撑满、conv-head 绝对化让位（不参与居中也不消失——顶上仍有一条头）。
      首条消息落地（dropChatEmpty）摘类即落回底部；淡出 0.3s，
      reduced-motion 关停。 */
-  /* 绝对定位的会话头以主栏为包含块：#center 不定位时 left/right 落到页面两端，
-     会话头横穿侧栏、盖住品牌行（W6-4 首版缺陷，2026-11-27 返工）。 */
-  body.chat-empty-on #center { justify-content: center; position: relative; }
+  body.chat-empty-on #center { justify-content: center; }
+  /* 绝对定位的包含块必须是主栏：#center 不定位时 left/right 落到页面两端，
+     会话头会横穿侧栏、盖住品牌行（W6-4 遗留）。只在非看历史态定位——看历史
+     态会话头本来就该回文档流（见本段末）。 */
+  body.chat-empty-on:not(.viewing) #center { position: relative; }
   body.chat-empty-on #conv-head { position: absolute; top: 0; left: 0; right: 0; }
-  /* 面板打开也是内容态，空态布局不跟进：聊天面整体让位（含 composer 下的计量行），
-     会话头回文档流、内容顶对齐。 */
-  body.browsing #composer-meta { display: none; }
-  body.browsing.chat-empty-on #center { justify-content: flex-start; }
-  body.browsing.chat-empty-on #conv-head { position: static; }
-  /* 只读浏览器（sess-detail）同是内容态：空态判定只看实时 #list，点开一条历史
-     时它还挂着——会话头不回文档流就盖在 #browser-head 上。 */
-  body.sess-detail.chat-empty-on #center { justify-content: flex-start; }
-  body.sess-detail.chat-empty-on #conv-head { position: static; }
   body.chat-empty-on #list { flex: 0 0 auto; }
   body.chat-empty-on #composer-meta { display: none; }   /* 空态无计量，别垫高 */
   /* composer 在组底，裸居中会让它的中心落在视口中线下 60px——底下垫
      一段呼吸边距把组重心抬回 dsh 的观感（验收②：卡中心 y ∈ 380–520）。 */
   body.chat-empty-on form { margin-bottom: 64px; }
+  /* 看历史是内容态，不是空态（W6-5）：chat-empty-on 只看实时 #list——它空着时
+     点开历史会话，这个类还挂着，空态布局不能跟着进来：会话头回文档流（否则
+     盖在 #hist 顶上）、内容顶对齐、composer 落回底部。 */
+  body.viewing.chat-empty-on #center { justify-content: flex-start; }
+  body.viewing.chat-empty-on #conv-head { position: static; }
+  body.viewing.chat-empty-on form { margin-bottom: 10px; }
+  /* 面板打开也是内容态：聊天面整体让位（W5 起的互斥，W6-7 归位面板前的过渡
+     形态）。W6-5 主提交退役只读浏览器时把这条连带删了——面板与空态 Hero、
+     「已到末尾」、输入卡片叠在一起；空态的会话头（绝对定位）还压在面板首行上。
+     2026-11-27 返工找回，并补上 W6-4/5 新增的件（#hist、#hist-foot、
+     #composer-meta）。 */
+  body.browsing #list, body.browsing #hist, body.browsing #hist-foot,
+  body.browsing form, body.browsing #composer-meta { display: none; }
+  body.browsing.chat-empty-on #center { justify-content: flex-start; }
+  body.browsing.chat-empty-on #conv-head { position: static; }
   .chat-empty { display: flex; flex-direction: column; align-items: center;
                 gap: 10px; padding: 0 16px 12px; text-align: center;
                 opacity: 1; transition: opacity .3s; }
@@ -1145,7 +1155,7 @@
      决定，不另设图标色 token。
      ==== 按钮三档（card c_25d2ey 收敛口径，全页一套语言；W6-1 改主 CTA 配色）====
        0. 缺省 = 次操作：soft 底（--seek-soft）文字钮——顶栏指令组/视图组、
-          主题三选、加载更多、#sess-back、#hk-pause、审批卡 n/a、目录
+          主题三选、加载更多、历史翻页、#hk-pause、审批卡 n/a、目录
           浏览器。图标 14px + 文字。CSS 基线即此档，各钮不再自造底色。
        1. 主操作：.btn-primary（单色，--seek-primary/--seek-primary-fg）——
           亮=近黑底白字、暗=近白底黑字；每屏唯一主 CTA：#reconn 手动重连、
@@ -1240,19 +1250,17 @@
       <span id="ap-badge" hidden></span>
     </div>
     <main id="list"></main>
-    <section id="browser">
-      <div id="browser-body">
-        <div id="sess-detail">
-          <div id="browser-head">
-            <button id="sess-back" type="button" title="返回聊天面"><svg class="ic" aria-hidden="true"><use href="#i-chat"/></svg><span>聊天</span></button>
-            <button id="sess-continue" type="button" title="把当前会话切到这条历史（/resume：接着它的上下文继续跑）"><svg class="ic" aria-hidden="true"><use href="#i-play"/></svg><span>继续此会话</span></button>
-            <div id="sess-meta"></div>
-          </div>
-          <div id="sess-msgs"></div>
-          <div id="sess-foot"></div>
-        </div>
-      </div>
-    </section>
+    <!-- 历史视图（W6-5 点会话即进入）：只读浏览器退役，历史直接渲进
+         #hist（与实时 #list 同一套四形态渲染器）；翻页脚独立。实时视图
+         与历史视图互斥展示——live DOM 不销毁，切回来流式增量还在。 -->
+    <div id="hist" hidden></div>
+    <div id="hist-foot" hidden></div>
+    <div id="fresh-hero" hidden>
+      <!-- 懒新会话（W6-5 ④）：点「＋ 新会话」先到这块空态 Hero，第一条
+           消息发出前不发 /new（或 /bind）——翻一眼不花钱，取消零成本。 -->
+      <div class="hero"><svg class="hero-mark" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 1.6 18.4 10 10 18.4 1.6 10Z" fill="currentColor"/></svg><span class="hero-t">seek</span></div>
+      <div class="ce-x">新会话——直接输入消息开始；第一条发出时才真正开新会话。</div>
+    </div>
     <section id="agents">
       <div id="agents-body">
         <div id="ag-list"></div>
@@ -1544,8 +1552,11 @@ function renderBody(el, text) {
 
 // 对话流四形态的实时半边（W6-3）：you=右侧气泡（附件缩略图在气泡上方）、
 // seek=无框、hint=灰行。类名与历史渲染同一套（histTurn）。
-function addMsg(who, text, atts) {
+// host 缺省是实时 #list；看历史态要落到可见的 #hist（ctxNotice），因为那时
+// #list 是 display:none——写进去等于没写。
+function addMsg(who, text, atts, host) {
   dropChatEmpty();                   // 第一条消息落地：空态让位（c_jf3grt）
+  const box = host || list;
   const el = document.createElement('div');
   el.className = 'msg ' + (who === 'you' ? 'user' : who);
   if (who === 'you') {
@@ -1557,8 +1568,16 @@ function addMsg(who, text, atts) {
   } else {
     renderBody(el, text);             // 纯 DOM 构建：无 HTML 注入面
   }
-  list.appendChild(el);
-  list.scrollTop = list.scrollHeight;  // 流式追加：贴底滚动
+  box.appendChild(el);
+  box.scrollTop = box.scrollHeight;  // 流式追加：贴底滚动
+}
+
+// 懒收口（W6-5）的提示/错误落点：看历史态（body.viewing）下实时 #list 隐藏，
+// 必须写进人正在看的 #hist，否则「生成中」「草稿已保留」都无人可见（验证会话
+// 2026-11-27 实测）。错误用红字行（kind='err'），不用灰色 hint。
+function ctxNotice(kind, text) {
+  const viewing = document.body.classList.contains('viewing');
+  addMsg(kind, text, undefined, viewing ? document.getElementById('hist') : list);
 }
 
 // 轮末悬停 meta（W6-3 ⑥）：复制全文 + 收口时间（实时轮知道时间；历史
@@ -1896,23 +1915,34 @@ const dirty = new Set();  // 本帧待重渲的 run（SSE 突发合帧，一帧�
 // posting 是在途 POST /msg 的防重入位，与「可否发送」解耦——早先两者共用
 // send.disabled，键一禁用就把 /new、/bind 选择器这些同走 sendText 的入口
 // 一并锁死（按钮不吃输入框的草稿）。
+//
+// 看历史闸（W6-5 做③）：看历史时这个 composer 的对象是所看的会话，不是正在
+// 生成的那个。当前会话生成中 → 发送钮禁用（停止去实时视图做——这里的键点了
+// 也停不了别人：/cancel 会被懒收口分岔拦下），占位文案说明原因。视图切换
+// （openSession/viewLive）与 run 起落都要重算，所以 renderSend 一并管占位。
+const GATE_TEXT = '当前会话生成中——停止或等它完成后再在这里发';
+function viewingOther() { return document.body.classList.contains('viewing'); }
+function gatedNow() { return runs.size > 0 && viewingOther(); }
 let posting = false;
 function draftReady() {
   return input.value.trim() !== '' || attachments.some(a => a.status !== 'error');
 }
 function syncSend() {
-  if (runs.size > 0) { send.disabled = false; return; }
+  if (runs.size > 0) { send.disabled = viewingOther(); return; }
   send.disabled = posting || !draftReady();
 }
 function renderSend() {
   const busy = runs.size > 0;
+  const gated = gatedNow();
   // 圆形图标钮（W6-4）：arrow-up=发送、square=停止；语义在 aria-label 与
   // title（icon-only button 必须 aria-label），文字「停止/发送」由这两个属性承载。
   swapIcon(send, busy ? 'square' : 'arrow-up');
-  send.setAttribute('aria-label', busy ? '停止' : '发送');
-  send.title = busy ? '中断当前生成（等同 /cancel）' : '发送';
+  send.setAttribute('aria-label', gated ? '发送（当前会话生成中，暂不可用）' : busy ? '停止' : '发送');
+  send.title = gated ? GATE_TEXT + '（回实时视图可停止）'
+    : busy ? '中断当前生成（等同 /cancel）' : '发送';
   send.classList.toggle('stop', busy);
   syncSend();
+  applyWsChip();   // 占位文案跟闸态走
 }
 
 function nearBottom() {
@@ -2325,6 +2355,42 @@ document.getElementById('reconn').addEventListener('click', () => listen());
 // atts（W5 c_56yrcj）非空时把每个已就绪附件的路径拼成「@<path>」追加进
 // 正文——这就是平面与 CLI 之间唯一的附件协议，child 的 imgrefs/filerefs
 // 路由器照旧认领。
+// 懒收口（W6-5）：看历史时发消息 = 先切再发。/resume（或懒新会话的
+// /new、/bind）必须落在正文**之前**——执行器按 Conv 串行，顺序由它保证；
+// 页面侧的保证是这两步都在本函数内按序 await，不并发。切换失败时保留
+// 草稿并在转录区出一行红字，正文绝不明发。
+async function ensureContext(text) {
+  if (viewSid && viewSid !== boundSession) {
+    const sid = viewSid;
+    const r = await fetch(q('/msg'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Seek-Conversation': CONV },
+      body: JSON.stringify({ text: '/resume ' + sid }),
+    });
+    if (!r.ok) throw new Error('/resume 发送失败：HTTP ' + r.status);
+    // 等 /state 跟上（resume 应答已把绑定落盘，这里只是确认；超时按失败走）
+    for (let i = 0; i < 20 && boundSession !== sid; i++) {
+      await new Promise(rs => setTimeout(rs, 150));
+      await refreshState();
+    }
+    if (boundSession !== sid) throw new Error('会话切换未生效（/resume ' + sid.slice(0, 8) + '）');
+    viewLive();   // 已切到该会话：回实时视图，正文在直播面落地
+    return;
+  }
+  if (pendingFresh) {
+    const cmd = pendingFresh.kind === 'new' ? '/new' : '/bind ' + pendingFresh.root;
+    cancelFresh();
+    dropChatEmpty();
+    list.replaceChildren();          // 新会话=干净转录区（live DOM 此时该清）
+    const r = await fetch(q('/msg'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Seek-Conversation': CONV },
+      body: JSON.stringify({ text: cmd }),
+    });
+    if (!r.ok) throw new Error(cmd.split(' ')[0] + ' 发送失败：HTTP ' + r.status);
+  }
+}
+
 async function sendText(text, fromInput, atts) {
   if (posting) return;   // 在途重入闸（c_jf3grt：与「空草稿禁用」解耦）
   const refs = (atts || []).filter(a => a.status === 'done' && a.path);
@@ -2333,11 +2399,26 @@ async function sendText(text, fromInput, atts) {
   if (!body) return;
   // 未绑定直发普通文本（W6-4 ④）：不发给服务端吃「未绑定」报错，就地打开
   // 目录浏览器把人带到正确的第一步；/ 指令（/bind 等）照常可发。
-  if (!boundProject && !body.trim().startsWith('/')) {
+  if (!boundProject && !pendingFresh && !body.trim().startsWith('/')) {
     addMsg('hint', '（先选一个工作区——已为你打开目录浏览器）');
     openDirPicker();
     if (fromInput) input.value = '';
     return;
+  }
+  // 懒收口（W6-5）：看历史/懒新会话时，先 /resume（或 /new、/bind）再发
+  // 正文；失败保草稿、红字提示，正文不发。生成中不开新上下文（③）。
+  // 提示一律走 ctxNotice：看历史态 #list 是隐藏的，写进去没人看得见。
+  if ((viewSid && viewSid !== boundSession) || pendingFresh) {
+    if (runs.size) {
+      ctxNotice('hint', '（' + GATE_TEXT + '）');
+      return;
+    }
+    try {
+      await ensureContext(body);
+    } catch (e) {
+      ctxNotice('err', '（' + e.message + '——草稿已保留）');
+      return;
+    }
   }
   // /cancel（停止键、顶栏按钮、手打三入口同此一条）：武装被中断的 run——
   // 它的 run-bearing ack 走保留式收口而非权威替换（c_5m3fm6）。无活跃 run
@@ -3030,9 +3111,8 @@ mic.addEventListener('contextmenu', ev => ev.preventDefault());
 // DOM 只装已翻进的页——长 transcript 的常驻渲染量级与虚拟滚动同级，
 // 服务端与页面都不整读。渲染纪律与聊天面同源：textContent-only。
 const sessList = document.getElementById('sess-list');
-const sessMeta = document.getElementById('sess-meta');
-const sessMsgs = document.getElementById('sess-msgs');
-const sessFoot = document.getElementById('sess-foot');
+const sessMsgs = document.getElementById('hist');       // W6-5：历史渲进 #hist
+const sessFoot = document.getElementById('hist-foot');
 const sideErrEl = document.getElementById('side-err');
 const sideEl = document.getElementById('side');
 const sideToggle = document.getElementById('side-toggle');
@@ -3043,7 +3123,6 @@ const convTitle = document.getElementById('conv-title');
 const convProj = document.getElementById('conv-proj');
 const convProjName = document.getElementById('conv-proj-name');
 const sideVer = document.getElementById('side-ver');
-const sessBack = document.getElementById('sess-back');
 const MSG_PAGE = 50;
 // 调用树登记表（c_ux7lvk，随 sel 同生命周期——openSession 清空）：
 // 行按 call id（assistant 的 tool_calls[].id ↔ tool 消息的 tool_call_id，
@@ -3121,12 +3200,18 @@ sideArch.addEventListener('click', () => {
 });
 applyArchBtn();
 
-// ＋ 新会话（W6-2，notes §3）：已绑定 → /new（项目不变、会话重置）；未
-// 绑定 → 打开目录浏览器选一个（与空态引导同一个入口 openDirPicker）。
+// ＋ 新会话（W6-5 懒执行）：已绑定 → 落「新会话空态」，第一条消息发出前
+// 不发 /new（翻一眼/取消零成本）；未绑定 → 打开目录浏览器（与空态引导
+// 同一个入口）。
 sideNew.addEventListener('click', () => {
   if (posting) return;
-  if (boundProject) sendText('/new', false);
-  else openDirPicker();
+  if (boundProject) {
+    pendingFresh = { kind: 'new' };
+    closePanes();
+    document.body.classList.add('fresh');
+    markCur();
+    input.focus();
+  } else openDirPicker();
   drawerClose();
 });
 // 搜索切换（W6-2）：#side-search 默认收起，点搜索图标展开并聚焦；再点
@@ -3154,6 +3239,7 @@ function applyWsChip() {
     wsChip.classList.add('pick');
     input.placeholder = '选择一个工作区开始';
   }
+  if (gatedNow()) input.placeholder = GATE_TEXT;   // 看历史 + 生成中：占位说明（W6-5 做③）
 }
 wsChip.addEventListener('click', () => { openDirPicker(); drawerClose(); });
 applyWsChip();   // 初渲染（W6-4；refreshState 会随后纠正）——放在声明后防 TDZ
@@ -3186,8 +3272,10 @@ async function loadVersion() {
 //     绑定，本来就没有上下文可丢）。
 //   · 组头的 ＋ = 「在该工作区开新会话」：绑定在别处 → /bind <root>（自然是
 //     新会话）；已在该组 → /new（项目不变、会话重置，与旧 ＋新建 同一条）。
-// 会话行点击仍是 openSession（中栏只读浏览）；要「接着这条继续」由会话正文
-// 头上的「继续此会话」发 /resume <sid>——浏览和接续不该是同一个点击。
+// 会话行点击 = openSession（W6-5 点会话即进入：历史渲进主转录区）。
+// 「翻一眼不该换掉正在进行的对话」的旧安全理由由懒 resume 保留：看不动
+// 绑定，只有真的发出第一条消息时才先发 /resume <sid> 再发正文（见
+// sendText 的 ensureResume 分岔）——别把 /resume 挪回点击事件。
 //
 // 折叠位（哪些组收起了）与归档可见位同款：localStorage，刷新保持，隐私模式
 // 退化为内存值。分页（30 条一页的「加载更多」）改成**全树合计**的行数帽，
@@ -3308,9 +3396,11 @@ function renderConvHead() {
   const s = cur && allSessions.find(x => x.sid === cur);
   convTitle.textContent = (s && s.title) || (cur ? '（无标题）' : '新会话');
   convTitle.title = (s && s.title) || '';
-  if (boundProject) {
-    convProjName.textContent = baseOf(boundProject);
-    convProj.title = boundProject;
+  // 看历史（W6-5）：芯片跟「正在看的」会话自记的 cwd；实时视图跟绑定。
+  const proj = (viewSid && s && s.cwd) || boundProject;
+  if (proj) {
+    convProjName.textContent = baseOf(proj);
+    convProj.title = proj;
     convProj.hidden = false;
   } else {
     convProj.hidden = true;
@@ -3380,11 +3470,15 @@ function treeBind(root) {
   input.focus();
 }
 
-// 组头的 ＋：已在该组 → /new（项目不变、会话重置）；不在 → /bind（自然是新会话）。
+// 组头的 ＋（W6-5 懒执行）：已在该组 → fresh 空态（发第一条才 /new）；
+// 不在 → 记懒 /bind（发第一条才切组开新会话）。
 function treeNewSession(root) {
   if (posting) return;
   const here = boundProject ? cleanRoot(boundProject) : '';
-  sendText(here === root ? '/new' : '/bind ' + root, false);
+  pendingFresh = here === root ? { kind: 'new' } : { kind: 'bind', root };
+  closePanes();
+  document.body.classList.add('fresh');
+  markCur();
   input.focus();
 }
 
@@ -3551,40 +3645,50 @@ sideSearch.addEventListener('input', () => { shownSessions = SESS_PAGE; renderSe
 
 // 打开一条：主区切到会话正文（聊天面/输入框让位），三个资产面板同时收起
 // ——「同时只亮一个面」的口径从四面板闸沿用到这里。
-async function openSession(sid) {
-  sel = { sid, next: '', done: false, busy: false };
-  histMi = 0;
-  treeRows.clear();      // 调用树登记表随会话同生命周期（c_ux7lvk）
-  treeResults.clear();
-  closePanes();
-  document.body.classList.add('sess-detail');
-  drawerClose();   // 窄屏抽屉态下选中会话即收抽屉，正文才露出来（c_lqtt2m）
-  sessMeta.textContent = '';
-  sessMsgs.replaceChildren();
-  paneHint(sessFoot, '');
-  markCur();
-  loadMeta(sid);
-  loadMsgs();
+// 点会话即进入（W6-5，c_mo7quv）：点行 = 把这条历史渲进主转录区（#hist，
+// 与实时同一套四形态），composer 可用但发的是「懒 resume」——看不动绑定，
+// 第一条消息发出时才切（见 sendText 的 ensureResume 分岔）。点当前绑定
+// 会话行 = 回实时视图（live DOM 一直在，流式增量不丢）。
+let viewSid = null;          // 正在看的会话（null=实时视图）
+let pendingFresh = null;     // 懒新会话位：null | {kind:'new'} | {kind:'bind', root}
+function cancelFresh() {
+  pendingFresh = null;
+  document.body.classList.remove('fresh');
 }
-
-// 聊天钮：回到聊天面（侧栏不动，sel 保留——当前项高亮随会话走）。
-sessBack.addEventListener('click', () => {
-  document.body.classList.remove('sess-detail');
+async function openSession(sid) {
+  cancelFresh();
+  if (sid && sid !== boundSession) {
+    closePanes();          // 先清面板/旧视图（它会把 viewing 摘掉），再立新视图
+    sel = { sid, next: '', done: false, busy: false };
+    viewSid = sid;
+    histMi = 0;
+    treeRows.clear();      // 调用树登记表随会话同生命周期（c_ux7lvk）
+    treeResults.clear();
+    document.body.classList.add('viewing');
+    document.body.classList.remove('browsing');
+    sessMsgs.hidden = false;   // #hist 出场（hidden 属性与 body.viewing 双闸）
+    sessMsgs.replaceChildren();
+    sessFoot.hidden = false;
+    paneHint(sessFoot, '');
+    markCur();
+    loadMsgs();
+    renderSend();   // 看历史闸随视图走（生成中 → 发送钮禁用，卡面做③）
+  } else {
+    viewLive();
+  }
+  drawerClose();   // 窄屏抽屉态下选中会话即收抽屉，正文才露出来（c_lqtt2m）
+}
+function viewLive() {
+  sel = null;
+  viewSid = null;
+  cancelFresh();
+  sessMsgs.hidden = true;    // #hist 退场
+  document.body.classList.remove('viewing');
+  markCur();
+  renderConvHead();
+  renderSend();              // 回实时：生成中恢复成可点的停止键
   input.focus();
-});
-
-// 继续此会话：把**当前**对话绑定到正在浏览的这条历史（/resume——平面按
-// 会话自记的 cwd 同步切项目）。浏览和接续分成两个动作是刻意的：点行只
-// 看，点这枚钮才动绑定（点行就 resume 的话，随便翻一眼历史就会把正在
-// 进行的对话换掉）。
-const sessContinue = document.getElementById('sess-continue');
-sessContinue.addEventListener('click', () => {
-  if (posting || !sel) return;
-  const sid = sel.sid;
-  document.body.classList.remove('sess-detail');
-  sendText('/resume ' + sid, false);
-  input.focus();
-});
+}
 
 // JSON-RPC 2.0 envelope（W4.1）：一次 POST 一个调用；错误以异常上抛，
 // 由各窗格自行展示。id 用自增整数——浏览器不重投，无需全局唯一。
@@ -3606,18 +3710,6 @@ function paneHint(el, text) {
   d.className = 'pane-hint';
   d.textContent = text;
   el.replaceChildren(d);
-}
-
-// 元信息行：模型/turns/累计 tokens/cwd。装饰性数据，失败只落在本行。
-async function loadMeta(sid) {
-  try {
-    const g = await rpc('session/get', { sid });
-    if (!sel || sel.sid !== sid) return;  // 返回前已切走：丢弃
-    const u = g.cumulative_usage || {};
-    sessMeta.textContent = (g.header.model || '?') + ' · ' + fmtTurns(g.turns) + ' · '
-      + ((u.prompt_tokens || 0) + (u.completion_tokens || 0)) + ' tokens · '
-      + (g.header.cwd || '');
-  } catch (e) { sessMeta.textContent = 'session/get 失败：' + e.message; }
 }
 
 async function loadMsgs() {
@@ -3916,7 +4008,7 @@ hkBtn.addEventListener('click', () => togglePane('hooks'));
 // 三面板共用的开合闸（W4.5 的「browsing=隐聊天 + 恰好一个 *-view 亮面板」；
 // W3.3 的任务面板并入同一闸）。W5 侧栏卡把 sessions 从这组闸里摘出去——
 // 会话列表现在是常驻左栏，不再抢中栏。中栏面板互斥：会话正文
-// （sess-detail）、记忆/统计/后台/审计任选其一、或聊天面（默认）。
+// （viewing 历史视图）、记忆/统计/后台/审计任选其一、或聊天面（默认）。
 const panes = {
   memory:   { btn: memBtn,    icon: 'brain',    label: '记忆', cls: 'mem-view',      load: loadMemPane },
   stats:    { btn: statBtn,   icon: 'chart',    label: '统计', cls: 'stat-view',     load: loadStatPane },
@@ -3925,18 +4017,25 @@ const panes = {
   hooks:    { btn: hkBtn,     icon: 'activity', label: '审计', cls: 'hooks-view',    load: loadHooksPane },
 };
 function closePanes() {
+  const wasViewing = document.body.classList.contains('viewing');
   for (const p of Object.values(panes)) {
     document.body.classList.toggle(p.cls, false);
     setBtn(p.btn, p.icon, p.label);
   }
   document.body.classList.remove('browsing');
+  document.body.classList.remove('viewing');   // 面板让位时历史视图退场（W6-5）
+  viewSid = null;
+  sel = null;   // 历史视图的分页游标一起退场：curSid() 读它，不清则会话头/高亮留着刚看的会话
+  sessMsgs.hidden = true;
+  if (wasViewing) markCur();   // 侧栏高亮与会话头回到实时口径
+  renderSend();   // 离开看历史态：看历史闸解除（生成中的停止键恢复可点、占位复位）
 }
 function togglePane(name) {
   const active = !document.body.classList.contains(panes[name].cls);
   closePanes();
   if (active) {
     document.body.classList.add(panes[name].cls, 'browsing');
-    document.body.classList.remove('sess-detail');  // 会话正文让位（中栏一个面）
+    document.body.classList.remove('viewing');      // 历史视图让位（中栏一个面）
     setBtn(panes[name].btn, 'chat', '聊天');
     panes[name].load();
   } else {

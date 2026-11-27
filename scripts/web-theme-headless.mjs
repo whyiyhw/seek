@@ -231,15 +231,15 @@ const openSettings = async () => {
   return until('设置面板落定',
     `document.body.classList.contains('settings-view') && ${setCardsReady}`);
 };
-// 聊天面判定：无面板开（browsing）、无会话正文（sess-detail）。
-const isChat = `!document.body.classList.contains('browsing') && !document.body.classList.contains('sess-detail')`;
+// 聊天面判定：无面板开（browsing）、无看历史（viewing）。
+const isChat = `!document.body.classList.contains('browsing') && !document.body.classList.contains('viewing')`;
 // 回聊天面（真实路径）：正文面点「⟵ 返回」，面板面点已开面板的按钮
 // （此时按钮文字已是「💬 聊天」，再点即收起）。
 const ensureChat = async () => {
   if (await until('已是聊天面', isChat, 400)) return true;
   await evalJS(`(() => {
-    if (document.body.classList.contains('sess-detail')) {
-      (document.getElementById('sess-back')||{click(){}}).click(); return;
+    if (document.body.classList.contains('viewing')) {
+      viewLive(); return;   // 页面上下文：直接调页面函数，别套 Node 侧的 evalJS
     }
     for (const id of ['set-btn','mem-btn','stat-btn','agents-btn']) {
       const b = document.getElementById(id);
@@ -422,9 +422,9 @@ const facesAt = async (theme) => {
   await evalJS(`document.getElementById('mic').classList.remove('rec'),'ok'`);
   // 会话正文：点 fixture 行（两条消息 + 代码块）。
   clickSel(`#sess-list .sess-row[data-sid="${SID}"]`);
-  await until('会话正文开', `document.body.classList.contains('sess-detail')
-    && document.querySelectorAll('#sess-msgs .msg').length>=2`);
-  await checkFace(theme, '会话正文', '#browser');
+  await until('历史视图开（W6-5）', `document.body.classList.contains('viewing')
+    && document.querySelectorAll('#hist .msg').length>=2`);
+  await checkFace(theme, '历史视图', '#hist');
   await ensureChat();
 };
 // 当前记忆位=dark（景 2 留下）——先测 dark 轮，再切 light 测一轮。

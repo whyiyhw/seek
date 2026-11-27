@@ -89,9 +89,14 @@ echo "== build =="
 # 原样 JSON。计数器只影响展示，数值不必精确对账。
 echo "== fixtures =="
 mkdir -p "$TMP/sessions"
+# 夹具会话的项目目录放在沙盒里：执行器拉子进程时以它为工作目录（cmd.Dir），
+# 目录不存在 fork/exec 直接 ENOENT——此前写死 /tmp/w44-fixture 又从不创建，
+# 所以本族的子进程从来没被成功拉起过（此前没有断言依赖，直到景 L 要服务端证据）。
+FIXTURE_CWD="$TMP/w44-fixture"
+mkdir -p "$FIXTURE_CWD"
 hdr() { # hdr <id> <created> <updated> <turns> <tool_calls> <prompt> <completion>
-  printf '{"schema_version":2,"id":"%s","created_at":"%s","updated_at":"%s","model":"deepseek-chat","cwd":"/tmp/w44-fixture","turns":%s,"tool_calls":%s,"usage":{"prompt_tokens":%s,"completion_tokens":%s,"total_tokens":%s,"prompt_cache_hit_tokens":0,"prompt_cache_miss_tokens":%s}}\n' \
-    "$1" "$2" "$3" "$4" "$5" "$6" "$7" "$(( $6 + $7 ))" "$6"
+  printf '{"schema_version":2,"id":"%s","created_at":"%s","updated_at":"%s","model":"deepseek-chat","cwd":"%s","turns":%s,"tool_calls":%s,"usage":{"prompt_tokens":%s,"completion_tokens":%s,"total_tokens":%s,"prompt_cache_hit_tokens":0,"prompt_cache_miss_tokens":%s}}\n' \
+    "$1" "$2" "$3" "$FIXTURE_CWD" "$4" "$5" "$6" "$7" "$(( $6 + $7 ))" "$6"
 }
 LONG="$TMP/sessions/$LONG_SID.jsonl"
 hdr "$LONG_SID" "2026-11-15T10:00:00+08:00" "2026-11-15T11:30:00+08:00" 617 120 180000 90000 > "$LONG"
@@ -142,10 +147,53 @@ wc -l "$LONG" "$TINY" | tail -1
 # ---- 3. 临时 config：serve.web_addr（生产代码无 env 监听出口，走 config 通道）----
 printf '{"serve":{"web_addr":"%s"}}\n' "$ADDR" > "$TMP/config.json"
 
+# ---- 3.5 桩 seek（PATH 前置，c_mo7quv 返工）----
+# 本族此前没有桩，普通文本落到 PATH 上的真 seek（沙盒里没有 key，只会报错）。
+# 景 L 要两条服务端证据，故补一个只认一种特殊消息的桩：
+#   ① 每次被拉起都把参数追加到 $TMP/stub-seek.log——执行器拉子进程时带
+#      -resume <sid>，「正文那一行带着所看会话的 sid」即「/resume 先于正文」；
+#   ② 「慢流」吐真流式增量（8 段 × 0.5s），给「生成中看别处、切回不丢」用。
+# 其余消息一律快答；agent_end 不带 session_id——绑定保持原样，前面各景的预期
+# 不变。事件形状 = seek -p --json 的 jsonLine 契约（同 web-stop-manual.sh）。
+echo "== stub seek =="
+mkdir -p "$TMP/bin"
+: > "$TMP/stub-seek.log"
+cat > "$TMP/bin/seek" <<STUB
+#!/usr/bin/env bash
+# web-sessions 景 L 的桩（c_mo7quv）：记参数 + 慢流 + 快答。
+set -u
+ARGS=("\$@")
+MSG=""
+while [ \$# -gt 0 ]; do
+  case "\$1" in
+    -p) MSG="\${2:-}"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+printf '%s\\n' "\${ARGS[*]}" >> "$TMP/stub-seek.log"
+em() { printf '%s\\n' "\$1"; }
+case "\$MSG" in
+  慢流)
+    em '{"type":"agent_start","model":"deepseek-chat"}'
+    for s in 一 二 三 四 五 六 七 八; do
+      sleep 0.5
+      em "{\\"type\\":\\"text_delta\\",\\"delta\\":\\"慢流第\${s}段。\\"}"
+    done
+    em '{"type":"agent_end","turns":1}'
+    ;;
+  *)
+    em '{"type":"agent_start","model":"deepseek-chat"}'
+    em "{\\"type\\":\\"text_delta\\",\\"delta\\":\\"桩应答：\${MSG}\\"}"
+    em '{"type":"agent_end","turns":1}'
+    ;;
+esac
+STUB
+chmod +x "$TMP/bin/seek"
+
 # ---- 4. 起 serve，抓 banner URL ----
 echo "== serve up =="
 : > "$TMP/serve.log"
-SEEK_HOME="$TMP" "$TMP/seek" serve --frontend=web 2> "$TMP/serve.log" &
+PATH="$TMP/bin:$PATH" SEEK_HOME="$TMP" "$TMP/seek" serve --frontend=web 2> "$TMP/serve.log" &
 SERVE_PID=$!
 URL=""
 for _ in $(seq 1 50); do
@@ -209,7 +257,7 @@ HEADLESS=1
 if [ "$HEADLESS" = "1" ]; then
   echo "== headless（Chrome + node CDP）=="
   "$NODE_BIN" "$HERE/web-sessions-headless.mjs" "$URL" "$LONG_SID" "$TINY_SID" \
-    --chrome "$CHROME_BIN" &
+    --stub-log "$TMP/stub-seek.log" --proj "$FIXTURE_CWD" --chrome "$CHROME_BIN" &
   NODE_PID=$!
   wait "$NODE_PID"; rc=$?
   NODE_PID=""
