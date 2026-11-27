@@ -2,6 +2,8 @@
 
 ## 已进 main、未部署
 
+- c_tnujb6：resolveProviderName 优先级修复：default_provider 显式声明压过 key 存在性探测（旧行 flag > key 探测 > default_provider，多 key config 里字段永远轮不到、被磁盘上的 key 永久遮蔽）；声明缺 key/未知 provider 启动时报错而非静默换道；--provider 旗标仍最高；guide-config.md 字段说明同步
+- c_eha42g：后台记忆管线换车道：dream/distill/memory_observe/skill-distill/-dream 改走后台记忆车道（默认 opendesign 订阅网关 + deepseek-v4.1-flash-eco，env SEEK_MEMORY_BASE_URL/MODEL 与 providers.memory 可覆盖），不再计费自有 DeepSeek per-token key；ACP 车道保持写静默（bot 会话不写 soul）；管线不再依附 dsClient——聊天车道离开 deepseek 后记忆功能继续可用
 - c_wjo6wy：R2 verdict 持久化落点：autopilot Report 落盘为可积累 JSONL（§9.5③3）
 - c_jxwsfz：--json 空返回的机器可判定信号（judge 前置②：静默空返回 exit 0 陷阱）
 - c_lh6tlq：--tools=none 哨兵：零工具面（judge 前置③：安全边界）
@@ -22,6 +24,12 @@
 - c_3j2ovf：握手预算：车道继承 stdlib 10s TLS 握手超时、超时类失败又与瞬时 reset 共用 500ms 退避，opendesign 一轮死在 `TLS handshake timeout (after 2 attempts)`。改共享 20s transport（克隆 DefaultTransport，proxy/HTTP2 原样）+ 按失败类别退避（`net.Error.Timeout()` → 3s），覆盖 openai/compatible、anthropic、gemini 与 DeepSeek 一线
 - c_qjuags：seek judge 本体·下：--max-cost 成本硬顶——pricing 累加、预算尽停派新条、exit 3（judge §6-7）
 - c_vmrguu：叙事稿开首稿：seek
+- c_tnzudu：路由表与推断口径对齐：opencode/deepseek 条目补全，消掉跨车道报错的死胡同提示（c_dxrjjl 复审发现）
+- c_4gw4rd：证据目录归位到 docs/evidence/：两个 .butler-evidence-* 目录 git mv + 全部引用一次性更新
+- c_nfeloo：修 ACP/TUI 非 opencode 启动时 modelcap 视觉误判：catalogue grants 只在 provLabel==OpenCode 装
+- c_bohzri：doc-slim：docs/pitfalls 超预算 169KB — 按「book-overlap 编辑」既定口径降到 533500B
+- c_zib76h：web 审查脚本与资产面小修：截图等侧栏过渡 / 后台夹具路径规范化 / 记忆空态边框 / 统计图「$ $」
+- c_7bqiq5：seek acp × Paseo：ask_user/propose 恒 ErrDisabled — Paseo 0.17.4 不申报 elicitation.form，也不实现 createElicitation handler
 
 ## v0.13.1（2026-11-24）
 

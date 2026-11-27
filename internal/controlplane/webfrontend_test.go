@@ -780,6 +780,9 @@ func TestWeb_PageMemoryStats(t *testing.T) {
 		"q('/rpc')",       // rides the same token'd /rpc route
 		"id=\"mem-proj\"", // the two pickers exist
 		"id=\"stat-sess\"",
+		// 未选条目时元信息行与标签行是空的——不兜底会留下两条只有 padding
+		// 与下边框的空带（2026-11-27 复核实录）。
+		"#mem-meta:empty, #mem-tags:empty { display: none; }",
 	} {
 		if !strings.Contains(page, need) {
 			t.Errorf("embedded page lost the memory/stats piece %q (W4.5)", need)
@@ -821,6 +824,9 @@ func TestWeb_PageStatsTrend(t *testing.T) {
 		"TREND_WINDOWS",      // time-window switching
 		"还没有历史会话",            // empty-state copy
 		"折线需要 ≥2 个点",         // one-point boundary copy
+		// fmtUSD 自带 $：成本行的标签写成 '$' 会渲染成「$ $0.00xx」（行首
+		// 标签与悬停读数共用它，2026-11-27 复核实录）。
+		"label: '成本', v: p => p.cost_usd || 0, f: fmtUSD",
 	} {
 		if !strings.Contains(page, need) {
 			t.Errorf("embedded page lost the trend-chart piece %q (c_6xktw4)", need)
@@ -1123,6 +1129,26 @@ func TestWeb_PageVisualBase(t *testing.T) {
 		default:
 			t.Errorf("border-radius %spx is outside the 8/12/22/24/999 scale", m[1])
 		}
+	}
+
+	// ⑤ 悬停行的行内操作组不靠底色盖字。行底被 --seek-hover 提过一档之后，
+	// 一块 --seek-panel 底的补丁会在行上显形（亮偏浅、暗偏深）——让位改由
+	// 行自己的 padding 承担。这个形态静态截图容易漏，先钉在这里。
+	actsIdx := strings.Index(stripped, "\n  .sess-acts {")
+	if actsIdx < 0 {
+		t.Fatalf(".sess-acts rule not found in the style block")
+	}
+	actsEnd := strings.Index(stripped[actsIdx:], "}")
+	if actsEnd < 0 {
+		t.Fatal(".sess-acts rule unterminated")
+	}
+	if strings.Contains(stripped[actsIdx:actsIdx+actsEnd], "background:") {
+		t.Errorf(".sess-acts paints its own background — a mask colour cannot follow the hover/selected/archived row layers")
+	}
+	yieldIdx := strings.Index(stripped, ".sess-row:hover, .sess-row:focus-within { padding-right: 68px; }")
+	editingIdx := strings.Index(stripped, ".sess-row.editing { padding-right: 12px; }")
+	if yieldIdx < 0 || editingIdx < yieldIdx {
+		t.Errorf("hover row must yield to its inline actions, and the editing state must opt out AFTER it (same specificity): yield=%d editing=%d", yieldIdx, editingIdx)
 	}
 }
 

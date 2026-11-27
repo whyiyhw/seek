@@ -30,15 +30,16 @@ const dreamSessionTail = 10
 const dreamReasonerTimeout = 3 * time.Minute
 
 // runDream is the -dream CLI handler. Scans all project memory + recent
-// session tails, calls thinking mode, prints candidates to stdout, and
-// (when write=true) appends them to ~/.seek/soul.md's Pending section.
+// session tails, runs one reasoning round-trip on the given model,
+// prints candidates to stdout, and (when write=true) appends them to
+// ~/.seek/soul.md's Pending section.
 //
 // Default (write=false) is preview-only by design: the user gets to
 // eyeball what would land in L before committing. The PRD doesn't
 // require this — but writing to L silently feels wrong for a feature
 // whose whole point is "model learns about you" with a v1 emphasis on
 // user control.
-func runDream(ctx context.Context, client *deepseek.Client, write bool) error {
+func runDream(ctx context.Context, client *deepseek.Client, model string, write bool) error {
 	// 1. Scan projects.
 	projects, err := memory.ListProjects()
 	if err != nil {
@@ -72,13 +73,15 @@ func runDream(ctx context.Context, client *deepseek.Client, write bool) error {
 		return nil
 	}
 
-	fmt.Fprintf(os.Stderr, "dream: scanning %d project(s), %d recent session(s) → calling V4.1-Flash thinking …\n",
-		len(in.Projects), len(in.Sessions))
+	fmt.Fprintf(os.Stderr, "dream: scanning %d project(s), %d recent session(s) → calling %s …\n",
+		len(in.Projects), len(in.Sessions), model)
 
-	// 3. Run the thinking-mode round-trip.
+	// 3. Run the reasoning round-trip (c_eha42g: model comes from the
+	// background memory lane — gateway-served id by default, thinking
+	// only when the id itself implies it).
 	rctx, cancel := context.WithTimeout(ctx, dreamReasonerTimeout)
 	defer cancel()
-	dreamer := &memory.Dreamer{Client: client}
+	dreamer := &memory.Dreamer{Client: client, Model: model}
 	candidates, err := dreamer.Dream(rctx, in)
 	if err != nil {
 		return fmt.Errorf("dream: %w", err)

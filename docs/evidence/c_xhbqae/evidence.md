@@ -3,7 +3,7 @@
 日期 2026-11-24。所有运行：真 `eval/run.sh` + 真 `eval/tools/judge.py` + 真
 `eval/cases/*/expect.json`（改动后），只把 seek 二进制换成本目录的确定性
 `fake-seek`（SUT 调用无 `-model` → 输出一个「错常量」答案；judge 调用带
-`-model` → 输出 `{"pass": false, ...}`）。结果落 `.butler-evidence-c_xhbqae/res-*`，
+`-model` → 输出 `{"pass": false, ...}`）。结果落 `docs/evidence/c_xhbqae/res-*`，
 不碰正式 `eval/results/`。
 
 ## ① gate 生效：judge 判红被拦/染色
