@@ -268,7 +268,7 @@ func cmdExec(e *Env, args []string, stdout, stderr io.Writer) error {
 // scrubbed, with nothing appended. The wrapper was handed
 // SEEK_HOME=<home> only so it could find this registry; handing that on
 // would let a nested `seek` write sessions into a home the user never
-// named (docs/prd/feature-task-lifetime.md §1.2, second segment).
+// named (docs/prd/archive/feature-task-lifetime.md §1.2, second segment).
 func taskChildEnv() []string { return childenv.Sanitized() }
 
 // terminalLine renders a finished task's summary for attach/kill.

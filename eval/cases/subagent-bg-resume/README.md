@@ -3,7 +3,7 @@
 ## What this probes
 
 Load-bearing axis #2 of eval v2
-([`docs/prd/feature-eval-v2.md`](../../../docs/prd/feature-eval-v2.md) §2.2,
+([`docs/prd/archive/feature-eval-v2.md`](../../../docs/prd/archive/feature-eval-v2.md) §2.2,
 E4 at :108): the **background-subagent lifecycle end to end** — one of
 the six zero-coverage areas named in §1.2. Three PRD assertions, each
 bound to a metric:

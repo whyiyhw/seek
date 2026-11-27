@@ -56,7 +56,7 @@ assistant "Understood — I have the context. Ready to continue."
 `-provider compatible -base-url <fixture>` + 假 key，零 API 费。
 
 **record_only**: 只记录不闸门——真 key 车道与 E2 标定之前没有资格拦截
-（[`docs/prd/feature-eval-v3.md`](../../../docs/prd/feature-eval-v3.md) §2.1）。
+（[`docs/prd/archive/feature-eval-v3.md`](../../../docs/prd/archive/feature-eval-v3.md) §2.1）。
 
 **离线孪生**: `scripts/transcript-stats` 的 compact 链段
 （`chains.compression_mean` / `chains.recall` / `chains.child_head_rate`）

@@ -90,7 +90,7 @@ jobs:
       - name: zero-build-chain assertion + binary size gate
         run: scripts/web-gate.sh
 
-  # eval v2 E6 (docs/prd/feature-eval-v2.md §2.3, card c_rkoeiy):
+  # eval v2 E6 (docs/prd/archive/feature-eval-v2.md §2.3, card c_rkoeiy):
   # nightly observation of the core eval lane. Schedule-ONLY — it never
   # runs on pull_request or workflow_dispatch, so ci.yml's keyless,
   # forkable, always-green PR story above is untouched ("nightly 只观测

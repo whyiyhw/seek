@@ -1,6 +1,6 @@
 #!/bin/bash
 # anchor-runner.sh — eval v3 A1: the shared runner for anchor-* cases
-# (Terminal-Bench-lite private anchor, docs/prd/feature-eval-v3.md §2.2).
+# (Terminal-Bench-lite private anchor, docs/prd/archive/feature-eval-v3.md §2.2).
 #
 # Each eval/cases/anchor-<name>/runner.sh is a two-line shim delegating
 # here, so the isolation mechanics live in exactly one place. The shape

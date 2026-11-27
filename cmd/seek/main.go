@@ -369,7 +369,7 @@ func run() error {
 		return nil
 	}
 	// `seek task ...` + the ps / attach / kill aliases (v8 柱 V1,
-	// docs/prd/feature-task-lifetime.md). Same rationale as cron/worktree:
+	// docs/prd/archive/feature-task-lifetime.md). Same rationale as cron/worktree:
 	// the management verbs read ~/.seek/tasks/ and nothing else, so they
 	// must work without API keys, sessions, or the agent runtime — and
 	// `seek attach` in particular has to be usable from a shell that never

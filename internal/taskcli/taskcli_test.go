@@ -420,7 +420,7 @@ func TestExec_RecordsPIDAndExit(t *testing.T) {
 // TestExec_TaskEnvIsScrubbedOfSeekHome: the wrapper needs SEEK_HOME to
 // find the registry, but the TASK must not inherit it — a nested `seek`
 // would otherwise write sessions into a home the user never named
-// (docs/prd/feature-task-lifetime.md §1.2). This is the real-exec path
+// (docs/prd/archive/feature-task-lifetime.md §1.2). This is the real-exec path
 // (no Exec stub), so it verifies the actual child environment.
 func TestExec_TaskEnvIsScrubbedOfSeekHome(t *testing.T) {
 	if runtime.GOOS == "windows" {

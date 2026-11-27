@@ -39,7 +39,7 @@ main 现状不可观测——W1.4 的 `SendStream` 把这三者消费为 run 元
 真缺口三条进该节待开卡清单（eval 并发写结果行自测 / AGENTS.md 会话 legacy 迁移句过期 /
 E3+E4 未进 release lane —— 第三条已由 c_3xyt7w 收口）。`go vet ./...` 绿；纯文档卡无代码改动，未跑全量 `go test`（验收口径如此）。
 
-**前置阅读**：[`eval/README.md`](../../eval/README.md)（判分机制与 metric 词表）、[`feature-slim-loop.md`](feature-slim-loop.md) §3（「单次红是 signal 不是 proof，判回归须双轮」——本文把它从纪律变成机制）、[`v8.md`](v8.md) 柱 T（裸核/完整消融，本文的 `--lane` 与之共用结果目录隔离）、[`../../AGENTS.md`](../../AGENTS.md) 测试节（failure-mode 清单）。
+**前置阅读**：[`eval/README.md`](../../../eval/README.md)（判分机制与 metric 词表）、[`feature-slim-loop.md`](../feature-slim-loop.md) §3（「单次红是 signal 不是 proof，判回归须双轮」——本文把它从纪律变成机制）、[`v8.md`](../v8.md) 柱 T（裸核/完整消融，本文的 `--lane` 与之共用结果目录隔离）、[`AGENTS.md`](../../../AGENTS.md) 测试节（failure-mode 清单）。
 
 **触发起因**：v0.12.0 发版前跑全量 eval（2026-11-19，binary `11b2366`，21 例）出 3 红，逐个复核后发现**只有一个是真信号**：
 
