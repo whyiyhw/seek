@@ -374,6 +374,10 @@
   .msg.seek { padding: 2px 0; }
   .msg.hint { color: var(--seek-fg-dim); font-size: 13px; line-height: 20px;
               padding: 2px 0; }
+  /* 懒收口失败的错误行（W6-5 做②）：与 hint 同排版、红字——「草稿已保留」
+     是要人立刻看见的失败，不能混在灰色系统行里。 */
+  .msg.err { color: var(--seek-err); font-size: 13px; line-height: 20px;
+             padding: 2px 0; }
   /* pre 的横滚/配色四个正文容器同款。c_k3pnlw（markdown 卡）把选择器从 .msg 扩到
      .txt——会话正文的 markdown 产物挂在 .msg.seek > .txt 下（W6-3 起实时/
      历史同一套类名）；.tpre 的 pre-wrap/max-height 在自己的规则里，不与此处
@@ -982,6 +986,15 @@
   body.viewing.chat-empty-on #center { justify-content: flex-start; }
   body.viewing.chat-empty-on #conv-head { position: static; }
   body.viewing.chat-empty-on form { margin-bottom: 10px; }
+  /* 面板打开也是内容态：聊天面整体让位（W5 起的互斥，W6-7 归位面板前的过渡
+     形态）。W6-5 主提交退役只读浏览器时把这条连带删了——面板与空态 Hero、
+     「已到末尾」、输入卡片叠在一起；空态的会话头（绝对定位）还压在面板首行上。
+     2026-11-27 返工找回，并补上 W6-4/5 新增的件（#hist、#hist-foot、
+     #composer-meta）。 */
+  body.browsing #list, body.browsing #hist, body.browsing #hist-foot,
+  body.browsing form, body.browsing #composer-meta { display: none; }
+  body.browsing.chat-empty-on #center { justify-content: flex-start; }
+  body.browsing.chat-empty-on #conv-head { position: static; }
   .chat-empty { display: flex; flex-direction: column; align-items: center;
                 gap: 10px; padding: 0 16px 12px; text-align: center;
                 opacity: 1; transition: opacity .3s; }
@@ -1537,8 +1550,11 @@ function renderBody(el, text) {
 
 // 对话流四形态的实时半边（W6-3）：you=右侧气泡（附件缩略图在气泡上方）、
 // seek=无框、hint=灰行。类名与历史渲染同一套（histTurn）。
-function addMsg(who, text, atts) {
+// host 缺省是实时 #list；看历史态要落到可见的 #hist（ctxNotice），因为那时
+// #list 是 display:none——写进去等于没写。
+function addMsg(who, text, atts, host) {
   dropChatEmpty();                   // 第一条消息落地：空态让位（c_jf3grt）
+  const box = host || list;
   const el = document.createElement('div');
   el.className = 'msg ' + (who === 'you' ? 'user' : who);
   if (who === 'you') {
@@ -1550,8 +1566,16 @@ function addMsg(who, text, atts) {
   } else {
     renderBody(el, text);             // 纯 DOM 构建：无 HTML 注入面
   }
-  list.appendChild(el);
-  list.scrollTop = list.scrollHeight;  // 流式追加：贴底滚动
+  box.appendChild(el);
+  box.scrollTop = box.scrollHeight;  // 流式追加：贴底滚动
+}
+
+// 懒收口（W6-5）的提示/错误落点：看历史态（body.viewing）下实时 #list 隐藏，
+// 必须写进人正在看的 #hist，否则「生成中」「草稿已保留」都无人可见（验证会话
+// 2026-11-27 实测）。错误用红字行（kind='err'），不用灰色 hint。
+function ctxNotice(kind, text) {
+  const viewing = document.body.classList.contains('viewing');
+  addMsg(kind, text, undefined, viewing ? document.getElementById('hist') : list);
 }
 
 // 轮末悬停 meta（W6-3 ⑥）：复制全文 + 收口时间（实时轮知道时间；历史
@@ -1890,24 +1914,35 @@ const dirty = new Set();  // 本帧待重渲的 run（SSE 突发合帧，一帧�
 // posting 是在途 POST /msg 的防重入位，与「可否发送」解耦——早先两者共用
 // send.disabled，键一禁用就把 /new、/bind 选择器这些同走 sendText 的入口
 // 一并锁死（按钮不吃输入框的草稿）。
+//
+// 看历史闸（W6-5 做③）：看历史时这个 composer 的对象是所看的会话，不是正在
+// 生成的那个。当前会话生成中 → 发送钮禁用（停止去实时视图做——这里的键点了
+// 也停不了别人：/cancel 会被懒收口分岔拦下），占位文案说明原因。视图切换
+// （openSession/viewLive）与 run 起落都要重算，所以 renderSend 一并管占位。
+const GATE_TEXT = '当前会话生成中——停止或等它完成后再在这里发';
+function viewingOther() { return document.body.classList.contains('viewing'); }
+function gatedNow() { return runs.size > 0 && viewingOther(); }
 let posting = false;
 function draftReady() {
   return input.value.trim() !== '' || attachments.some(a => a.status !== 'error');
 }
 function syncSend() {
-  if (runs.size > 0) { send.disabled = false; return; }
+  if (runs.size > 0) { send.disabled = viewingOther(); return; }
   send.disabled = posting || !draftReady();
 }
 function renderSend() {
   const busy = runs.size > 0;
+  const gated = gatedNow();
   // 圆形图标钮（W6-4）：arrow-up=发送、square=停止；语义在 aria-label
   // 与 title（icon-only button 必须 aria-label——ui-ux-pro-max）。文字
   // 「停止/发送」改由这两个属性承载（web-stop 断言随迁，见 commit body）。
   swapIcon(send, busy ? 'square' : 'arrow-up');
-  send.setAttribute('aria-label', busy ? '停止' : '发送');
-  send.title = busy ? '中断当前生成（等同 /cancel）' : '发送';
+  send.setAttribute('aria-label', gated ? '发送（当前会话生成中，暂不可用）' : busy ? '停止' : '发送');
+  send.title = gated ? GATE_TEXT + '（回实时视图可停止）'
+    : busy ? '中断当前生成（等同 /cancel）' : '发送';
   send.classList.toggle('stop', busy);
   syncSend();
+  applyWsChip();   // 占位文案跟闸态走
 }
 
 function nearBottom() {
@@ -2372,15 +2407,16 @@ async function sendText(text, fromInput, atts) {
   }
   // 懒收口（W6-5）：看历史/懒新会话时，先 /resume（或 /new、/bind）再发
   // 正文；失败保草稿、红字提示，正文不发。生成中不开新上下文（③）。
+  // 提示一律走 ctxNotice：看历史态 #list 是隐藏的，写进去没人看得见。
   if ((viewSid && viewSid !== boundSession) || pendingFresh) {
     if (runs.size) {
-      addMsg('hint', '（当前会话生成中——停止或等它完成后再在这里发）');
+      ctxNotice('hint', '（' + GATE_TEXT + '）');
       return;
     }
     try {
       await ensureContext(body);
     } catch (e) {
-      addMsg('hint', '（' + e.message + '——草稿已保留）');
+      ctxNotice('err', '（' + e.message + '——草稿已保留）');
       return;
     }
   }
@@ -3203,6 +3239,7 @@ function applyWsChip() {
     wsChip.classList.add('pick');
     input.placeholder = '选择一个工作区开始';
   }
+  if (gatedNow()) input.placeholder = GATE_TEXT;   // 看历史 + 生成中：占位说明（W6-5 做③）
 }
 wsChip.addEventListener('click', () => { openDirPicker(); drawerClose(); });
 applyWsChip();   // 初渲染（W6-4；refreshState 会随后纠正）——放在声明后防 TDZ
@@ -3635,6 +3672,7 @@ async function openSession(sid) {
     paneHint(sessFoot, '');
     markCur();
     loadMsgs();
+    renderSend();   // 看历史闸随视图走（生成中 → 发送钮禁用，卡面做③）
   } else {
     viewLive();
   }
@@ -3648,6 +3686,7 @@ function viewLive() {
   document.body.classList.remove('viewing');
   markCur();
   renderConvHead();
+  renderSend();              // 回实时：生成中恢复成可点的停止键
   input.focus();
 }
 
@@ -3978,6 +4017,7 @@ const panes = {
   hooks:    { btn: hkBtn,     icon: 'activity', label: '审计', cls: 'hooks-view',    load: loadHooksPane },
 };
 function closePanes() {
+  const wasViewing = document.body.classList.contains('viewing');
   for (const p of Object.values(panes)) {
     document.body.classList.toggle(p.cls, false);
     setBtn(p.btn, p.icon, p.label);
@@ -3985,7 +4025,10 @@ function closePanes() {
   document.body.classList.remove('browsing');
   document.body.classList.remove('viewing');   // 面板让位时历史视图退场（W6-5）
   viewSid = null;
+  sel = null;   // 历史视图的分页游标一起退场：curSid() 读它，不清则会话头/高亮留着刚看的会话
   sessMsgs.hidden = true;
+  if (wasViewing) markCur();   // 侧栏高亮与会话头回到实时口径
+  renderSend();   // 离开看历史态：看历史闸解除（生成中的停止键恢复可点、占位复位）
 }
 function togglePane(name) {
   const active = !document.body.classList.contains(panes[name].cls);

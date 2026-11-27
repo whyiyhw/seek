@@ -1278,6 +1278,11 @@ func TestWeb_PageLazyResumeW65(t *testing.T) {
 	}
 	// 看历史是内容态（2026-11-27 返工）：实时列表空着时 chat-empty-on 还挂着，
 	// 空态布局（会话头绝对化/内容居中/composer 上浮）不能跟进历史视图。
+	// 提示可见 + 看历史闸（同日二次返工，验证 blocker ③）：看历史态 #list 是
+	// display:none，懒收口的提示/错误必须落到 #hist、错误行用红字；当前会话
+	// 生成中时发送钮禁用（停止去实时视图做）。W6-5 主提交还连带删了「面板打开
+	// 时聊天面让位」的规则（32 张面板镜头全破没人看，web-subagents 一族红）——
+	// 找回并钉住；面板从看历史态进入时会话头/高亮回实时口径。
 	for _, need := range []string{
 		"ensureContext",      // the lazy-context split lives in one function
 		"'/resume ' + sid",   // the resume POST is built before the body
@@ -1289,6 +1294,15 @@ func TestWeb_PageLazyResumeW65(t *testing.T) {
 		"body.viewing.chat-empty-on #conv-head { position: static; }",
 		"body.viewing.chat-empty-on #center { justify-content: flex-start; }",
 		"body.viewing.chat-empty-on form { margin-bottom: 10px; }",
+		"function ctxNotice(kind, text)",
+		"ctxNotice('err', '（' + e.message + '——草稿已保留）')",
+		".msg.err { color: var(--seek-err)",
+		"if (runs.size > 0) { send.disabled = viewingOther(); return; }",
+		"function gatedNow() { return runs.size > 0 && viewingOther(); }",
+		"body.browsing #list, body.browsing #hist, body.browsing #hist-foot,",
+		"body.browsing form, body.browsing #composer-meta { display: none; }",
+		"body.browsing.chat-empty-on #conv-head { position: static; }",
+		"if (wasViewing) markCur();",
 	} {
 		if !strings.Contains(page, need) {
 			t.Errorf("embedded page lost the W6-5 lazy-resume piece %q (c_mo7quv)", need)
