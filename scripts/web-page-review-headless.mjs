@@ -283,16 +283,19 @@ async function navigate(panel) {
     await backToChat();
     if (!RICH_SID) throw new Error('未传 --rich-sid');
     await evalJS(`document.querySelector('.sess-row[data-sid="${RICH_SID}"]').click()`);
-    await until('会话正文', `document.querySelectorAll('#sess-msgs .smsg').length >= 4`
+    // 就绪条件跟页面的对话流形态走：W6-3 起历史由 histTurn 渲染（.msg / .tcall），
+    // 旧的 .smsg / .ttree .tnode 已删——驱动还等它们就是等 8 秒超时后硬拍，
+    // 四张「富会话」镜头全没走完导航（W6-3/W6-4 的证据即如此，2026-11-27 修）。
+    await until('会话正文', `document.querySelectorAll('#sess-msgs .msg').length >= 4`
       + ` && ${$id('sess-meta')}.textContent.length > 0`);
-    // 展开第一行工具树：参数/结果面板进 DOM（懒建），夹具的「工具树行」
+    // 展开第一行工具调用：参数/结果面板进 DOM（懒建），夹具的「工具树行」
     // 易烂元素才算进了镜头。
     await evalJS(`(() => {
-      const row = document.querySelector('.ttree .tnode');
+      const row = document.querySelector('#sess-msgs .tcall');
       if (row) row.click();
       return !!row;
     })()`);
-    await until('工具树展开', `document.querySelectorAll('.tdetail:not([hidden])').length >= 1`);
+    await until('工具调用展开', `document.querySelectorAll('#sess-msgs .tdetail:not([hidden])').length >= 1`);
     return {};
   }
   // pane 型：已开则不点（togglePane 是开关，二连点会关掉）。按钮点了但
