@@ -1196,6 +1196,15 @@ func TestWeb_PageSkeletonW62(t *testing.T) {
 			t.Errorf("embedded page lost the W6-2 skeleton piece %q (c_onxxge)", need)
 		}
 	}
+	// 工作区小节头三枚图标钮的 DOM 顺序 = 卡面做③：搜索 / 归档 / 新建工作区。
+	// 没有 CSS order 重排，DOM 序即视觉序与 Tab 序，三者必须一致（首版把后两枚
+	// 写反了，2026-11-27 巡检指出）。
+	iFind := strings.Index(page, `id="side-find"`)
+	iArch := strings.Index(page, `id="side-arch"`)
+	iWsNew := strings.Index(page, `id="side-ws-new"`)
+	if iFind < 0 || iArch < iFind || iWsNew < iArch {
+		t.Errorf("sidebar header icon order drifted: want #side-find < #side-arch < #side-ws-new, got %d/%d/%d", iFind, iArch, iWsNew)
+	}
 }
 
 // TestWeb_PageChatFlowW63 pins the W6-3 conversation-flow unification
