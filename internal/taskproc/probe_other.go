@@ -10,7 +10,7 @@ import (
 // ProbePID on the remaining platforms uses the portable signal-0
 // question. It cannot distinguish a zombie (Windows has no Unix zombie
 // state, and the BSDs' os.FindProcess semantics differ), so it reports
-// alive-or-gone only — documented in docs/prd/feature-task-lifetime.md §5.
+// alive-or-gone only — documented in docs/prd/archive/feature-task-lifetime.md §5.
 func ProbePID(pid int) Probe {
 	if pid <= 0 {
 		return ProbeGone

@@ -5,7 +5,7 @@
 # ignored; every entry must name an existing eval/cases/<name>/ dir or
 # run.sh exits 2 before running anything.
 #
-# Composition (docs/prd/feature-eval-v2.md §2.2/§三 E6): the load-bearing
+# Composition (docs/prd/archive/feature-eval-v2.md §2.2/§三 E6): the load-bearing
 # axes + every case the E2 calibration table (eval/README.md) judges
 # STABLE — gate 1.0, not record-only, not in the known-flaky class.
 # Deliberately OUT: bash-overreach / grep-refine-not-flood /

@@ -1,6 +1,6 @@
 // Package taskcli implements `seek ps` / `seek attach` / `seek kill` and
 // the `seek task run|exec` verbs behind them (v8 柱 V1,
-// docs/prd/feature-task-lifetime.md).
+// docs/prd/archive/feature-task-lifetime.md).
 //
 // Structure mirrors the other *cli packages (worktreecli, checkpointcli):
 // a Run(args, stdout, stderr) entry point that dispatches verbs. The one

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# runner.sh — serve-web-stream（eval v2 E5，docs/prd/feature-eval-v2.md
+# runner.sh — serve-web-stream（eval v2 E5，docs/prd/archive/feature-eval-v2.md
 # §2.2/§三-E5，卡 c_lbtdqw）。承重轴用例：真 `seek serve --frontend=web`
 # 子进程 → /msg /bind + 提问 → 子进程 seek 跑一轮 → SSE 事件族 →
 # /rpc session/list 落盘双断言。

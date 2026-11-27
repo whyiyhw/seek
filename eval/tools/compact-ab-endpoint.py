@@ -20,7 +20,7 @@ So this endpoint does extractive answering over the request body:
 
 That makes the case mechanical and zero-cost, and it makes the negative
 arm (a summary that dropped the facts) turn red for the right reason.
-docs/prd/feature-eval-v3.md's judge axis stays untouched: a real-key
+docs/prd/archive/feature-eval-v3.md's judge axis stays untouched: a real-key
 lane can add a `judge` block later; the rubric text is already encoded
 here as FACTS.
 

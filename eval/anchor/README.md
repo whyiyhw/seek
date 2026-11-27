@@ -1,6 +1,6 @@
 # eval/anchor/ — 跨 harness 对照（私有，#2575）
 
-**边界（先读）**：本目录属于 eval v3 A3（`docs/prd/feature-eval-v3.md` §2.2）。
+**边界（先读）**：本目录属于 eval v3 A3（`docs/prd/archive/feature-eval-v3.md` §2.2）。
 #2575（2026-11-12 用户决定）禁止公开跑分——本目录的任何数字**永不发布**：
 不进 README、不进 release notes、不做 leaderboard、不给外部对照引用。它是
 **私有外部校准**：回答「同一模型、同一任务集下，seek 这个 harness 相对

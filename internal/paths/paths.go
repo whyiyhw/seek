@@ -371,7 +371,7 @@ func CronTriggers() (string, error) {
 }
 
 // TasksDir returns ~/.seek/tasks/ — the registry for lifetime-detached
-// task processes (v8 柱 V1, docs/prd/feature-task-lifetime.md). One
+// task processes (v8 柱 V1, docs/prd/archive/feature-task-lifetime.md). One
 // `<id>.jsonl` fact log + one `<id>.log` output file per task. Does NOT
 // create the directory; the task store MkdirAlls on first append.
 //
