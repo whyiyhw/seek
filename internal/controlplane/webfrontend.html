@@ -3355,12 +3355,17 @@ sideFind.addEventListener('click', () => {
 const wsChip = document.getElementById('ws-chip');
 const wsChipN = document.getElementById('ws-chip-n');
 const modelTag = document.getElementById('model-tag');
+// 窄屏占位（c_xhwykc）：≤640px 字号 16px 下 390px 内容宽仅 260px，长占位折行后
+// 被 rows=1 的 24px 整行裁掉——窄屏换短文案，桌面保留完整提示。
+const inputNarrowMQ = window.matchMedia ? window.matchMedia('(max-width: 640px)') : null;
+const PLACE_LONG = '直接发消息；/ 看指令，@ 引用历史会话';
+const PLACE_NARROW = '发消息，/ 看指令';   // ≤640px：390px 一行放得下
 function applyWsChip() {
   if (boundProject) {
     wsChipN.textContent = baseOf(boundProject);
     wsChip.title = boundProject;
     wsChip.classList.remove('pick');
-    input.placeholder = '直接发消息；/ 看指令，@ 引用历史会话';
+    input.placeholder = inputNarrowMQ && inputNarrowMQ.matches ? PLACE_NARROW : PLACE_LONG;
   } else {
     wsChipN.textContent = '选择工作区';
     wsChip.title = '选择一个工作区开始（打开目录浏览器）';
@@ -3370,6 +3375,8 @@ function applyWsChip() {
   if (gatedNow()) input.placeholder = GATE_TEXT;   // 看历史 + 生成中：占位说明（W6-5 做③）
 }
 wsChip.addEventListener('click', () => { openDirPicker(); drawerClose(); });
+// 跨 640px（转屏 / 拖窗）即时换占位——不重绘的话窄屏转宽会留着短文案。
+if (inputNarrowMQ) inputNarrowMQ.addEventListener('change', applyWsChip);
 applyWsChip();   // 初渲染（W6-4；refreshState 会随后纠正）——放在声明后防 TDZ
 // 品牌行版本小字（W6-2）：settings/get 的快照里带 serve 版本——一次性
 // 拉取填 #side-ver，失败静默隐藏（读不到版本不该影响页面）。
