@@ -1168,7 +1168,9 @@
     #composer-meta { padding: 4px 16px 8px 12px; }
     #ws-chip { max-width: 44vw; }
     #model-tag { display: none; }
-    form { margin: 4px 12px 8px; }
+    /* composer 左右各留 12px：宽度要减掉边距——基线是 width:100%，只加 margin 的话
+       盒子占满整列、边距被吃掉（W6-8 返工实测 56→390，一条边距都不剩）。 */
+    form { width: calc(100% - 24px); margin: 4px 12px 8px; }
     /* 抽屉（W6-8，dsh-09）：≤480px 轨常驻；点标识把完整侧栏（280）以浮层盖出
        + 遮罩，点遮罩 / 选中会话收回（JS drawerClose）。遮罩同态翻出。 */
     body.side-drawer #side { position: absolute; top: 0; bottom: 0; left: 0; z-index: 30;

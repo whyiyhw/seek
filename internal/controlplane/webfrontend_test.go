@@ -1470,6 +1470,7 @@ func TestWeb_PageIconRailW68(t *testing.T) {
 		"body.side-drawer #side-scrim { display: block; }",
 		"#conv-proj-name { display: none; }",
 		"#list, #hist { padding: 12px 16px; }",
+		"form { width: calc(100% - 24px); margin: 4px 12px 8px; }",                       // composer side margins are real, not eaten by width:100%
 		"#side-nav button { display: flex; align-items: center; gap: 8px; height: 32px;", // nav rows stay plain
 	} {
 		if !strings.Contains(page, need) {
