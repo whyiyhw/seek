@@ -41,6 +41,7 @@
 - c_ovly6d：W6-3 web 对话流改 dsh 形：768 居中阅读列 + 用户气泡/助手无框/工具单行/系统灰行四形态，实时与历史出同一种 DOM
 - c_ljtmy4：W6-4 web 输入区改 dsh composer 卡片 + 空态 Hero 居中，未绑定不再是顶部黄条
 - c_mo7quv：W6-5 web 点会话即进入：只读浏览器与「继续此会话」退役，历史渲进主转录区，首条消息时懒 /resume
+- c_7wyr6t：seek·卫生：.gitignore 收 .butler-commit.md + 修 skill 两步装的暂存目录泄漏（skill_commit 成功后父目录不删、测试打真 TMPDIR）
 
 ## v0.13.1（2026-11-24）
 
