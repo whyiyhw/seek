@@ -161,7 +161,7 @@
 #（+246941B）不是 main，勿混。web-gate 不带 -trimpath，绝对路径进产物，换
 # 目录重编有 ±9KB 量级抖动（实测两处独立 clone 分别 −8960B / +72B）——远在
 # 200KB 预算余量内，不改闸判据；主会话在自己检出重跑复核即同线。
-31823749
+31823837
 # 2026-11-20 c_rqcuaa ratchet: +53096B (session rename/archive —
 # internal/sessmeta state+audit pair, session/rename|archive methods +
 # list override/filter, sidebar inline-rename/archive UI ~6.7KB embed).
@@ -231,3 +231,6 @@
 # 规则同卡删净），无新 Go。验收脚本不进 embed。
 # 抬 pin 而非 --update-baseline 绝对值：本卡只认自己的 delta（31819429 →
 # 31823749），不吸收既有未棘轮漂移（同 c_ekuuof / c_w74tuo 归因口径）。
+# 2026-11-28 c_4wpajv W6-8 补丁：390px composer 两侧留白（本卡 delta +88B，
+# DELTA-added；-trimpath 实测 main 31948607B → 本卡 31948695B）。增量是一行 CSS
+# （form 宽度 calc(100% - 24px)）；抬 pin 只认本卡 delta（31823749 → 31823837）。
