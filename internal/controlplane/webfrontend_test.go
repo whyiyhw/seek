@@ -1328,6 +1328,36 @@ func TestWeb_PageComposerW64(t *testing.T) {
 	}
 }
 
+// TestWeb_PageComposerMobilePlaceholder pins the ≤640px short placeholder
+// (card c_xhwykc): W6-8 fixed the 390px composer width, but the bound-state
+// placeholder was still 22 chars at 16px — at 390px it wrapped onto a second
+// line that rows=1 clipped (02/04/12/26 全中). Narrow widths now get a
+// one-line copy; desktop keeps the long one.
+func TestWeb_PageComposerMobilePlaceholder(t *testing.T) {
+	page := string(webPage)
+	for _, need := range []string{
+		"matchMedia('(max-width: 640px)')", // same breakpoint as the 16px iOS-zoom guard
+		"@media (max-width: 640px)",        // …and as the CSS block that raises the size
+		"const PLACE_NARROW = '发消息，/ 看指令'",
+		"const PLACE_LONG = '直接发消息；/ 看指令，@ 引用历史会话'",
+		// one switch site: a copy drifting on its own puts the wrap back.
+		"inputNarrowMQ && inputNarrowMQ.matches ? PLACE_NARROW : PLACE_LONG",
+	} {
+		if !strings.Contains(page, need) {
+			t.Errorf("composer placeholder switch lost %q (c_xhwykc)", need)
+		}
+	}
+	// 短文案得真能放进 390px 的一行：16px 下内容宽约 260px（实测 textW 120.75px），
+	// 旧长文案 283px 才放不下。静态侧钉住「明显更短」+ 保住了 / 指令提示。
+	narrow := "发消息，/ 看指令"
+	if n := len([]rune(narrow)); n > 12 {
+		t.Errorf("窄屏占位 %q 有 %d 字——390px 一行（≈260px / 16px）装不下，至少要比长文案短一半", narrow, n)
+	}
+	if !strings.Contains(narrow, "/") {
+		t.Errorf("窄屏占位 %q 丢了 / 指令入口提示", narrow)
+	}
+}
+
 // TestWeb_PageLazyResumeW65 pins the W6-5 click-to-enter flow (c_mo7quv):
 // the read-only browser (#browser/#sess-detail/#sess-back/#sess-continue) is
 // GONE, the history renders into #hist with the same four-form renderer, and

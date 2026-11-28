@@ -49,6 +49,7 @@
 - c_snscbi：seek·减法：docs/pitfalls 超预算——W5/W6 一周新增约 50KB，编辑瘦身回预算内并给 W6-7..9 留余量（weight 报告 SLIM 建议）
 - c_3dz3kg：W6-9 web 换骨架终验：seek/dsh 五场景并排对照包 + computed-style 探针对 §2 token 表逐项核（不改功能）
 - c_fs2jvy：seek·统计：趋势图「成本 $0.0017」标签被折线划穿（08/22/15/29）
+- c_xhwykc：seek·手机宽：输入框 placeholder 折成两行、第二行被裁掉（02/04/12/26）
 
 ## v0.13.1（2026-11-24）
 
