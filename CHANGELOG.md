@@ -47,6 +47,7 @@
 - c_eq3eak：W6-8 web 侧栏折叠成 56px 图标轨（≤1024 自动收）+ 390px 窄屏对齐 dsh 移动形态
 - c_4wpajv：seek·补丁：W6-8 漏项——390px 下 composer 两侧真的各留 12px（width:100% 把 margin 吃掉）
 - c_snscbi：seek·减法：docs/pitfalls 超预算——W5/W6 一周新增约 50KB，编辑瘦身回预算内并给 W6-7..9 留余量（weight 报告 SLIM 建议）
+- c_3dz3kg：W6-9 web 换骨架终验：seek/dsh 五场景并排对照包 + computed-style 探针对 §2 token 表逐项核（不改功能）
 
 ## v0.13.1（2026-11-24）
 

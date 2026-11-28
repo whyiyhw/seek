@@ -1,6 +1,6 @@
 # W6：seek web 换骨架——按 dsh 的整体结构与成品观感重做（口径源）
 
-> 状态：口径文档，2026-11-25 开组。本组 9 张卡（W6-1…W6-9）的唯一口径源；与 `docs/prd/feature-web-frontend.md` §13 冲突处，**结构与观感以本文为准**，功能/安全/零依赖/体积纪律仍以 §4/§5/§13.3/§13.6 为准。
+> 状态：**W6 组完工（2026-11-28），终验报告见卡 c_3dz3kg**；对照包一条命令复现：`OUT_DIR=out/w6-final W6_FINAL=1 bash scripts/web-page-review.sh`（产物在 `out/w6-final/`）。口径文档，2026-11-25 开组。本组 9 张卡（W6-1…W6-9）的唯一口径源；与 `docs/prd/feature-web-frontend.md` §13 冲突处，**结构与观感以本文为准**，功能/安全/零依赖/体积纪律仍以 §4/§5/§13.3/§13.6 为准。
 > 姊妹篇：[`notes-dsh-ui-spec.md`](notes-dsh-ui-spec.md)（dsh 交互语言全量解剖，token 出处带 `路径:行号`）。本文只写「seek 这次要改成什么样」，不重复那篇的解剖。
 > 参考图：[`notes-assets/`](notes-assets/) 的 `dsh-01…05`（英文预览夹具）+ `dsh-06…09`（2026-11-25 真 `dsh web` 中文界面实拍：设置模态 / 空态 Hero + 工作区树 / 对话流 / 390px 图标轨）。
 

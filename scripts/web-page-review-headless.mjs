@@ -525,6 +525,176 @@ try {
   console.log(`  warn  visual 计数失败（不影响退出码）：${visual.error}`);
 }
 
+// ---- 6.6 W6 终验对照包（W6-9 c_3dz3kg；W6_FINAL=1 才做，只记录不拦）----
+// compare.html：五场景左右并排（空态 / 富会话 / 暗色富会话 / 设置 / 390px），左 seek
+// 本包截图、右 dsh 参考图，全部同目录相对路径，不进 embed、不入库。probe.md：
+// computed-style 探针对 notes-web-w6-dsh-shell §2 的 token 与几何逐项核，每项
+// 「期望 / 实测 / 是否一致」。采集失败只记 console 与 manifest，绝不折损退出码。
+const W6_SCENES = [
+  { name: '空态（Hero + composer）', seek: ['01-chat-empty-light-desktop.png'],
+    dsh: ['dsh-07-empty-hero-zh.png'] },
+  { name: '富会话（768 阅读列 + 四形态消息）', seek: ['06-chat-rich-light-desktop.png'],
+    dsh: ['dsh-08-chat-zh.png', 'dsh-02-showcase-light.png'] },
+  { name: '暗色富会话', seek: ['20-chat-rich-dark-desktop.png'], dsh: ['dsh-03-showcase-dark.png'] },
+  { name: '设置（居中模态）', seek: ['10-settings-light-desktop.png'], dsh: ['dsh-06-settings-modal-zh.png'] },
+  { name: '390px（轨常驻 + 抽屉 / 富会话）', seek: ['02-chat-empty-light-mobile.png', '13-chat-rich-light-mobile.png'],
+    dsh: ['dsh-09-mobile-rail-zh.png'], narrow: true },
+];
+// §2 的亮色列；容差：长度 ±1px，颜色按 rgb() 串逐字比。
+const w6Final = { ok: null, probe: null, compare: null };
+if (process.env.W6_FINAL === '1') {
+  phase = 'W6-final';
+  try {
+    await setTheme('light');
+    await setViewport(VIEWS.find(v => v.name === 'desktop'));
+    const m = await evalJS(`(async () => {
+      const cs = e => getComputedStyle(e);
+      const wait = ms => new Promise(r => setTimeout(r, ms));
+      const o = {};
+      const body = cs(document.body);
+      o.bodyFont = body.fontFamily;
+      o.bodySize = body.fontSize + '/' + body.lineHeight;
+      o.hoverTok = body.getPropertyValue('--seek-hover').trim();
+      o.selTok = body.getPropertyValue('--seek-sel').trim();
+      o.brandTok = body.getPropertyValue('--seek-brand').trim();
+      o.bubbleTok = body.getPropertyValue('--seek-accent').trim();
+      o.scrimTok = body.getPropertyValue('--seek-scrim-modal').trim();
+      const side = document.getElementById('side');
+      o.sideW = Math.round(side.getBoundingClientRect().width);
+      o.sideBg = cs(side).backgroundColor;
+      o.sideBorder = cs(side).borderRightWidth + ' ' + cs(side).borderRightStyle;
+      const row = document.querySelector('#sess-list .sess-row');
+      o.rowH = row ? Math.round(row.getBoundingClientRect().height) : null;
+      o.rowPadR = row ? cs(row).paddingRight : null;
+      const head = document.getElementById('conv-head');
+      o.convHeadH = Math.round(head.getBoundingClientRect().height);
+      o.convHeadPad = cs(head).paddingTop + ' ' + cs(head).paddingRight + ' ' + cs(head).paddingBottom + ' ' + cs(head).paddingLeft;
+      o.newBtnH = Math.round(document.getElementById('side-new').getBoundingClientRect().height);
+      o.newBtnRadius = cs(document.getElementById('side-new')).borderRadius;
+      // 富会话：点第一条会话进历史视图（与 06 镜头同一态）
+      // 逐条点开，找到带代码块与会话气泡的那条（与 06 镜头同一态）再量。
+      const isMono = e => /Mono|Menlo|Consolas/i.test(cs(e).fontFamily);
+      const rich = () => document.querySelector('#hist .msg.user .bub')
+        && [...document.querySelectorAll('#hist *')].some(isMono);
+      for (const r of document.querySelectorAll('#sess-list .sess-row')) {
+        r.click(); await wait(900);
+        if (rich()) break;
+      }
+      await wait(600);
+      const col = document.querySelector('#hist > *');
+      o.colW = col ? Math.round(col.getBoundingClientRect().width) : null;
+      o.histPad = cs(document.getElementById('hist')).paddingTop + ' ' + cs(document.getElementById('hist')).paddingRight;
+      const bub = document.querySelector('#hist .msg.user .bub');
+      if (bub) { const b = cs(bub); o.bubBg = b.backgroundColor; o.bubRadius = b.borderRadius; o.bubPad = b.padding; }
+      const tcall = document.querySelector('#hist .tcall');
+      if (tcall) { o.tcallH = Math.round(tcall.getBoundingClientRect().height); o.tcallSize = cs(tcall).fontSize + '/' + cs(tcall).lineHeight; }
+      const form = document.getElementById('form');
+      const fr = form.getBoundingClientRect(), f = cs(form);
+      o.composerW = Math.round(fr.width); o.composerRadius = f.borderRadius; o.composerShadow = f.boxShadow;
+      const send = document.getElementById('send');
+      const sr = send.getBoundingClientRect();
+      o.sendSize = Math.round(sr.width) + '×' + Math.round(sr.height);
+      o.sendRadius = cs(send).borderRadius; o.sendBg = cs(send).backgroundColor;
+      // §2 的「代码 12/19」说的是块级代码与工具输出（pre / .tpre）。工具行的
+      // .tdetail 是懒构建的（点开才有 <pre class="tpre">），所以这里先点开一条
+      // .tcall 造出真实块级载体，量完再收回去；确实造不出来（例如无工具行）才
+      // 退到行内码，并在表里如实标「未覆盖」而不是判成一致。
+      let block = document.querySelector('#hist pre, #hist .tpre');
+      const tcallBtn = !block && document.querySelector('#hist button.tcall');
+      if (tcallBtn) {
+        tcallBtn.click(); await wait(300);
+        block = document.querySelector('#hist .tpre');
+      }
+      const mono = block || [...document.querySelectorAll('#hist *')].find(isMono);
+      o.codeKind = block ? 'block' : (mono ? 'inline' : 'none');
+      if (mono) { o.codeFont = cs(mono).fontFamily; o.codeSize = cs(mono).fontSize + '/' + cs(mono).lineHeight; }
+      if (tcallBtn && block) { tcallBtn.click(); await wait(150); }   // 收回展开态，不影响后续量与截图
+      // 设置模态
+      document.getElementById('set-btn').click(); await wait(500);
+      const dlg = document.getElementById('settings'); const dr = dlg.getBoundingClientRect();
+      o.dlgW = Math.round(dr.width); o.dlgH = Math.round(dr.height); o.dlgRadius = cs(dlg).borderRadius;
+      o.dlgShadow = cs(dlg).boxShadow; o.scrimBg = cs(document.getElementById('set-scrim')).backgroundColor;
+      document.getElementById('set-close').click(); await wait(300);
+      // 收起轨
+      setSide(true, false); await wait(800);
+      o.railW = Math.round(side.getBoundingClientRect().width);
+      setSide(false, false); await wait(600);
+      return o;
+    })()`);
+    w6Final.probe = m;
+    const hex = h => { const n = parseInt(h.slice(1), 16); return `rgb(${n >> 16 & 255}, ${n >> 8 & 255}, ${n & 255})`; };
+    const near = (a, b) => a != null && Math.abs(a - b) <= 1;
+    const eq = (a, b) => a === b;
+    const has = (a, b) => typeof a === 'string' && a.includes(b);
+    const rows = [
+      ['正文字族（系统无衬线栈）', '含 PingFang SC、Microsoft YaHei', m.bodyFont, has(m.bodyFont, 'PingFang SC') && has(m.bodyFont, 'Microsoft YaHei')],
+      ['正文字号 / 行高', '14/24', m.bodySize, eq(m.bodySize, '14px/24px')],
+      ['侧栏宽（展开）', '280', m.sideW, near(m.sideW, 280)],
+      ['侧栏宽（收起轨）', '56', m.railW, near(m.railW, 56)],
+      ['侧栏底', '#f9fafb', m.sideBg, eq(m.sideBg, hex('#f9fafb'))],
+      ['侧栏行高', '32', m.rowH, near(m.rowH, 32)],
+      ['侧栏行右 padding（组内行左缩进 24 是设计）', '8', m.rowPadR, eq(m.rowPadR, '8px')],
+      ['新会话按钮高 / 圆角', '38 / 12', `${m.newBtnH} / ${m.newBtnRadius}`, near(m.newBtnH, 38) && eq(m.newBtnRadius, '12px')],
+      ['会话头 padding', '12px 28px 0 20px', m.convHeadPad, eq(m.convHeadPad, '12px 28px 0px 20px')],
+      ['#conv-head 高（§1 线框图 h≈56）', '≈56', m.convHeadH, near(m.convHeadH, 56)],
+      ['阅读列宽', '768', m.colW, near(m.colW, 768)],
+      ['转录区 padding', '16px 32px', m.histPad, eq(m.histPad, '16px 32px')],
+      ['用户气泡底', '#edf3fe', m.bubBg, eq(m.bubBg, hex('#edf3fe'))],
+      ['用户气泡圆角', '22', m.bubRadius, eq(m.bubRadius, '22px')],
+      ['用户气泡 padding（§2 未给值，按 W6-3 落定值 10 / 16）', '10px 16px', m.bubPad, eq(m.bubPad, '10px 16px')],
+      ['composer 外框宽', '774', m.composerW, near(m.composerW, 774)],
+      ['composer 圆角', '22', m.composerRadius, eq(m.composerRadius, '22px')],
+      ['composer 阴影', '0 4px 12px rgba(0,0,0,.02), 0 0 1px rgba(0,0,0,.08)', m.composerShadow, has(m.composerShadow, '4px 12px') && has(m.composerShadow, '0px 0px 1px')],
+      ['发送钮', '圆形、品牌蓝一档', `${m.sendSize} / r=${m.sendRadius} / ${m.sendBg}`, eq(m.sendRadius, '999px') && has(m.sendBg, '53, 101, 210')],
+      ['代码字号 / 行高（块级代码、工具输出）', '12/19', `${m.codeSize ?? '（未取到）'}${m.codeKind === 'block' ? '' : `（${m.codeKind === 'inline' ? '行内码' : '无代码'}，行高随正文，块级未覆盖）`}`,
+        m.codeKind === 'block' ? eq(m.codeSize, '12px/19px') : 'skip'],
+      ['悬停 / 选中 token', 'rgba(0,0,0,.06) / rgba(38,49,72,.06)', `${m.hoverTok} / ${m.selTok}`,
+        eq(String(m.hoverTok).replace(/\\s/g, ''), 'rgba(0,0,0,.06)') && eq(String(m.selTok).replace(/\\s/g, ''), 'rgba(38,49,72,.06)')],
+      ['品牌蓝 token', '#4176e6', m.brandTok, eq(m.brandTok, '#4176e6')],
+      ['设置对话框宽 × 高（900 高视口）', '800 × 800', `${m.dlgW} × ${m.dlgH}`, near(m.dlgW, 800) && near(m.dlgH, 800)],
+      ['设置对话框圆角', '24', m.dlgRadius, eq(m.dlgRadius, '24px')],
+      ['设置对话框阴影', '0 0 1px rgba(0,0,0,.2), 0 12px 32px rgba(0,0,0,.08)', m.dlgShadow, has(m.dlgShadow, '0px 0px 1px') && has(m.dlgShadow, '12px 32px')],
+      ['设置遮罩（亮）', 'rgba(0,0,0,.24)', m.scrimBg, eq(m.scrimBg, 'rgba(0, 0, 0, 0.24)')],
+    ].map(([k, want, got, ok]) => {
+      // 夹具没取到块级代码时如实标「未覆盖」，不算进一致数（返工 c_3dz3kg 轮 1 缺陷 c）。
+      const st = ok === 'skip' ? '未覆盖（夹具无块级代码，不计入一致数）'
+        : (ok ? '一致' : '**不一致**');
+      return `| ${k} | ${want} | ${got ?? '（未取到）'} | ${st} |`;
+    });
+    const bad = rows.filter(r => r.includes('**不一致**')).length;
+    const skipped = rows.filter(r => r.includes('未覆盖')).length;
+    const consistent = rows.length - bad - skipped;
+    writeFileSync(path.join(outDir, 'probe.md'),
+      `# W6 终验 · computed-style 探针\n\n对 \`docs/notes-web-w6-dsh-shell.md\` §2 逐项核（亮色，1440×900，rev ${process.env.PAGE_REVIEW_GIT_REV || 'unknown'}）。\n`
+      + `自动比对以字面值为准；两项按设计偏离字面值，见文末。\n\n`
+      + '| 项 | 期望（notes §2） | 实测 | 是否一致 |\n|---|---|---|---|\n' + rows.join('\n') + '\n\n'
+      + `自动比对：${consistent}/${rows.length} 一致${skipped ? `（${skipped} 项未覆盖，不计入）` : ''}${bad ? `，${bad} 项**不一致**` : ''}。\n\n`
+      + '按设计偏离字面值的两项（不算回归）：\n'
+      + '- 发送钮取 `--seek-cta`（#3565d2，品牌蓝压深一档）：§2 的品牌蓝 #4176e6 配白字只有 4.2:1，不过 AA；W6-1 起钉死。\n'
+      + '- 状态色（错误 / 成功 / 警告）亮色下沿用 W5 的深值：§2 的 dsh 饱和档在白底 2.2–4.5:1，不过 AA。\n');
+    const fig = (src, cap) => `<figure><figcaption>${cap}</figcaption><img src="${src}" alt="${cap}"></figure>`;
+    const dshRef = f => `../../docs/notes-assets/${f}`;
+    const scene = sc => `<h2>${sc.name}</h2><div class="pair${sc.narrow ? ' narrow' : ''}">`
+      + sc.seek.map(f => fig(f, 'seek · ' + f)).join('') + sc.dsh.map(f => fig(dshRef(f), 'dsh · ' + f)).join('') + '</div>';
+    writeFileSync(path.join(outDir, 'compare.html'),
+      '<!doctype html><meta charset="utf-8"><title>W6 终验：seek / dsh 并排对照</title>\n'
+      + '<style>body{margin:0;padding:24px;font:14px/1.5 -apple-system,system-ui,"PingFang SC",sans-serif;background:#f4f5f7;color:#0f1115}'
+      + 'h1{font-size:20px;margin:0 0 4px}p{color:#61666b;margin:0 0 8px}h2{font-size:16px;margin:28px 0 10px}'
+      + '.pair{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;align-items:start}'
+      + 'figure{margin:0;background:#fff;border:1px solid rgba(0,0,0,.1);border-radius:12px;overflow:hidden}'
+      + 'figcaption{padding:8px 12px;font-size:12px;color:#61666b;border-bottom:1px solid rgba(0,0,0,.06)}'
+      + 'img{display:block;width:100%;height:auto}.narrow img{max-width:390px;margin:0 auto}</style>\n'
+      + '<h1>W6 终验：seek / dsh 五场景并排对照</h1>\n'
+      + `<p>左 seek（本包截图，rev ${process.env.PAGE_REVIEW_GIT_REV || 'unknown'}），右 dsh 参考图。逐项数值见同目录 probe.md。生成于 ${new Date().toISOString()}。</p>\n`
+      + W6_SCENES.map(scene).join('\n') + '\n');
+    w6Final.ok = true;
+    console.log(`\nW6 终验对照包：compare.html（${W6_SCENES.length} 场景）+ probe.md（${consistent}/${rows.length} 一致${skipped ? ` / ${skipped} 未覆盖` : ''}${bad ? ` / ${bad} 不一致` : ''}）→ ${outDir}`);
+  } catch (e) {
+    w6Final.ok = false; w6Final.error = e.message;
+    console.log(`\nW6 终验对照包：采集失败（${e.message}）——不影响退出码`);
+  }
+}
+
 // ---- 7. 产物：console.txt + manifest.json ----
 writeFileSync(path.join(outDir, 'console.txt'),
   consoleLog.length === 0 ? '（全程零 console 输出/异常/资源错误）\n'
@@ -549,6 +719,7 @@ writeFileSync(path.join(outDir, 'manifest.json'), JSON.stringify({
   nav_errors: shotMeta.filter(s => s.navError).length,
   capture_failures: shotMeta.filter(s => !s.ok).length,
   panel_shape: shotMeta.filter(s => s.shape).map(s => ({ file: s.file, width: s.width, ...s.shape })),
+  w6_final: process.env.W6_FINAL === '1' ? { ok: w6Final.ok, error: w6Final.error || null } : null,
   console_entries: consoleLog.length,
   dom_dump: domDumped ? 'dom-chat-rich.html' : null,
   visual,
