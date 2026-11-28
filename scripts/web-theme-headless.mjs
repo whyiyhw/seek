@@ -222,26 +222,43 @@ const waitReady = async () => until('页面就绪',
 const clickSel = sel => evalJS(`(document.querySelector(${JSON.stringify(sel)})||{click(){}}).click(),'ok'`);
 // 主题三态按钮（面板内真实点击，不直写 localStorage）。
 const clickMode = mode => clickSel(`#set-theme button[data-mode="${mode}"]`);
-const setCardsReady = `document.querySelectorAll('#set-body .set-card').length>=2`;
-// 开设置面板（幂等）：先探「已开且内容齐」——togglePane 对已开面板是关闭，
-// 盲点会关掉它；没开才真点 #set-btn。
+// W6-6 起设置是模态：开 = body.settings-view（模态可见，tab 内容已渲）。
+const isSetOpen = `document.body.classList.contains('settings-view')`;
+const setReady = `${isSetOpen} && document.getElementById('set-body').children.length >= 1`;
+// 开设置（幂等）：已开就只切回「通用」tab（外观三选是主题镜头的操作位）。
+// #set-btn 对已开模态是关闭，盲点会把它关掉，故先探状态。
 const openSettings = async () => {
-  if (await evalJS(`document.body.classList.contains('settings-view') && ${setCardsReady}`)) return true;
+  if (await evalJS(isSetOpen)) {
+    await clickSel('.set-tab[data-tab="general"]');
+    return until('通用 tab 落定', `!!document.querySelector('#set-theme button')`);
+  }
   await clickSel('#set-btn');
-  return until('设置面板落定',
-    `document.body.classList.contains('settings-view') && ${setCardsReady}`);
+  return until('设置模态落定', setReady);
 };
-// 聊天面判定：无面板开（browsing）、无看历史（viewing）。
-const isChat = `!document.body.classList.contains('browsing') && !document.body.classList.contains('viewing')`;
+const openSetTab = async name => {
+  if (!await openSettings()) return false;
+  await clickSel(`.set-tab[data-tab="${name}"]`);
+  return until(`设置 ${name} tab 落定`,
+    `document.querySelector('.set-tab[data-tab="${name}"].on')
+       && document.getElementById('set-body').children.length >= 1`);
+};
+// 聊天面判定：无面板开（browsing）、无看历史（viewing）、设置模态也关着
+// （W6-6 起设置是浮层：模态开着时聊天面虽然还在，但被遮住了）。
+const isChat = `!document.body.classList.contains('browsing')
+  && !document.body.classList.contains('viewing')
+  && !document.body.classList.contains('settings-view')`;
 // 回聊天面（真实路径）：正文面点「⟵ 返回」，面板面点已开面板的按钮
 // （此时按钮文字已是「💬 聊天」，再点即收起）。
 const ensureChat = async () => {
   if (await until('已是聊天面', isChat, 400)) return true;
   await evalJS(`(() => {
+    if (document.body.classList.contains('settings-view')) {
+      document.getElementById('set-close').click(); return;   // 模态先关
+    }
     if (document.body.classList.contains('viewing')) {
       viewLive(); return;   // 页面上下文：直接调页面函数，别套 Node 侧的 evalJS
     }
-    for (const id of ['set-btn','mem-btn','stat-btn','agents-btn']) {
+    for (const id of ['mem-btn','stat-btn','agents-btn']) {
       const b = document.getElementById(id);
       if (b && b.textContent.includes('聊天')) { b.click(); return; }
     }
@@ -353,11 +370,16 @@ await waitReady();
 trace('景 3：设置面板');
 if (!await openSettings()) ck('设置面板再开', false, 'set-body 未落定');
 {
+  // W6-6：行式表单分 tab——服务配置 tab 读行，关于 tab 读版本/token。
+  if (!await openSetTab('serve')) ck('服务配置 tab 打开', false, '#set-body 未落定');
   const rows = await evalJS(`[...document.querySelectorAll('#set-body .set-row')].map(r => ({
-    k: r.querySelector('.k').textContent, v: r.querySelector('.v').textContent }))`);
+    k: r.querySelector('.k') ? r.querySelector('.k').textContent : '',
+    v: r.querySelector('.v') ? r.querySelector('.v').textContent : '' }))`);
   const find = kw => rows.find(r => r.k.includes(kw)) || { k: kw, v: '(缺行)' };
   const texts = await evalJS(`document.getElementById('set-body').textContent`);
-  ck('serve 配置卡行数（外观外的两卡 ≥10 行）', rows.length >= 10, `rows=${rows.length}`);
+  // 8 行 serve 快照 + 每个候选项目一行（W6-6 前这些和关于区同在一个容器里，
+  // ≥10 是按「配置 + 关于」合并数出来的；分 tab 后只数本 tab）。
+  ck('服务配置 tab 行数 ≥9（serve 快照 + 每个候选项目一行）', rows.length >= 9, `rows=${rows.length}`);
   ck('默认 provider=deepseek', find('provider').v.includes('deepseek'), find('provider').v);
   ck('默认模型=无配置项口径', find('模型').v.includes('无配置项'), find('模型').v);
   ck('温度=无配置项口径', find('温度').v.includes('无配置项'), find('温度').v);
@@ -367,19 +389,100 @@ if (!await openSettings()) ck('设置面板再开', false, 'set-body 未落定')
   ck('自动压缩=350000 tokens', find('压缩').v.includes('350000'), find('压缩').v);
   ck('候选项目=1 且含 fixture 路径', find('候选').v === '1' && texts.includes(PROJ),
     find('候选').v);
-  const aboutV = find('版本').v;
+  ck('只读说明在服务配置 tab 顶部（用户语言：改 config.json 后重启）',
+    texts.includes('~/.seek/config.json') && texts.includes('重启') && texts.includes('只读'), '');
+  ck('页面不含派单内部词（卡面口径/本卡配额）',
+    !texts.includes('卡面口径') && !texts.includes('本卡配额'), '');
+  // 候选项目子项行：真实标签「路径」，不存在只剩「·」/「→」的孤儿标记行（A 口）。
+  const orphan = await evalJS(`[...document.querySelectorAll('#set-body .set-row .k')]
+    .map(k => k.textContent.trim()).filter(t => t === '·' || t === '→' || t === '')`);
+  ck('候选项目子项行无孤儿标记', orphan.length === 0, JSON.stringify(orphan));
+  if (!await openSetTab('about')) ck('关于 tab 打开', false, '#set-body 未落定');
+  const about = await evalJS(`[...document.querySelectorAll('#set-body .set-row')].map(r => ({
+    k: r.querySelector('.k') ? r.querySelector('.k').textContent : '',
+    v: r.querySelector('.v') ? r.querySelector('.v').textContent : '',
+    ws: r.querySelector('.v') ? getComputedStyle(r.querySelector('.v')).whiteSpace : '' }))`);
+  const aFind = kw => about.find(r => r.k.includes(kw)) || { k: kw, v: '(缺行)' };
+  const aboutV = aFind('版本').v;
   ck('版本非空', aboutV.length > 0 && aboutV !== '(缺行)', aboutV);
-  ck(`token 短显=…${TOK_TAIL}`, find('token').v === `…${TOK_TAIL}（后 6 位）`, find('token').v);
-  ck('改口径文案在场（编辑 config.json 后重启）',
-    texts.includes('~/.seek/config.json') && texts.includes('重启'), '');
-  // 零写入控件：无 input/select/textarea；button 仅主题三枚。
-  const n = await evalJS(`(() => ({
-    inp: document.querySelectorAll('#settings input, #settings select, #settings textarea').length,
-    themeBtns: [...document.querySelectorAll('#settings button')].filter(b => b.closest('#set-theme')).length,
-    otherBtns: [...document.querySelectorAll('#settings button')].filter(b => !b.closest('#set-theme')).length,
-  }))()`);
-  ck('零写入控件（无 input/select/textarea）', n.inp === 0, JSON.stringify(n));
-  ck('按钮仅主题三枚', n.themeBtns === 3 && n.otherBtns === 0, JSON.stringify(n));
+  ck('版本行 nowrap（短 hash 不从中间劈开）', aFind('版本').ws === 'nowrap', aFind('版本').ws);
+  ck(`token 短显=…${TOK_TAIL}`, aFind('token').v === `…${TOK_TAIL}`, aFind('token').v);
+  ck('零写入控件（无 input/select/textarea）',
+    await evalJS(`document.querySelectorAll('#settings input, #settings select, #settings textarea').length`) === 0, '');
+  const n = await evalJS(`({ tabs: document.querySelectorAll('#settings .set-tab').length,
+    close: document.querySelectorAll('#set-close').length })`);
+  ck('按钮 = 三个 tab + ✕（主题三枚在通用 tab，见下条）', n.tabs === 3 && n.close === 1, JSON.stringify(n));
+  if (!await openSetTab('general')) ck('通用 tab 打开（按钮镜头）', false, '#set-body 未落定');
+  ck('通用 tab 主题三枚（浅色/深色/跟随系统）',
+    await evalJS(`[...document.querySelectorAll('#set-theme button')].length`) === 3, '');
+}
+
+// ============ 景 3b：模态几何 + Esc 关（W6-6 卡面 ②）============
+// 1440 宽下：对话框宽 800±2、左右边距差 ≤2；role/aria 在场；打开时焦点进框；
+// Esc 关掉后焦点回侧栏「设置」行。
+trace('景 3b：模态几何 + Esc');
+if (!await openSettings()) ck('模态打开（几何镜头）', false, 'setReady 未落定');
+{
+  const g = await evalJS(`(() => {
+    const el = document.getElementById('settings');
+    const r = el.getBoundingClientRect();
+    return { w: r.width, left: r.left, right: innerWidth - r.right, vw: innerWidth,
+      role: el.getAttribute('role'), modal: el.getAttribute('aria-modal'),
+      tabs: document.querySelectorAll('#set-tabs .set-tab').length,
+      focusIn: !!el.contains(document.activeElement),
+      scrim: getComputedStyle(document.getElementById('set-scrim')).display };
+  })()`);
+  ck('对话框宽 800±2（1440 宽下）', Math.abs(g.w - 800) <= 2, `w=${g.w}`);
+  ck('对话框居中：左右边距差 ≤2px', Math.abs(g.left - g.right) <= 2,
+    `left=${g.left} right=${g.right}`);
+  ck('role=dialog + aria-modal=true', g.role === 'dialog' && g.modal === 'true', JSON.stringify(g));
+  ck('三个 tab 在场', g.tabs === 3, `tabs=${g.tabs}`);
+  ck('打开时焦点在对话框内', g.focusIn === true, JSON.stringify(g));
+  ck('遮罩可见', g.scrim !== 'none', g.scrim);
+}
+// Esc 派发到对话框本体（真人的 Esc 从框内焦点冒泡上来）。
+await evalJS(`document.getElementById('settings').dispatchEvent(
+  new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })),'ok'`);
+await until('Esc 关模态', `!document.body.classList.contains('settings-view')`, 2000);
+{
+  const s = await evalJS(`({ cls: document.body.classList.contains('settings-view'),
+    focus: (document.activeElement && (document.activeElement.id || document.activeElement.tagName)) || '' })`);
+  ck('Esc 关闭模态', s.cls === false, JSON.stringify(s));
+  ck('关闭后焦点回侧栏「设置」行', s.focus === 'set-btn', s.focus);
+}
+
+// ============ 景 3c：焦点圈养 + 焦点掉到框外后的 Esc ============
+// 主会话真实输入探针（2026-11-28）的两条回归钉：点一下框内空白，焦点会掉回
+// <body>，此后 Esc 收不到；aria-modal 也拦不住 Tab 走到背景。无头这里是合成
+// 事件：blur() 等价于点了框内空白，keydown 从落点冒泡到 document。
+trace('景 3c：焦点圈养');
+if (!await openSetTab('general')) ck('模态打开（圈养镜头）', false, '#set-body 未落定');
+{
+  await evalJS(`document.querySelector('#set-theme button[data-mode="system"]').focus()`);
+  await evalJS(`document.activeElement.dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }))`);
+  const fwd = await evalJS(`document.activeElement.id`);
+  ck('Tab 在框内末尾绕回第一个可聚焦元素', fwd === 'set-close', `focus=${fwd}`);
+  await evalJS(`document.activeElement.dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true }))`);
+  const back = await evalJS(`document.activeElement.dataset.mode || document.activeElement.id`);
+  ck('Shift+Tab 在框内开头绕回最后一个', back === 'system', `focus=${back}`);
+  await evalJS(`document.activeElement.blur()`);
+  const lost = await evalJS(`document.activeElement.tagName`);
+  await evalJS(`document.body.dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+  await until('失焦后 Esc 关模态', `!document.body.classList.contains('settings-view')`, 2000);
+  const s2 = await evalJS(`({ cls: document.body.classList.contains('settings-view'),
+    focus: document.activeElement.id })`);
+  ck(`焦点掉到 ${lost} 后 Esc 仍关闭模态`, s2.cls === false, JSON.stringify(s2));
+  ck('失焦后关闭，焦点仍回侧栏「设置」行', s2.focus === 'set-btn', s2.focus);
+  // 关闭时监听必须摘掉（页面不常驻全局键盘监听）：此刻的 Esc 是空操作。
+  await evalJS(`document.getElementById('set-btn').focus()`);
+  await evalJS(`document.body.dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+  const idle = await evalJS(`({ cls: document.body.classList.contains('settings-view'),
+    focus: document.activeElement.id })`);
+  ck('关闭后 Esc 无副作用（监听已摘）', idle.cls === false && idle.focus === 'set-btn', JSON.stringify(idle));
 }
 
 // ============ 景 4：两主题 × 八面采样，全对 ≥4.5:1 ============
@@ -403,7 +506,7 @@ const openPane = (btn, cls, extra) => clickSel(btn)
     + (extra ? ` && (${extra})` : ''), 6000);
 const facesAt = async (theme) => {
   await ensureChat();
-  await openPane('#set-btn', 'settings-view', setCardsReady);
+  await openSettings();
   await checkFace(theme, '设置面', '#settings');
   await openPane('#stat-btn', 'stat-view', `document.querySelector('.stat-card')`);
   await checkFace(theme, '统计面', '#stats');
@@ -429,7 +532,8 @@ const facesAt = async (theme) => {
 };
 // 当前记忆位=dark（景 2 留下）——先测 dark 轮，再切 light 测一轮。
 await facesAt('dark');
-await openPane('#set-btn', 'settings-view', setCardsReady);
+await ensureChat();
+await openSettings();
 clickMode('light');
 await until('切到 light', `document.documentElement.getAttribute('data-theme')==='light'`);
 await ensureChat();
@@ -437,12 +541,14 @@ await facesAt('light');
 
 // ============ 景 5：跟随系统实时翻（清记忆位 + 模拟系统外观变化）============
 trace('景 5：跟随系统');
-await openPane('#set-btn', 'settings-view', setCardsReady);
+await ensureChat();
+await openSettings();
 clickMode('system');
 await until('记忆位已清', `localStorage.getItem('seek-theme')===null`);
 {
   const note = await evalJS(`document.getElementById('set-theme-note').textContent`);
-  ck('面板说明=跟随系统口径', note.includes('跟随系统') && note.includes('当前生效'), note);
+  ck('面板说明=用户语言（跟随系统 + 当前外观）',
+    note.includes('跟随系统') && note.includes('当前') && !note.includes('记忆位'), note);
 }
 await emulateScheme('dark');
 await until('系统→dark，页面实时跟随', `document.documentElement.getAttribute('data-theme')==='dark'`);

@@ -155,8 +155,12 @@ ck "注册表含 /resume + /cancel（导航已归工作区树）" "yes" \
 ck "注册表不再列 /bind /projects /switch /new" "yes" \
   "$(printf '%s' "$page" | grep -cE "name: '/(bind|projects|switch|new)'" | grep -q '^0$' && echo yes || echo no)"
 ck "'@' 候源 = session/list" "yes" "$(has "$page" "rpc('session/list', {})")"
-ck "无全局 keydown 监听（Esc 不劫持）" "0" \
-  "$(printf '%s' "$page" | grep -cE "document\.addEventListener\('keydown'|window\.addEventListener\('keydown'")"
+# 全局 keydown 监听不常驻（c_7lsngm 纪律：Esc 不被整页劫持）。允许的唯一形态是
+# 「开着才挂、关时摘掉」的成对监听（W6-6 设置模态的 Esc + 焦点圈养）——判据
+# 是挂数 = 摘数；只挂不摘就是常驻劫持。
+kd_add="$(printf '%s' "$page" | grep -cE "(document|window)\.addEventListener\('keydown'")"
+kd_rm="$(printf '%s' "$page" | grep -cE "(document|window)\.removeEventListener\('keydown'")"
+ck "全局 keydown 监听有挂必有摘（Esc 不常驻劫持）" "${kd_add}" "${kd_rm}"
 ck "窄屏降级有媒体查询" "yes" "$(has "$page" 'max-width: 640px')"
 ck "页面无 HTML 解析 sink（3 项）" "0" \
   "$(printf '%s' "$page" | grep -cE 'innerHTML|insertAdjacentHTML|document\.write')"

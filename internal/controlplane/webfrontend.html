@@ -254,7 +254,14 @@
     --seek-code-bg:#1b1b1c;     /* 代码块底（§2 表：= 侧栏底一档） */
     --seek-code-inline:#2c2c2e; /* 行内码底（§2 表：layer-3） */
     --seek-scrim: rgba(0,0,0,.5);   /* 窄屏抽屉遮罩（c_lqtt2m） */
+    /* 设置模态遮罩（W6-6）：与抽屉遮罩分开一档——模态盖的是整页，暗色
+       用 .5；亮色用更中性的 rgba(0,0,0,.24)（比抽屉的冷色遮罩更轻一层）。 */
+    --seek-scrim-modal: rgba(0,0,0,.5);
     --seek-shadow:0 4px 14px rgba(0,0,0,.45);
+    /* 设置模态底（W6-6）：dsh 的弹层取 layer-1 一档，比主区浅。 */
+    --seek-modal: #1b1b1c;
+    /* 弹层阴影（notes §2：0 0 1px / 0 12px 32px，两主题同值）。 */
+    --seek-shadow-pop:0 0 1px rgba(0,0,0,.2), 0 12px 32px rgba(0,0,0,.08);
   }
   /* 亮色：同一组语义名换值，快捷键只有 data-theme 一个属性。选值口径
      = 每对文字/底色 ≥4.5:1（WCAG AA 正文），面板间不靠色相只靠明度差。
@@ -299,7 +306,10 @@
     --seek-code-bg:#f9fafb;
     --seek-code-inline:#ebeef2;
     --seek-scrim: rgba(15,17,21,.28);
+    --seek-scrim-modal: rgba(0,0,0,.24);   /* 设置模态遮罩（W6-6：亮色轻一档） */
+    --seek-modal: #ffffff;          /* 设置模态底（白，浮在遮罩之上） */
     --seek-shadow:0 4px 14px rgba(0,0,0,.12);
+    --seek-shadow-pop:0 0 1px rgba(0,0,0,.2), 0 12px 32px rgba(0,0,0,.08);
   }
   * { box-sizing: border-box; }
   /* 正文字族 = 系统无衬线（dsh 同款），14/24。等宽只出现在 pre/code/kbd 与
@@ -1050,36 +1060,65 @@
                font-size: 12px; color: var(--seek-fg); pointer-events: none;
                white-space: nowrap; }
 
-  /* ---- 设置面板（W5 卡 c_ni7mzw：设置只读展示 + 关于区）----
-     与三个资产面板同一副「中栏一个面」骨架（.pane + *-view 类），故只
-     负责本面板亮；隐聊天/互斥由 body.browsing 与各 :not() 选择器承担。
-     只读口径写在卡面：可写面（默认模型/温度）需要配置写入 + 重启路径，
-     是一个子系统而不是本卡的一刀（本卡 ≤8KB 配额只覆盖 token/主题改写，
-     实际 ~37KB 已在 PRD §13.3 如实记账），故本轮只展示 serve 侧已生效的配置。 */
-  #settings { flex: 1; display: none; flex-direction: column; min-height: 0; }
+  /* ---- 设置模态框（W6-6 c_ekuuof；口径 notes-web-w6-dsh-shell §1/§2/§3）----
+     dsh-06 的浮层：遮罩 + 居中对话框 + 左 tab 栏 + 右行式表单。开关真源只有
+     body.settings-view 类（页面脚本与无头脚本都读它），display 由它承载。 */
+  #settings { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
+              z-index: 41; display: none; flex-direction: column; overflow: hidden;
+              width: min(800px, calc(100vw - 32px)); height: min(800px, calc(100vh - 100px));
+              background: var(--seek-modal); border: 1px solid var(--seek-line-2);
+              border-radius: 24px; box-shadow: var(--seek-shadow-pop); }
   body.settings-view #settings { display: flex; }
   body:not(.settings-view) #settings { display: none; }
-  #set-body { flex: 1; overflow-y: auto; padding: 14px; }
-  .set-card { background: var(--seek-soft); border-radius: 8px; padding: 12px 14px;
-              margin-bottom: 12px; }
-  .set-card h3 { margin: 0 0 8px; font-size: 14px; color: var(--seek-fg-soft);
-                 font-weight: 600; }
-  .set-row { display: flex; justify-content: space-between; gap: 12px;
-             padding: 3px 0; }
-  .set-row .k { color: var(--seek-fg-dim); }
-  /* 设置行的值（W6-1 口径）：这是 UI 文本行——provider 名、开关态、tokens
-     数、路径混排，整块读的是「配置长什么样」而不是代码，故跟 body 的无衬线
-     走，只有数字列用 tabular-nums 对齐。等宽只留给 pre/code/kbd/显式 .mono。 */
-  .set-row .v { color: var(--seek-fg); text-align: right; word-break: break-all;
-                font-variant-numeric: tabular-nums; }
-  .set-note { color: var(--seek-fg-dim); font-size: 13px; margin-top: 6px;
-              line-height: 20px; }
-  /* 主题三态切换（亮/暗/跟随系统）：按钮组，当前态高亮。次操作钮
-     在软底卡内取 panel 一档（c_25d2ey）：soft-on-soft 没有边界，
-     面板底色随主题两向都留一档明度差。 */
-  #set-theme { display: flex; gap: 8px; flex-wrap: wrap; }
-  #set-theme button { padding: 5px 12px; font-size: 13px; background: var(--seek-panel); }
-  #set-theme button.on { background: var(--seek-sel); }
+  #set-scrim { display: none; position: fixed; inset: 0; z-index: 40;
+               background: var(--seek-scrim-modal); }
+  body.settings-view #set-scrim { display: block; }
+  #set-head { flex: none; display: flex; align-items: center;
+              padding: 18px 20px 8px 24px; }
+  #set-head h2 { margin: 0; font-size: 18px; line-height: 26px; font-weight: 600; }
+  #set-close { margin-left: auto; }
+  #set-main { flex: 1; display: flex; min-height: 0; }
+  /* 左 tab 栏 164px：图标 16 + 文字 14，行高 40，选中底一档。圆角取 12
+     （卡面写 r=10，与 §2 的圆角刻度 8/12/22/24/999 冲突——刻度是钉住的
+     测试口径，纪律优先，取最近的 12）。 */
+  /* 栏与表单之间不画竖线（dsh-06 实拍：靠留白分隔）。 */
+  #set-tabs { flex: none; width: 164px; display: flex; flex-direction: column; gap: 2px;
+              padding: 4px 10px 14px; overflow-y: auto; }
+  .set-tab { justify-content: flex-start; height: 40px; padding: 0 10px;
+             border-radius: 12px; font-size: 14px; background: transparent;
+             color: var(--seek-fg-soft); }
+  .set-tab .ic { width: 16px; height: 16px; }
+  .set-tab:hover { background: var(--seek-hover); }
+  .set-tab.on { background: var(--seek-sel); color: var(--seek-fg); }
+  #set-body { flex: 1; min-width: 0; overflow-y: auto; padding: 4px 24px 20px; }
+  /* 行式表单：左=标签 14 + 说明 12（三级色），右=值/控件；行间 1px l1，
+     行高 ≥56。数值列走 .mono（等宽），其余跟正文无衬线。 */
+  .set-row { display: flex; align-items: center; justify-content: space-between;
+             gap: 16px; min-height: 56px; padding: 10px 0;
+             border-bottom: 1px solid var(--seek-line-2); }
+  .set-row:last-child { border-bottom: 0; }
+  .set-l { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .set-row .k { font-size: 14px; line-height: 20px; color: var(--seek-fg); }
+  .set-row .d { font-size: 12px; line-height: 18px; color: var(--seek-fg-dim); }
+  .set-r { flex: none; min-width: 0; max-width: 62%; display: flex;
+           justify-content: flex-end; }
+  /* 值列不劈词（版本 hash / 路径整段）：nowrap + ellipsis + title（B 口）。 */
+  .set-row .v { min-width: 0; font-size: 14px; line-height: 20px;
+                color: var(--seek-fg-soft); text-align: right; white-space: nowrap;
+                overflow: hidden; text-overflow: ellipsis; }
+  .set-note { color: var(--seek-fg-dim); font-size: 12px; line-height: 18px;
+              padding: 6px 0 10px; }
+  /* 外观三选一大块按钮：图标在上文字在下，选中底加深，.on 归 applyTheme。
+     padding 清零 + nowrap：继承 button 的 16px 内边距会让「跟随系统」折行。 */
+  #set-theme { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+  #set-theme button { flex-direction: column; gap: 6px; width: 84px; height: 72px;
+                      padding: 0 2px; white-space: nowrap;
+                      font-size: 13px; background: var(--seek-panel);
+                      border: 1px solid var(--seek-line); border-radius: 12px;
+                      color: var(--seek-fg-soft); }
+  #set-theme button .ic { width: 18px; height: 18px; }
+  #set-theme button:hover { background: var(--seek-hover); }
+  #set-theme button.on { background: var(--seek-sel); color: var(--seek-fg); }
 
   /* ---- hooks 审计面板（W5 c_xz2bey 实时审计视图）---- */
   body:not(.hooks-view) #hooks { display: none; }
@@ -1133,11 +1172,16 @@
     /* 气泡放宽一档：单栏下代码块（pre 本就 overflow-x:auto，markdown
        卡同容器）多一截横向空间 */
     .msg.user .bub { max-width: 94%; }
-    /* 设置面板：label 上 value 下堆叠，value 满宽按 ellipsis 折——路径
-       /hash 不再硬裁或碎行（全文悬停 title 可见，见 setRow） */
-    .set-row { flex-direction: column; gap: 1px; padding: 5px 0; }
-    .set-row .v { text-align: left; white-space: nowrap; overflow: hidden;
-                  text-overflow: ellipsis; }
+    /* 设置模态（W6-6）：窄屏满宽减 32、高度让位，左 tab 栏横排成顶部一条。 */
+    #settings { height: calc(100vh - 32px); }
+    #set-main { flex-direction: column; }
+    #set-tabs { width: auto; flex-direction: row; gap: 4px; padding: 0 12px 8px;
+                border-bottom: 1px solid var(--seek-line-2); overflow-x: auto; }
+    .set-tab { flex: none; height: 34px; padding: 0 10px; font-size: 13px; }
+    #set-body { padding: 2px 16px 16px; }
+    .set-row { flex-direction: column; align-items: stretch; gap: 4px; }
+    .set-r { max-width: none; justify-content: flex-start; }
+    .set-row .v { text-align: left; }
   }
 </style>
 </head>
@@ -1301,14 +1345,6 @@
         <div id="stat-cards"></div>
       </div>
     </section>
-    <!-- 设置面板（W5 c_ni7mzw）：外观（主题三态，纯前端）+ serve 侧
-         配置只读展示 + 关于区（版本、入口 token 短显）。数据来自
-         /rpc settings/get——serve 侧把启动时生效的配置投影成一份快照，
-         页面不读文件、不猜默认值。 -->
-    <section id="settings" class="pane">
-      <div class="pane-head"><span class="cnt">设置 · 只读展示（改配置 = 编辑 ~/.seek/config.json 后重启）</span></div>
-      <div id="set-body"></div>
-    </section>
     <!-- hooks 审计视图（W5 c_xz2bey）：订阅先行的 tail——专用 /events 连接带
          ?topic=hooks（审计日志是全局的，无需 /bind），快照走 POST /rpc
          hooks/audit/tail；推送逐行追加，可暂停/按 hook 名过滤。 -->
@@ -1352,6 +1388,23 @@
      任何视图弹出。卡片由 SSE approval 事件驱动增删（webfrontend_approval.go
      的服务端 hub 是单源），按钮走 POST /rpc approval/decide。 -->
 <div id="approvals" aria-live="polite"></div>
+<!-- 设置模态框（W6-6 c_ekuuof）：遮罩 + 居中对话框，开合只靠 body.settings-view
+     类；数据来自 /rpc settings/get 的启动快照。role=dialog + aria-modal。 -->
+<div id="set-scrim"></div>
+<section id="settings" role="dialog" aria-modal="true" aria-labelledby="set-title">
+  <div id="set-head">
+    <h2 id="set-title">设置</h2>
+    <button id="set-close" class="btn-icon" type="button" title="关闭设置（Esc）" aria-label="关闭设置"><svg class="ic" aria-hidden="true"><use href="#i-x"/></svg></button>
+  </div>
+  <div id="set-main">
+    <div id="set-tabs" role="tablist" aria-label="设置分类">
+      <button id="set-tab-general" class="set-tab on" type="button" role="tab" aria-selected="true" data-tab="general"><svg class="ic" aria-hidden="true"><use href="#i-monitor"/></svg><span>通用</span></button>
+      <button id="set-tab-serve" class="set-tab" type="button" role="tab" aria-selected="false" data-tab="serve"><svg class="ic" aria-hidden="true"><use href="#i-settings"/></svg><span>服务配置</span></button>
+      <button id="set-tab-about" class="set-tab" type="button" role="tab" aria-selected="false" data-tab="about"><svg class="ic" aria-hidden="true"><use href="#i-shield-check"/></svg><span>关于</span></button>
+    </div>
+    <div id="set-body" role="tabpanel" aria-labelledby="set-tab-general"></div>
+  </div>
+</section>
 <!-- markdown 子集渲染器（W5 卡 c_x2au4t）：static/ 拆分的第一个非内联
      资产，同源由 /static/ 自供——CSP 的 script-src 'self' 直接覆盖，无需
      hash 钉（内联块才钉）。相对 src，不带协议/双斜杠（无外链断言口径）。
@@ -3254,6 +3307,12 @@ async function loadVersion() {
       const short = (r.version.match(/\d+\.\d+\.\d+/) || [r.version])[0];
       sideVer.textContent = 'v' + short;
       sideVer.hidden = false;
+      // 空态 Hero 先于这次 RPC 渲染、同形态又不重建——晚到的版本就地补挂徽标。
+      const hero = list.querySelector('.chat-empty .hero');
+      if (hero && !hero.querySelector('.hero-ver')) {
+        hero.appendChild(Object.assign(document.createElement('span'),
+          { className: 'hero-ver', textContent: sideVer.textContent }));
+      }
     }
   } catch (e) { /* 未鉴权/方法缺失：版本位留空 */ }
 }
@@ -3999,7 +4058,7 @@ const hkBtn = document.getElementById('hk-btn');
 memBtn.addEventListener('click', () => togglePane('memory'));
 statBtn.addEventListener('click', () => togglePane('stats'));
 agentsBtn.addEventListener('click', () => togglePane('agents'));
-settingsBtn.addEventListener('click', () => togglePane('settings'));
+settingsBtn.addEventListener('click', toggleSettings);
 // 审计入口接线（c_25d2ey 补）：1c79c3ab 加过，后续合并把这一行丢了——
 // 顶栏 #hk-btn 点不动、hooks 面板只能靠驱动直挂类才打得开（page-review
 // 驱动里有 2026-11-22 的首跑实录）。五个入口同权，缺一根线就是死入口。
@@ -4009,15 +4068,17 @@ hkBtn.addEventListener('click', () => togglePane('hooks'));
 // W3.3 的任务面板并入同一闸）。W5 侧栏卡把 sessions 从这组闸里摘出去——
 // 会话列表现在是常驻左栏，不再抢中栏。中栏面板互斥：会话正文
 // （viewing 历史视图）、记忆/统计/后台/审计任选其一、或聊天面（默认）。
+// 设置不在这组栅里（W6-6：设置是模态，走 toggleSettings）；closePanes 顺手
+// 收起它——开别的面板时模态不该浮在上面。
 const panes = {
   memory:   { btn: memBtn,    icon: 'brain',    label: '记忆', cls: 'mem-view',      load: loadMemPane },
   stats:    { btn: statBtn,   icon: 'chart',    label: '统计', cls: 'stat-view',     load: loadStatPane },
   agents:   { btn: agentsBtn, icon: 'tasks',    label: '后台', cls: 'agents-view',   load: loadAgentsPane },
-  settings: { btn: settingsBtn, icon: 'settings', label: '设置', cls: 'settings-view', load: loadSetPane },
   hooks:    { btn: hkBtn,     icon: 'activity', label: '审计', cls: 'hooks-view',    load: loadHooksPane },
 };
 function closePanes() {
   const wasViewing = document.body.classList.contains('viewing');
+  closeSettings({ restoreFocus: false });
   for (const p of Object.values(panes)) {
     document.body.classList.toggle(p.cls, false);
     setBtn(p.btn, p.icon, p.label);
@@ -4698,55 +4759,60 @@ if (themeMQ) {
   else if (themeMQ.addListener) themeMQ.addListener(onSystemTheme);
 }
 
-// ---- 设置面板（W5 卡 c_ni7mzw）----
-// 三段：外观（三态主题，纯前端，立即生效并记忆） / serve 侧配置（只读，
-// 来自 /rpc settings/get —— serve 进程把启动时生效的配置投影成快照，
-// 页面不读文件也不猜默认值） / 关于（版本 + 入口 token 短显）。
-// 只读口径写在卡面：可写面要配置写入 + 重启路径，超本卡配额，故本轮
-// 只展示「现在生效的是什么」，改配置 = 编辑 ~/.seek/config.json 后重启。
+// ---- 设置模态框（W5 c_ni7mzw → W6-6 c_ekuuof 换模态）----
+// 三个 tab：通用=外观三态 / 服务配置=settings/get 只读快照 / 关于=版本 +
+// token 后 6 位 + 会话 id；遮罩 / 关闭钮 / Esc 都关，焦点进框、关后回「设置」行。
 const setBody = document.getElementById('set-body');
+const setTabs = document.getElementById('set-tabs');
+const setClose = document.getElementById('set-close');
+const settingsModal = document.getElementById('settings');
+const setScrim = document.getElementById('set-scrim');
 
-function setCard(title) {
-  const c = document.createElement('div');
-  c.className = 'set-card';
-  const h = document.createElement('h3');
-  h.textContent = title;
-  c.appendChild(h);
-  return c;
-}
-function setRow(card, k, v) {
+// 行式表单：左=标签 + 说明（可空），右=值或控件；{mono:true} 给逐字符比对的值。
+function setRow(k, v, desc, opts) {
   const row = document.createElement('div');
   row.className = 'set-row';
+  const left = document.createElement('div');
+  left.className = 'set-l';
   const kk = document.createElement('span');
   kk.className = 'k';
   kk.textContent = k;
-  const vv = document.createElement('span');
-  vv.className = 'v';
-  vv.textContent = v;
-  // 长值带全文 title（c_lqtt2m）：窄屏 value 按 ellipsis 折（断点块），
-  // 悬停提示里全文仍可读——路径/版本 hash 不因折叠丢信息
-  if (v.length > 24) vv.title = v;
-  row.appendChild(kk);
-  row.appendChild(vv);
-  card.appendChild(row);
+  left.appendChild(kk);
+  if (desc) {
+    const dd = document.createElement('span');
+    dd.className = 'd';
+    dd.textContent = desc;
+    left.appendChild(dd);
+  }
+  row.appendChild(left);
+  const rr = document.createElement('div');
+  rr.className = 'set-r';
+  if (typeof v === 'object' && v && v.nodeType === 1) {
+    rr.appendChild(v);   // 控件（外观三选一组）
+  } else {
+    const vv = document.createElement('span');
+    vv.className = 'v' + (opts && opts.mono ? ' mono' : '');
+    vv.textContent = v;
+    // 长值带全文 title：窄屏值列按 ellipsis 折，路径/版本 hash 不因折叠丢信息。
+    if (v.length > 24) vv.title = v;
+    rr.appendChild(vv);
+  }
+  row.appendChild(rr);
+  return row;
 }
-function setNote(card, text) {
+function setNote(text, id) {
   const d = document.createElement('div');
   d.className = 'set-note';
+  if (id) d.id = id;
   d.textContent = text;
-  card.appendChild(d);
   return d;
 }
 
-// 外观卡：三态按钮 + 一句「当前实际颜色」的说明（system 态下用户要知道
-// 现在真的是亮还是暗）。
-function renderAppearance() {
-  const c = setCard('外观');
+// 通用 tab：外观三选一；.on 判定沿用 applyTheme（一套状态，不另造布尔）。
+function renderGeneral() {
   const group = document.createElement('div');
   group.id = 'set-theme';
-  // 主题三选（c_25d2ey）：sun/moon/monitor 三枚 sprite 图标同一线宽
-  // 同一尺寸——取代旧的三枚文字符号（两套视觉重量）。
-  for (const [mode, icon, label] of [['light', 'sun', '亮'], ['dark', 'moon', '暗'], ['system', 'monitor', '跟随系统']]) {
+  for (const [mode, icon, label] of [['light', 'sun', '浅色'], ['dark', 'moon', '深色'], ['system', 'monitor', '跟随系统']]) {
     const b = document.createElement('button');
     b.type = 'button';
     b.dataset.mode = mode;
@@ -4754,55 +4820,130 @@ function renderAppearance() {
     b.addEventListener('click', () => setThemeMode(mode));
     group.appendChild(b);
   }
-  c.appendChild(group);
-  const note = document.createElement('div');
-  note.className = 'set-note';
-  note.id = 'set-theme-note';
-  c.appendChild(note);
-  setBody.appendChild(c);
-  applyTheme();   // 末尾顺带把说明行刷成当前态（note 刚建好）
+  setBody.appendChild(setRow('外观', group, '选浅色 / 深色 / 跟随系统：立即生效并记住'));
+  setBody.appendChild(setNote('', 'set-theme-note'));
+  applyTheme();   // 刷一遍按钮 .on 与说明行（刚建好）
 }
 
 function syncThemeNote() {
   const note = document.getElementById('set-theme-note');
   if (!note) return;
-  const stored = storedTheme();
-  note.textContent = (stored ? '记忆位：' + stored : '跟随系统（无记忆位）')
-    + ' · 当前生效：' + effectiveTheme()
-    + (stored ? '' : '（系统切换会自动跟随）');
+  const now = effectiveTheme() === 'dark' ? '深色' : '浅色';
+  note.textContent = storedTheme() ? '当前：' + now : '跟随系统 · 当前为' + now;
+}
+
+// 服务配置 tab：顶部一行用户语言的只读说明 + 快照；候选项目子项行用真实
+// 标签「路径」，不留孤儿标记（并入修 A）。
+async function renderServe() {
+  setBody.appendChild(setNote('这些值只读：改 ~/.seek/config.json 的 serve / default_provider / '
+    + 'auto_compact 后重启 seek serve 生效。', 'set-serve-note'));
+  try {
+    const r = await settingsSnapshot();
+    if (!r) throw new Error('serve 侧未挂设置方法');
+    setBody.appendChild(setRow('默认 provider',
+      r.default_provider || '（未设 —— 子进程按已配 key 自动选车道）',
+      '子进程没配固定车道时按已配 key 自动选'));
+    // 模型/温度没有配置项：值本身就把话说完了，不再挂一行重复的说明。
+    setBody.appendChild(setRow('默认模型', r.model || '（无配置项 —— serve 子进程用车道默认）'));
+    setBody.appendChild(setRow('温度', '（无配置项 —— 用车道默认）'));
+    setBody.appendChild(setRow('并发上限', String(r.max_concurrency), '同时运行的子进程数', { mono: true }));
+    setBody.appendChild(setRow('yolo（子进程权限）', r.yolo ? '开（全放行）' : '关（受权限闸，默认）',
+      '全放行 = 子进程不弹权限确认'));
+    setBody.appendChild(setRow('web 监听', r.web_addr, 'serve 实际监听的地址', { mono: true }));
+    setBody.appendChild(setRow('自动压缩', r.auto_compact || '关', '超阈值时自动压缩上下文'));
+    setBody.appendChild(setRow('候选项目', String((r.projects || []).length), '可绑定的项目根数', { mono: true }));
+    for (const p of r.projects || []) {
+      setBody.appendChild(setRow('路径', p, '', { mono: true }));
+    }
+  } catch (e) {
+    setBody.appendChild(setNote('settings/get 失败：' + e.message + '（serve 侧未挂设置方法时属预期）'));
+  }
+}
+
+// 关于 tab：版本行走 .mono + nowrap，短 hash 不从中间劈开（并入修 B）。
+async function renderAbout() {
+  const r = await settingsSnapshot();
+  setBody.appendChild(setRow('版本', r && r.version ? r.version : 'unknown',
+    '构建标识：版本号 · 短提交 hash', { mono: true }));
+  setBody.appendChild(setRow('入口 token', r && r.token_tail ? '…' + r.token_tail : '（未取到）',
+    '只显示后 6 位供核对；完整 token 在 ~/.seek/serve/web.token（0600）', { mono: true }));
+  setBody.appendChild(setRow('会话 id', CONV ? CONV.slice(0, 8) : '?', '当前会话的短 id', { mono: true }));
+}
+
+// 快照取一次、两份 tab 共用（失败留 null → 关于区显示 unknown，不抛）。
+async function settingsSnapshot() {
+  if (setData) return setData;
+  try { setData = await rpc('settings/get', {}); } catch (e) { setData = null; }
+  return setData;
+}
+
+let setData = null;      // settings/get 快照（about 复用；失败留 null）
+let setTab = 'general';  // 当前 tab 名（DOM 的 .on 是渲染产物，此处只作入口记忆）
+
+async function showSetTab(name) {
+  setTab = name;
+  for (const b of setTabs.querySelectorAll('.set-tab')) {
+    const on = b.dataset.tab === name;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-selected', on ? 'true' : 'false');
+  }
+  setBody.setAttribute('aria-labelledby', 'set-tab-' + name);
+  setBody.replaceChildren();
+  if (name === 'general') { renderGeneral(); return; }
+  if (name === 'about') { await renderAbout(); return; }
+  await renderServe();
 }
 
 async function loadSetPane() {
-  setBody.replaceChildren();
-  renderAppearance();
-  try {
-    const r = await rpc('settings/get', {});
-    const cfg = setCard('serve 侧配置（只读）');
-    setRow(cfg, '默认 provider', r.default_provider || '（未设 —— 子进程按已配 key 自动选车道）');
-    setRow(cfg, '默认模型', r.model || '（无配置项 —— serve 子进程用车道默认）');
-    setRow(cfg, '温度', '（无配置项 —— 用车道默认）');
-    setRow(cfg, '并发上限', String(r.max_concurrency));
-    setRow(cfg, 'yolo（子进程权限）', r.yolo ? '开（全放行）' : '关（受权限闸，默认）');
-    setRow(cfg, 'web 监听', r.web_addr);
-    setRow(cfg, '自动压缩', r.auto_compact || '关');
-    setRow(cfg, '候选项目', String((r.projects || []).length));
-    for (const p of r.projects || []) setRow(cfg, '·', p);
-    setNote(cfg, '改这些值 = 编辑 ~/.seek/config.json 的 serve / default_provider / auto_compact 段后重启 seek serve。'
-      + '本轮设置面板按卡面口径只读：写口要配置写入 + 重启路径，超本卡配额，不在范围内。');
+  // 每次打开重取一次快照（serve 侧配置是启动时投影；快照只是展示，不是配置源）。
+  setData = null;
+  await showSetTab(setTab);
+}
 
-    const about = setCard('关于');
-    setRow(about, '版本', r.version || 'unknown');
-    setRow(about, '入口 token（短显）', r.token_tail ? '…' + r.token_tail + '（后 6 位）' : '（未取到）');
-    setRow(about, '会话 id（短显）', CONV ? CONV.slice(0, 8) : '?');
-    setNote(about, '完整 token 只在 ~/.seek/serve/web.token（0600）与启动 banner 里；本页只显示后 6 位供核对。');
-    // 两卡挂载：setCard 只建不挂（外观卡由 renderAppearance 自己挂），
-    // 这里漏挂是真实踩过的坑——卡建好填好却从不上树，面板只见外观卡。
-    setBody.appendChild(cfg);
-    setBody.appendChild(about);
-  } catch (e) {
-    const c = setCard('设置读取失败');
-    setNote(c, 'settings/get 失败：' + e.message + '（serve 侧未挂设置方法时属预期）');
-    setBody.appendChild(c);
+// ---- 设置模态开合（W6-6 ①）----
+// 开合：先收起别的面板，挂类后焦点落关闭钮；关闭时摘类、焦点回「设置」行。
+let setOpener = null;
+
+function openSettings(opener) {
+  setOpener = opener || settingsBtn;
+  closePanes();                       // 顺带把模态自己收起来（幂等），再重挂
+  document.body.classList.add('settings-view');
+  document.addEventListener('keydown', modalKeys);
+  loadSetPane();
+  setClose.focus();
+}
+
+function closeSettings(opts) {
+  if (!document.body.classList.contains('settings-view')) return;
+  document.body.classList.remove('settings-view');
+  document.removeEventListener('keydown', modalKeys);
+  if ((opts && opts.restoreFocus) !== false) {
+    const back = setOpener || settingsBtn;
+    if (back) back.focus();
+  }
+}
+function toggleSettings() {
+  if (document.body.classList.contains('settings-view')) closeSettings();
+  else openSettings(settingsBtn);
+}
+
+setClose.addEventListener('click', () => closeSettings());
+setScrim.addEventListener('click', () => closeSettings());
+setTabs.addEventListener('click', ev => {
+  const b = ev.target.closest('.set-tab');
+  if (b) showSetTab(b.dataset.tab);
+});
+// Esc 与焦点圈养：开着才挂到 document、关时摘掉（页面不常驻全局键盘监听）。
+// 只挂对话框上不够——aria-modal 拦不住键盘 Tab，点框内空白焦点还会掉回
+// body，这两种 Esc 都收不到（真实输入探针实测）。
+function modalKeys(ev) {
+  if (ev.key === 'Escape') { ev.preventDefault(); closeSettings(); return; }
+  if (ev.key !== 'Tab') return;
+  const f = settingsModal.querySelectorAll('button:not(:disabled)');
+  const a = document.activeElement, edge = ev.shiftKey ? f[0] : f[f.length - 1];
+  if (!settingsModal.contains(a) || a === edge) {
+    ev.preventDefault();
+    (ev.shiftKey ? f[f.length - 1] : f[0]).focus();
   }
 }
 
