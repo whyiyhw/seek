@@ -1881,8 +1881,9 @@ let lastSeenSession;
 let lastSeenProject;
 
 // ---- 主区空态（c_jf3grt）----
-// 聊天面空着时给引导，不留一大片无字区：未绑定 → 「点左栏的工作区」+
-// 「选择目录…」按钮（fs/list 目录浏览器）；已绑定 → 欢迎语与输入提示。
+// 聊天面空着时给引导，不留一大片无字区：未绑定 → 工作区芯片（点它开
+// fs/list 目录浏览器）；已绑定 → 欢迎语与输入提示。文案不写方位与按钮
+// 文字——窄屏侧栏是 56px 图标轨，图上没有字（c_b6chn5）。
 // 空态块是 #list 的直接子节点里唯一非 .msg 的一项，消息落地
 // 即摘（dropChatEmpty）；只在真的空列表上渲染，绝不挤占历史消息。
 let chatEmptyKind = '';   // 在场空态的形态（unbound/bound）；'' = 无
@@ -1949,7 +1950,7 @@ function renderChatEmpty() {
   x.className = 'ce-x';
   x.textContent = boundProject
     ? '直接输入消息开始；输入 / 看指令，@ 引用历史会话。'
-    : '选一个目录绑定后，这里就能开始对话；左栏也会列出你用过的工作区。';
+    : '选一个目录绑定后，这里就能开始对话。';
   box.appendChild(x);
   list.appendChild(box);
   chatEmptyKind = kind;
@@ -1967,7 +1968,7 @@ async function refreshState() {
     boundProjectID = s.bound ? (s.project_id || '') : '';
     boundSession = s.session || null;
     setStatus(s.bound ? '已绑定 ' + s.project + (s.session ? ' · 会话 ' + s.session.slice(0, 8) : '')
-                      : '未绑定——点左栏的「新建」选一个目录', s.bound);
+                      : '未绑定——点文件夹加号图标选一个目录', s.bound);
     syncTopicStream();               // /bind 落地后面板订阅即时跟上
     syncAgentRefresh();              // 绑定到位后定时刷新才敢起（c_4doebx）
     if (sessList) markCur();         // 侧栏当前项跟随绑定（W5 侧栏）
@@ -3635,7 +3636,7 @@ function renderSessRows() {
   if (!groups.length) {
     paneHint(sessList, allSessions.length || (bindData && bindData.length)
       ? '（没有匹配的工作区或会话）'
-      : '还没有工作区，点侧栏头的「新建」选一个目录开始。');
+      : '还没有工作区，点文件夹加号图标选一个目录开始。');
     return;
   }
   // 全树行数帽：组头恒显，会话行按 30 条一页累加（跨组共享一个帽子，
@@ -4259,7 +4260,7 @@ function agTokensText(t) {
 async function loadAgents() {
   if (!boundProjectID) {
     agCnt.textContent = '';
-    return paneHint(agList, '还没绑定工作区，先在左栏新建或选一个目录');
+    return paneHint(agList, '还没绑定工作区，点文件夹加号图标选一个目录');
   }
   agLoads++;
   try {
@@ -4619,6 +4620,26 @@ const memMeta = document.getElementById('mem-meta');
 const memTags = document.getElementById('mem-tags');
 const memContent = document.getElementById('mem-content');
 const memoryEl = document.getElementById('memory');
+// 窄屏下拉（c_b6chn5）：≤480px 的 .pane-bar select 只有 38vw 宽，装不下
+// 「id · N 条 · 日期」——尾巴被裁后「11-22」只剩首位，读起来像「1 条」。
+// 窄屏选项不带日期，宽屏照旧；断点变化就地换文案，不重拉 memory/projects。
+const paneNarrowMQ = window.matchMedia ? window.matchMedia('(max-width: 480px)') : null;
+let memProjects = [];   // 最近一次 memory/projects 的结果（断点切换时的换文案源）
+function memOptLabel(p) {
+  const head = p.project_id.slice(0, 8) + ' · ' + p.memories + ' 条';
+  return (paneNarrowMQ && paneNarrowMQ.matches) ? head : head + ' · ' + fmtDay(p.last_active_at);
+}
+function renderMemOpts() {
+  const keep = memProj.value;
+  memProj.replaceChildren();
+  for (const p of memProjects) {
+    const opt = document.createElement('option');
+    opt.value = p.project_id;
+    opt.textContent = memOptLabel(p);
+    memProj.appendChild(opt);
+  }
+  if (keep) memProj.value = keep;
+}
 let memSel = null;  // {proj, name} 当前打开的详情；null = 未开
 // 选中态只有 memSel 一个真源：.has-sel 是它的投影（与后台的 syncAgSel 同构）。
 function setMemSel(v) { memSel = v; memoryEl.classList.toggle('has-sel', !!v); }
@@ -4632,19 +4653,14 @@ async function loadMemPane() {
   paneHint(memList, '加载中…');
   try {
     const res = await rpc('memory/projects', {});
+    memProjects = res.projects || [];
     memProj.replaceChildren();
-    if (!res.projects.length) {
+    if (!memProjects.length) {
       memCnt.textContent = '';
       closeMem();
       return paneHint(memList, '磁盘上还没有项目，先用 seek 跑一阵');
     }
-    for (const p of res.projects) {
-      const opt = document.createElement('option');
-      opt.value = p.project_id;
-      opt.textContent = p.project_id.slice(0, 8) + ' · ' + p.memories + ' 条 · '
-        + fmtDay(p.last_active_at);
-      memProj.appendChild(opt);
-    }
+    renderMemOpts();
     loadMemList(memProj.value);
   } catch (e) { paneHint(memList, 'memory/projects 失败：' + e.message); }
 }
@@ -4715,6 +4731,10 @@ async function openMem(proj, name) {
 }
 
 memProj.addEventListener('change', () => loadMemList(memProj.value));
+// 转屏 / 拖窗跨 480：选项有无日期就换一轮（同一份数据，不重拉）。
+if (paneNarrowMQ) paneNarrowMQ.addEventListener('change', () => {
+  if (memProjects.length) renderMemOpts();
+});
 
 // ---- 统计视图（W4.5 资产面 UI·二）----
 // 消费 W4.3 的 stats/cache（cost_usd 服务端算——「client never prices」，
