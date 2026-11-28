@@ -161,7 +161,7 @@
 #（+246941B）不是 main，勿混。web-gate 不带 -trimpath，绝对路径进产物，换
 # 目录重编有 ±9KB 量级抖动（实测两处独立 clone 分别 −8960B / +72B）——远在
 # 200KB 预算余量内，不改闸判据；主会话在自己检出重跑复核即同线。
-31815285
+31819429
 # 2026-11-20 c_rqcuaa ratchet: +53096B (session rename/archive —
 # internal/sessmeta state+audit pair, session/rename|archive methods +
 # list override/filter, sidebar inline-rename/archive UI ~6.7KB embed).
@@ -216,3 +216,11 @@
 # 抬 pin 而非 --update-baseline 绝对值：本卡只认自己的 delta（31807109 →
 # 31815285），不吸收既有未棘轮漂移（main 对旧 pin 已有 ~117KB 余量账——那是
 # 别的卡的，谁长谁棘轮，同 c_6xktw4/c_heffj3 归因口径）。
+# 2026-11-28 c_w74tuo W6-7 资产面板归位（本卡 delta +4144B，DELTA-added）：
+# -trimpath 同口径实测（linux/amd64 CGO_ENABLED=0）：main 31940431B → 本卡尖端
+# 31944575B。增量全是页面源（webfrontend.html 源码净 +约 3.6KB：.pane-bar 头 /
+# 768 列定位盒 / 单行行样式 / 选中态并排规则；旧 .pane-head、斜体占位、双栏
+# 定宽与 ≤480px 堆叠规则同卡删净；趋势图标签挪到折线上方），无新 Go。
+# 验收脚本（web-subagents/web-mobile/web-page-review 的 .mjs）不进 embed。
+# 抬 pin 而非 --update-baseline 绝对值：本卡只认自己的 delta（31815285 →
+# 31819429），不吸收既有未棘轮漂移（同 c_ekuuof / c_6xktw4 归因口径）。

@@ -342,6 +342,32 @@ async function shot(seqNo, panelKey, label, theme, view) {
   return entry;
 }
 
+// W6-7 资产面板形状探针（只记录不拦，进 manifest.panel_shape）：点一行看
+// 列表 / 详情的几何——桌面（≥1200）= 列表 320 + 详情并排、合计 768；窄屏 =
+// 详情替换列表、出「返回列表」；再点返回验回列表。探完清选中，镜头不受影响。
+// 硬断言在 web-subagents 无头（同一套判据，那边判失败）。
+async function panelShape(key) {
+  const ids = key === 'memory'
+    ? ['memory', 'mem-list', 'mem-detail', '.mem-row'] : ['agents', 'ag-list', 'ag-detail', '.ag-row'];
+  return evalJS(`(async () => {
+    const sec = document.getElementById('${ids[0]}'), list = document.getElementById('${ids[1]}'),
+      det = document.getElementById('${ids[2]}'), row = list.querySelector('${ids[3]}');
+    const vis = e => getComputedStyle(e).display !== 'none';
+    if (!row) return { ok: null, why: '列表无行' };
+    const body = list.parentElement, pad = parseFloat(getComputedStyle(body).paddingLeft);
+    const col = body.clientWidth - 2 * pad, wide = innerWidth >= 1200;
+    row.click(); await new Promise(r => setTimeout(r, 500));
+    const back = det.querySelector('.pane-back');
+    const picked = sec.classList.contains('has-sel') && vis(det) && (wide
+      ? vis(list) && Math.round(list.getBoundingClientRect().width) === 320
+        && Math.round(det.getBoundingClientRect().width) === col - 336 && !vis(back)
+      : !vis(list) && Math.round(det.getBoundingClientRect().width) === col && vis(back));
+    back.click(); await new Promise(r => setTimeout(r, 300));
+    const restored = !sec.classList.contains('has-sel') && vis(list) && !vis(det);
+    return { ok: picked && restored, wide, col, picked, restored };
+  })()`);
+}
+
 // ---- 4. Phase A：聊天空态（/bind 前）× 主题 × 视口 ----
 for (const theme of THEMES) {
   phase = `A-chat-empty-${theme}`;
@@ -378,6 +404,9 @@ for (const theme of THEMES) {
       }
       const entry = await shot(seqNo, panel.key, panel.label, theme, view);
       if (nav.error) entry.navError = nav.error;
+      if (panel.key === 'memory' || panel.key === 'agents') {
+        try { entry.shape = await panelShape(panel.key); } catch (e) { entry.shape = { ok: null, why: e.message }; }
+      }
       if (panel.key === 'chat-rich' && theme === 'light' && view.name === 'desktop' && !domDumped) {
         const html = await evalJS('document.documentElement.outerHTML');
         writeFileSync(path.join(outDir, 'dom-chat-rich.html'), '<!DOCTYPE html>\n' + html);
@@ -516,6 +545,7 @@ writeFileSync(path.join(outDir, 'manifest.json'), JSON.stringify({
   shots: shotMeta,
   nav_errors: shotMeta.filter(s => s.navError).length,
   capture_failures: shotMeta.filter(s => !s.ok).length,
+  panel_shape: shotMeta.filter(s => s.shape).map(s => ({ file: s.file, width: s.width, ...s.shape })),
   console_entries: consoleLog.length,
   dom_dump: domDumped ? 'dom-chat-rich.html' : null,
   visual,
@@ -523,6 +553,12 @@ writeFileSync(path.join(outDir, 'manifest.json'), JSON.stringify({
     + '退出码只看镜头是否拍齐（32/32）。visual 五项是趋势指标，只记录不拦。',
 }, null, 2) + '\n');
 
+{
+  const sh = shotMeta.filter(s => s.shape);
+  const bad = sh.filter(s => s.shape.ok !== true);
+  console.log(`\npanel_shape（W6-7，只记录）：${sh.length - bad.length}/${sh.length} 过`
+    + (bad.length ? '——未过：' + bad.map(s => `${s.file} ${JSON.stringify(s.shape)}`).join('；') : ''));
+}
 if (visual.error) console.log(`\nvisual: 采集失败（${visual.error}）——不影响退出码`);
 else console.log('\nvisual: '
   + `低对比 暗${visual.low_contrast_pairs.dark.count ?? '?'}/亮${visual.low_contrast_pairs.light.count ?? '?'} 对`
