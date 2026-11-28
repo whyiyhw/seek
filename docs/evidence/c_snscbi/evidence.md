@@ -7,9 +7,9 @@
 ## 读数（scripts/weight.sh，docs/pitfalls 行）
 
 ```
-开工（本分支 base，含 W6-6/W6-7 新增两条）  540425 B   over  +6925
-收工                                        522154 B   ok    （预算 533500）
-本卡目标 ≤524000                              已达成，余量 1846 B 在目标线之上、11346 B 在预算线之下
+开工（本分支 base=d52e0bf8，含 W6-6/W6-7 新增两条）  540425 B   over  +6925
+压缩后、合并 main（8b841c52，W6-8 前一条新条目）          523446 B   ok    （预算 533500）
+本卡目标 ≤524000                                          已达成（低 554 B）；对预算线余 10054 B
 ```
 
 > 卡面给的 537035 B 是 `main@608fcf58` 的读数；分支上先后吸收了 W6-6（c_ekuuof，+1 条）
@@ -82,8 +82,8 @@ OK — 无缺失（裸标识符/数值/结构/不膨胀/语言口径全过）
 
 | 项 | 结果 |
 |---|---|
-| ① `bash scripts/pitfalls-count.sh --check` | `pitfalls-count: OK`，`live=419 absorbed=15 sections_with_entries=36` |
-| ② `bash scripts/weight.sh` 的 docs/pitfalls 行 | `522154 / 533500 ok`（不再 over）；距 524000 目标 -1846 B（已达标） |
+| ① `bash scripts/pitfalls-count.sh --check` | `pitfalls-count: OK`，`live=420 absorbed=15 sections_with_entries=36`（合并 main 后含新增条目） |
+| ② `bash scripts/weight.sh` 的 docs/pitfalls 行 | `523446 / 533500 ok`（不再 over）；距 524000 目标 -554 B（已达标），距预算线 -10054 B |
 | ③ 事实保留机械核 | 上面两个脚本全绿，报告 `facts-report.txt` / `audit-extra.txt` |
 | ⑤ `go test ./...` | 全绿（两次，含一次冷缓存；docs 无 Go 测试，跑的是全仓回归） |
 | 不动 `docs/budget.json` | 未改（抬预算线要用户签字，本卡不做） |
@@ -102,8 +102,10 @@ OK — 无缺失（裸标识符/数值/结构/不膨胀/语言口径全过）
 
 ## ⑤ 给后续 W6-7..9 的余量口径
 
-收工时读数 522154 B：
-- 对预算线 533500 余 **11346 B**；
-- 对卡面 524000 目标线余 **1846 B**（在途两条 + 若干新条目的空间已留出）。
+收工时读数 523446 B（2648 行）：
+- 对预算线 533500 余 **10054 B**（≈10 KB，即卡面要求的「给 W6-7..9 留约 10KB」）；
+- 对卡面 524000 目标线已达标（低 554 B）。注意 `main` 收工前又并入一条 W6-8 前的
+  新条目（`web-frontend-asset-plane/侧栏抽屉化后主区掉进第一列…`，1292 B）——余量口径
+  已把它算在内。
 若 W6-8/W6-9 各自新增 1–2 条（约 1.5–3 KB/条），余量仍在预算内；逼近 524000 时
 下一张瘦身卡应按同一套两个脚本继续做，不需要抬线。
