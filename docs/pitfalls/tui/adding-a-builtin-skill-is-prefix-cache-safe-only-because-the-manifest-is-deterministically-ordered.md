@@ -1,6 +1,6 @@
 ### Adding a builtin skill is prefix-cache-safe ONLY because the manifest is deterministically ordered
-- **Saw**: dropping a 4th file into `internal/skill/builtin/` (`code-review.md`) adds a line to the system-prompt `# Available skills` manifest sent every turn as part of the cached prefix.
+- **Saw**: dropping a 4th file into `internal/skill/builtin/` (`code-review.md`) adds a line to the system-prompt `# Available skills` manifest sent every turn in the cached prefix.
 - **Why**: safe only by construction — the manifest renders via `Set.Manifest()` → `Set.List()` → `s.order` (insertion-order slice, not map iteration), the loader sorts every directory's entries (`sort.Slice(... Name())` for on-disk and `embed.FS` tiers) before `Add`, and `Manifest()` flattens `\n` out of descriptions, so manifest bytes are identical across restarts.
 - **Fix**: nothing to fix; verified the invariant and added a `code-review` presence + description-keyword assertion to `loader_test.go`.
-- **Lesson**: ranging a `map` (instead of `List()`/`order`) or stopping sorting a skill source silently breaks prefix-cache for every session; adding a skill still costs a one-time first-turn cache miss for sessions resumed across the upgrade — unavoidable, not a regression.
-- **Refs**: `internal/skill/skill.go:Manifest`/`List`/`order`, `internal/skill/loader.go:107,247` (sort.Slice), `cmd/seek/main.go:1126,1291,1663`
+- **Lesson**: ranging a `map` (instead of `List()`/`order`) or stopping sorting a skill source silently breaks prefix-cache every session; adding a skill still costs a one-time first-turn cache miss for sessions resumed across the upgrade — unavoidable, not a regression.
+- **Refs**: `internal/skill/skill.go:Manifest`/`List`/`order`, `internal/skill/loader.go:107,247`, `cmd/seek/main.go:1126,1291,1663`

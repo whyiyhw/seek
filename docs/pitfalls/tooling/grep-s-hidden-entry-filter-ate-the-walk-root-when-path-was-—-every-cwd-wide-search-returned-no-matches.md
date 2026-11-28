@@ -1,6 +1,6 @@
 ### grep's hidden-entry filter ate the walk ROOT when path was "." — every cwd-wide search returned "no matches"
-- **Saw**: `grep pattern=X path=.` returned `no matches` for patterns provably in the cwd while `path=internal` matched; hit twice, both misleading the model.
+- **Saw**: `grep pattern=X path=.` returned `no matches` for patterns provably in the cwd while `path=internal` matched; hit twice, both misleading.
 - **Why**: `filepath.WalkDir` hands the callback the root entry with its LITERAL name — for `dir == "."` that's `d.Name() == "."`, which `strings.HasPrefix(d.Name(), ".")` read as hidden → `filepath.SkipDir` on the first call → empty list, no error. The same walker fed `**` globs, so `**/*.go` (empty prefix → `.`) was silently empty; bare `HasPrefix` can't tell ROOT from CHILDREN.
 - **Fix**: `walkSkip(path, root, d)` — hidden check with the root exempt (`path == root`), in both walkers (`walkDir`, `expandDoubleStarGlob`); hidden children stay filtered (a `.` root still skips `.git`). Tests: `TestGrep_DotPath_WalksCwd`, `TestGrep_Glob_DoubleStarFromDot` (plus `TestGrep_Directory_SkipsHidden`).
-- **Lesson**: when a walker applies an entry filter, decide explicitly whether the ROOT is subject; a filter that silently yields zero results is worse than an error (can't tell "nothing there" from "refused to look").
+- **Lesson**: when a walker applies an entry filter, decide explicitly whether the ROOT is subject; a filter that silently yields zero results is worse than an error.
 - **Refs**: `internal/tools/grep/grep.go:walkSkip`, `internal/tools/grep/grep_test.go:TestGrep_DotPath_WalksCwd`

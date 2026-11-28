@@ -1,6 +1,6 @@
 ### WM_SETTINGCHANGE broadcast blocks startup on busy Windows desktops
 - **Saw**: first-run seek -install / PATH nudge took 1-5 seconds on a machine with many open windows — SendMessageTimeoutW returns only after every top-level window processes (or times out on) the WM_SETTINGCHANGE message.
-- **Why**: HWND_BROADCAST sends sequentially to every top-level window; browsers with hundreds of tabs, Electron apps, and Office each take a slice, summing to seconds across dozens of windows; SMTO_ABORTIFHUNG only skips hung windows — responsive ones still get the full sequential send.
+- **Why**: HWND_BROADCAST sends sequentially to every top-level window; browsers with hundreds of tabs, Electron apps, and Office each take a slice, summing to seconds across dozens of windows; SMTO_ABORTIFHUNG only skips hung windows — responsive ones still get the full send.
 - **Fix**: split the PATH operation into EnsureInPATH (registry write only, no broadcast — startup nudge) and EnsureInPATHWithBroadcast (registry + broadcast — explicit seek -install); the nudge writes the registry in microseconds and tells the user to restart their terminal.
 - **Lesson**: SendMessageTimeoutW(HWND_BROADCAST, WM_SETTINGCHANGE) is not free — keep it out of startup or fast paths; registry writes take effect on next login even without a broadcast, which is a UX nicety, not a correctness requirement.
 - **Refs**: internal/pathop/pathop_windows.go, MSDN WM_SETTINGCHANGE (https://learn.microsoft.com/en-us/windows/win32/sysinfo/wm-settingchange)

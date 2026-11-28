@@ -1,6 +1,6 @@
 ### Plan artifact write needs context BEFORE Sink.Approved fires — added a separate ContextReceiver interface
-- **Saw**: wiring the plan artifact writer into `planBridge.Approved(steps, batch)` needs `problem`/`why_now` from propose, but `Approved` carries only `steps` and `batch` — widening it would have been the third Sink signature break in one feature batch (after Phase C's `batch bool` and the F1+F2 optional interfaces).
-- **Why**: every fake / test recording sink implements the Sink contract, so each signature break drags unrelated Sink-constructing tests into the diff and churn calcifies into "don't change Sink".
+- **Saw**: wiring the plan artifact writer into `planBridge.Approved(steps, batch)` needs `problem`/`why_now` from propose, but `Approved` carries only `steps` and `batch` — widening it would be the third Sink signature break in one feature batch (after Phase C's `batch bool` and the F1+F2 optional interfaces).
+- **Why**: every fake / recording sink implements the Sink contract, so each break drags unrelated Sink-constructing tests into the diff and churn calcifies into "don't change Sink".
 - **Fix**: added optional interface `propose.ContextReceiver { OnProposeStart(problem string, steps []string, whyNow string) }`, upcast and called by Execute before the picker pops — same family as `DuplicateChecker`, `ProgressReporter`, `ArtifactReporter`.
-- **Lesson**: when the new info is context for a subset of consumers, a sibling-interface upcast (`if _, ok := sink.(ContextReceiver); ok`) beats a parameter every caller must take.
-- **Refs**: `internal/tools/propose/propose.go:Sink,DuplicateChecker,ProgressReporter,ContextReceiver,ArtifactReporter` (the family), `cmd/seek/main.go:planBridge` (implements all four optional interfaces)、docs/book/chapter-18.md.
+- **Lesson**: when new info is context for a subset of consumers, a sibling-interface upcast (`if _, ok := sink.(ContextReceiver); ok`) beats a parameter every caller must take.
+- **Refs**: `internal/tools/propose/propose.go:Sink,DuplicateChecker,ProgressReporter,ContextReceiver,ArtifactReporter`, `cmd/seek/main.go:planBridge`（四个 optional 都实现）、docs/book/chapter-18.md.

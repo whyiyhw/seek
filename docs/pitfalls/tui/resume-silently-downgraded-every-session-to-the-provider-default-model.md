@@ -1,6 +1,6 @@
 ### `-resume` silently downgraded every session to the provider-default model
 - **Saw**: `seek --resume <id>` on a vision session failed with "deepseek api error: This model does not support image" — the header recorded `deepseek-v4-flash-vision-exp`, no `--model` passed; V4-Pro sessions likewise ran V4-Flash after every resume, losing thinking mode.
-- **Why**: the sticky-session inheritance checked `*model == modelDefault`, but the `--model` flag's default is `""` — never true (dead branch); the later `if *model == ""` fallback applied the provider default.
-- **Fix**: compare against the sentinel `""` (only an explicit `--model` overrides the saved model); verified by the feature-vision resume smoke (answers "42" from a mid-history image). Second layer: the agent send path strips history images when the active model isn't a vision model, so a `/model` switch degrades in-band instead of 400-ing.
-- **Lesson**: when a flag's default is a sentinel (`""`), every "did the user override?" check must compare against the sentinel, not the downstream resolved default — otherwise the override logic is dead code no compiler catches.
-- **Refs**: `cmd/seek/main.go` (sticky-session block), `pkg/agent/agent.go` (`runTurnDeepSeek` capability gate), feature-vision M-V.3 resume smoke
+- **Why**: the sticky-session inheritance checked `*model == modelDefault`, but the `--model` flag defaults to `""` — never true (dead branch); the later `if *model == ""` fallback applied the provider default.
+- **Fix**: compare against the sentinel `""` (only an explicit `--model` overrides the saved model); verified by the feature-vision resume smoke (answers "42" from a mid-history image). Second layer: the send path strips history images when the active model isn't a vision one, so a `/model` switch degrades in-band instead of 400-ing.
+- **Lesson**: when a flag's default is a sentinel (`""`), every override check must compare against the sentinel, not the downstream resolved default — else the logic is dead code no compiler catches.
+- **Refs**: `cmd/seek/main.go`, `pkg/agent/agent.go` (`runTurnDeepSeek` capability gate), feature-vision M-V.3 resume smoke

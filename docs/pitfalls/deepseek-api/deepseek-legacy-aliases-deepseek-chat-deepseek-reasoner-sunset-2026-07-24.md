@@ -1,6 +1,6 @@
 ### DeepSeek legacy aliases `deepseek-chat` / `deepseek-reasoner` sunset 2026-07-24
-- **Saw**: code defaulting to `deepseek.ModelChat`/`ModelReasoner` would silently break in production on 2026-07-24; the pricing table billed `ModelReasoner` at V4-Pro rates (~3.1× too high), assuming it routed to V4-Pro.
+- **Saw**: code defaulting to `deepseek.ModelChat`/`ModelReasoner` would silently break in production on 2026-07-24; pricing billed `ModelReasoner` at V4-Pro rates (~3.1× too high), assuming it routed there.
 - **Why**: per api-docs.deepseek.com both aliases are deprecated and route to V4-Flash — `deepseek-chat` with thinking disabled, `deepseek-reasoner` with thinking enabled: two configurations of one backend, not two models.
 - **Fix**: defaults switched `ModelChat` → `ModelV4Flash` (cmd/seek, `pkg/agent.New`, setup ping, fim default, distill/dream); `internal/pricing/pricing.go` bills `ModelReasoner` at V4-Flash rates; user-facing literals (picker, /think, placeholder tip, /model hint) use explicit V4 names. The constants remain so existing sessions/configs load until sunset; `ShouldEnableThinking(ModelReasoner)` still returns true.
 - **Lesson**: when a provider deprecates a name with a named successor and exact mapping, switch defaults before the sunset date and treat old constants as compat-only; re-read the docs instead of guessing routing.
-- **Refs**: `pkg/deepseek/types.go` (const block deprecation notes), `internal/pricing/pricing.go`, `internal/tui/commands.go:knownModelsForProvider`
+- **Refs**: `pkg/deepseek/types.go`, `internal/pricing/pricing.go`, `internal/tui/commands.go:knownModelsForProvider`

@@ -1,6 +1,6 @@
 ### A gzip middleware must both PRESERVE http.Flusher and EXCLUDE text/event-stream — either miss kills SSE silently
-- **Saw**: two ways the W1.5 wrapper can break `/events`: (a) embedding `http.ResponseWriter` hides Flusher — the handler's `w.(http.Flusher)` assertion 500s "streaming unsupported"; (b) gzip on the event-stream buffers frames — clients see nothing till the window fills, the batching `X-Accel-Buffering: no` exists to prevent.
-- **Why**: middleware wraps the writer BEFORE the handler sets Content-Type — compression can't be pre-decided; Go interfaces satisfy on the CONCRETE type — a wrapper without `Flush` is no Flusher whatever the inner writer.
+- **Saw**: two ways the W1.5 wrapper can break `/events`: (a) embedding `http.ResponseWriter` hides Flusher — `w.(http.Flusher)` then 500s "streaming unsupported"; (b) gzip on the event-stream buffers frames — clients see nothing till the window fills, which `X-Accel-Buffering: no` exists to prevent.
+- **Why**: middleware wraps the writer BEFORE the handler sets Content-Type — compression can't be pre-decided; Go interfaces satisfy on the CONCRETE type — a wrapper without `Flush` is no Flusher, whatever the inner writer.
 - **Fix**: `gzipResponseWriter` decides at WriteHeader/first-Write (Content-Type allowlist; `text/event-stream` absent), implements `Flush()` flushing gzip stream then underlying flusher; `close()` finishes the stream after handler return; card `c_ph2zax`.
 - **Lesson**: response-wrapping middleware must re-expose every optional interface handlers assert (Flusher for SSE; Hijacker for websockets); "compress everything textual" needs a streaming carve-out or per-event delivery dies.
 - **Refs**: `internal/controlplane/webfrontend_static.go` `withGzip`; `TestWeb_GzipSkipsSSE`.

@@ -46,6 +46,7 @@
 - c_w74tuo：W6-7 web 资产面板归位：记忆/统计/后台/审计用会话头同款标题栏 + 单列列表，去掉空荡的左右分栏与斜体占位
 - c_eq3eak：W6-8 web 侧栏折叠成 56px 图标轨（≤1024 自动收）+ 390px 窄屏对齐 dsh 移动形态
 - c_4wpajv：seek·补丁：W6-8 漏项——390px 下 composer 两侧真的各留 12px（width:100% 把 margin 吃掉）
+- c_snscbi：seek·减法：docs/pitfalls 超预算——W5/W6 一周新增约 50KB，编辑瘦身回预算内并给 W6-7..9 留余量（weight 报告 SLIM 建议）
 
 ## v0.13.1（2026-11-24）
 

@@ -1,6 +1,6 @@
 ### System prompt advertised non-existent `limit` parameter → resolved by accepting `limit` with max-50 enforcement
-- **Saw**: every `read` call passing `"limit": N` was rejected with `json: unknown field "limit"`, wasting a model round-trip.
-- **Why**: `cmd/seek/main.go`'s prompt listed `read(path, offset?, limit?)` and said "Always pass limit when reading an unfamiliar file", but `limit` had been removed from the tool's JSON Schema (AGENTS.md §Tool usage workflow item 3) to enforce the 50-line maximum without a bypass.
+- **Saw**: every `read` call passing `"limit": N` was rejected with `json: unknown field "limit"`, wasting a round-trip.
+- **Why**: `cmd/seek/main.go`'s prompt listed `read(path, offset?, limit?)` and said "Always pass limit when reading an unfamiliar file", but `limit` was gone from the JSON Schema (AGENTS.md §Tool usage workflow item 3) to enforce the 50-line max without a bypass.
 - **Fix**: `limit` is back in the schema with `maximum: 50` plus server-side rejection `"read: limit must be at most 50, got %d"`; touched `internal/tools/read/read.go` (schema, Args, validation), `internal/tools/read/read_test.go` (valid + error cases), `cmd/seek/main.go` prompt, `AGENTS.md`/`CLAUDE.md`.
 - **Lesson**: when the model systematically passes a parameter, accept it in the schema with a max and reject invalid values with a clear error rather than `additionalProperties: false` or silent clamping — schema `maximum` informs the LLM, server-side validation enforces.
-- **Refs**: `cmd/seek/main.go:74` (before/after), `internal/tools/read/read.go:23-31,68-78`, `AGENTS.md:40,59`, commit (this one)
+- **Refs**: `cmd/seek/main.go:74`, `internal/tools/read/read.go:23-31,68-78`, `AGENTS.md:40,59`

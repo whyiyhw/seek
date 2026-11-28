@@ -1,5 +1,5 @@
 ### /effort max turns hit finish_reason=length at 16k — seek's explicit cap undercut DeepSeek's implicit thinking budget
-- **Saw**: an effort:max session (99k prompt, 99% cache) hit `response truncated (finish_reason=length, max_tokens=16384)` — the whole 16k went to `reasoning_content`, content empty or cut; a sibling turn gave the clean-empty variant (`model returned an empty response`).
+- **Saw**: an effort:max session (99k prompt, 99% cache) hit `response truncated (finish_reason=length, max_tokens=16384)` — all 16k went to `reasoning_content`, content empty or cut; a sibling turn gave the clean-empty variant (`model returned an empty response`).
 - **Why**: seek sends `max_tokens` explicitly (default 16384; lineage 4096→8192→16384); omitted it's 8K non-thinking / 64K thinking (`reasoning_effort=max`), so the explicit 16k undercut the mode's grant — reasoning + content share one budget.
 - **Fix**: `Agent.turnMaxTokens()`: `--max-tokens` unset → `/effort max` caps at 65536 (official implicit thinking default), others keep 16384; explicit `--max-tokens` wins; effective next Prompt after SetEffort.
 - **Lesson**: a client-side "safe explicit default" can quietly fight a vendor parameter with a mode-dependent implicit default — re-check hardcoded defaults when the request grows a mode knob (Thinking/reasoning_effort).

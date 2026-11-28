@@ -1,6 +1,6 @@
 ### `write` had no staleness protection because `edit`'s exact-match made everyone assume both were safe
-- **Saw**: `edit` is safe by construction (exact `old_string` + occurrence count ⇒ stale edits fail) and that spread to the whole mutation surface; `write` is bare `os.WriteFile` — it can replace a file never read or changed since.
-- **Why**: opposite failure modes: edit's guard is in its operation's semantics, write's has none; checkpoints only help if a human notices the clobber — never in an unattended autopilot/goal run.
+- **Saw**: `edit` is safe by construction (exact `old_string` + occurrence count ⇒ stale edits fail) so the whole mutation surface was assumed safe; `write` is bare `os.WriteFile` — it replaces a file never read or changed since.
+- **Why**: opposite failure modes: edit's guard lives in its semantics, write's has none; checkpoints only help if a human notices the clobber — never in an unattended autopilot/goal run.
 - **Fix**: `internal/fsobserve`: `read` records a (size, mtime) token per path; `edit`/`write` refresh after mutation; `write` REFUSES (not warns) when the target exists and is unseen or changed — a warning lands after `os.WriteFile` replaced the file. Subagents get their own store (the parent's allows blind-overwriting same-named files in unseen worktrees).
 - **Lesson**: two tools sharing a category may not share the SAFETY PROPERTY. A stat token beats a content hash: `read` serves windowed views — hashing a 100 MB log for a peek costs a full read.
 - **Refs**: `internal/fsobserve/fsobserve.go`, `internal/tools/write/write.go`, `internal/tools/write/write_test.go:TestWrite_ReadThenWrite_Integration`, dsh `packages/fs/fs-observation-policy/src/index.ts:91-114`

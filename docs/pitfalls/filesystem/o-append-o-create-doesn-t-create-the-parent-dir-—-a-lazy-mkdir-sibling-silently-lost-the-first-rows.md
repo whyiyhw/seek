@@ -3,4 +3,4 @@
 - **Why**: `O_CREATE` creates the FILE, never its parent directories. It seemed to work because sibling `BindingStore.saveLocked` MkdirAll's the same serve dir — hosts that had `/bind`-ed got rows; only paths preceding a bind (cron broadcast before any conversation) produced nothing.
 - **Fix**: `internal/controlplane/voiceusage.go` — `appendVoiceUsageLine` MkdirAll's `filepath.Dir(path)` at 0o700 (binding store's mode; env file holds creds) before opening; both lanes (TTS/ASR) use it. `TestAppendVoiceUsageLine_CreatesParentDir` pins a not-yet-existing nested path. Card c_yc2thl.
 - **Lesson**: "append-only, best-effort" and "create the parent lazily" must be decided together: a quietly-failing append's parent-dir creation can't be another component's side effect.
-- **Refs**: `internal/controlplane/speaker.go` (TTS rows), `internal/controlplane/voicefrontend.go` (ASR rows), `internal/controlplane/bindings.go` (the sibling that did MkdirAll)
+- **Refs**: `internal/controlplane/speaker.go`, `internal/controlplane/voicefrontend.go`, `internal/controlplane/bindings.go`

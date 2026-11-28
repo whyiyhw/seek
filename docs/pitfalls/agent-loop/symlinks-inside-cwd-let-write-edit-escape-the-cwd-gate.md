@@ -3,4 +3,4 @@
 - **Why**: `permission.isWithin` compares path strings (filepath.Abs + filepath.Rel) without resolving symlinks via `filepath.EvalSymlinks`, so the policy sees "starts with cwd → allow" while the subsequent `os.WriteFile` follows the symlink outside.
 - **Fix**: NOT fixed — pinned by `permission.TestIsWithin_SymlinkInsideCWDPointingOutsideIsAllowed` and `write.TestWrite_SymlinkInsideCWDLetsContentEscape`, because seek's threat model is a single-user local tool (writing outside cwd is already possible via `bash`) and symlinked vendor/build/cache dirs are legitimate workflows EvalSymlinks would break.
 - **Lesson**: path-based access control sees a different graph than the filesystem layer walks — a CVE for a hardened multi-tenant tool, a documented limitation for seek; pin the current behaviour so any tightening is deliberate.
-- **Refs**: `internal/permission/permission.go:isWithin`; test cross-references above、docs/book/chapter-05.md
+- **Refs**: `internal/permission/permission.go:isWithin`、docs/book/chapter-05.md

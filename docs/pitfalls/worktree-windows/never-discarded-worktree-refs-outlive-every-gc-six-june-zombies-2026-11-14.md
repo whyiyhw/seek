@@ -1,6 +1,6 @@
 ### never-discarded worktree refs outlive every GC (six June zombies, 2026-11-14)
-- **Saw**: `seek worktree gc` (and startup GC) never touched six `seek/wt/*` worktrees created 2026-06-01 — `--older-than` also only applied to them; five months of `refs/seek/worktrees/<id>` + branch + directory lingered until manual cleanup.
-- **Why**: GC enumerated only `refs/seek/discarded/*` (the marker from `exit_worktree(if_dirty=discard)`); a session dying before exit_worktree leaves no marker, so an unmarked orphan is invisible to marker-driven GC by construction.
+- **Saw**: `seek worktree gc` (and startup GC) never touched six `seek/wt/*` worktrees created 2026-06-01 — `--older-than` only applied to them; five months of `refs/seek/worktrees/<id>` + branch + directory lingered until manual cleanup.
+- **Why**: GC enumerated only `refs/seek/discarded/*` (the marker from `exit_worktree(if_dirty=discard)`); a session dying before exit_worktree leaves no marker, so an unmarked orphan is invisible to marker-driven GC.
 - **Fix**: `Manager.PruneOrphans` — age-based fallback over `refs/seek/worktrees/` (the ID embeds the creation timestamp), collecting past `--orphan-after` (default 7d) only when not active in this process, `merge-base --is-ancestor <ref> HEAD` proves no unmerged commits, and `git worktree remove` WITHOUT `--force` succeeds.
-- **Lesson**: a GC keyed on a marker only collects sessions that lived long enough to write it; every crash path between create and teardown needs an orthogonal age axis with fail-safe guards (ancestry proof + no-force removal).
-- **Refs**: `internal/worktree/worktree.go:PruneOrphans`, `internal/worktreecli/worktreecli.go:cmdGC` (`--orphan-after`), `cmd/seek/main.go` startup call
+- **Lesson**: a GC keyed on a marker only collects sessions that lived long enough to write it; every crash path between create and teardown needs an orthogonal age axis with fail-safe guards.
+- **Refs**: `internal/worktree/worktree.go:PruneOrphans`, `internal/worktreecli/worktreecli.go:cmdGC`, `cmd/seek/main.go` startup call
