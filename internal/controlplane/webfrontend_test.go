@@ -1766,3 +1766,77 @@ func TestWeb_PageInputEnhancements(t *testing.T) {
 	// keeps no resident document/window keydown listener.
 	assertNoResidentGlobalKeydown(t, page)
 }
+
+// TestWeb_PageCopyFollowsLayout pins c_b6chn5: 方位文案跟着布局走。W6-2/W6-4
+// 换了骨架与空态之后，几处文案仍指着「左栏 / 侧栏头的『新建』」——而 390px
+// 下侧栏是 56px 图标轨（.lbl / #sess-list 都 display:none），页面上根本没有
+// 那两个词，读者（和读屏）指不到东西。收口的做法是去掉方位词、指向恒在的
+// 图标（文件夹加号），并禁掉又一次把方位词写回去的可能。
+func TestWeb_PageCopyFollowsLayout(t *testing.T) {
+	page := string(webPage)
+	// ① 文案指向的入口在两种侧栏态下都存在：#side-ws-new 是文件夹加号钮
+	// （展开态 26px、轨里 40px），title/aria-label 是「新建工作区」。
+	for _, need := range []string{
+		`id="side-ws-new"`,
+		`title="新建工作区：从可浏览目录里选一个绑定（同名工作区直接切换）"`,
+		"未绑定——点文件夹加号图标选一个目录",
+		"还没有工作区，点文件夹加号图标选一个目录开始。",
+		"还没绑定工作区，点文件夹加号图标选一个目录",
+		"选一个目录绑定后，这里就能开始对话。", // 空态副句不再承诺「左栏也会列出」
+	} {
+		if !strings.Contains(page, need) {
+			t.Errorf("embedded page lost the layout-neutral copy %q (c_b6chn5)", need)
+		}
+	}
+	// 界面上没有的词不许再被说成界面位置：W6-2 之后侧栏头是「＋ 新会话」+
+	// 三枚图标钮，没有「新建」二字；轨里连「新会话」也只剩图标。
+	for _, gone := range []string{
+		"点左栏",
+		"左栏的「新建」",
+		"点侧栏头的「新建」",
+		"先在左栏新建",
+		"左栏也会列出你用过的工作区",
+	} {
+		if strings.Contains(page, gone) {
+			t.Errorf("page still points at a place that no longer shows that word: %q (c_b6chn5)", gone)
+		}
+	}
+}
+
+// TestWeb_PageMemoryPickerNarrow pins the ④ half of c_b6chn5: the memory
+// project picker carried「id · N 条 · 日期」at every width, but ≤480px the
+// .pane-bar select is capped at 38vw (148px at 390px) while that label needs
+// ~182px — the tail got clipped and 「11-22」 read as 「1 条」. Narrow widths
+// now get the dateless label (131px, fits), and crossing the breakpoint
+// re-renders the SAME fetched rows instead of refetching.
+func TestWeb_PageMemoryPickerNarrow(t *testing.T) {
+	page := string(webPage)
+	for _, need := range []string{
+		"const paneNarrowMQ = window.matchMedia ? window.matchMedia('(max-width: 480px)') : null;",
+		"function memOptLabel(p) {",
+		"return (paneNarrowMQ && paneNarrowMQ.matches) ? head : head + ' · ' + fmtDay(p.last_active_at);",
+		"function renderMemOpts() {",
+		"memProjects = res.projects || [];",
+		"renderMemOpts();",
+		"if (paneNarrowMQ) paneNarrowMQ.addEventListener('change', () => {",
+	} {
+		if !strings.Contains(page, need) {
+			t.Errorf("embedded page lost the narrow-picker piece %q (c_b6chn5)", need)
+		}
+	}
+	// 带日期的单行拼法必须只剩一处（memOptLabel 里那一条），否则又会长出
+	// 一处不受断点管的文案。
+	if got := strings.Count(page, "' · ' + p.memories + ' 条 ·"); got != 0 {
+		t.Errorf("page still builds the dated option label inline (%d×) — it must go through memOptLabel (c_b6chn5)", got)
+	}
+	// ④ 的宽屏基线不动：≤480px 的 38vw 上限仍在（本卡不靠放宽 select 解决，
+	// 那样会把「记忆」标题和条数挤没——实测 390px 下 select 撑到 184px 时
+	// 的计数右缘 161 > select 左缘）。
+	narrow, err := cssBlockAt(page, "@media (max-width: 480px)")
+	if err != nil {
+		t.Fatalf("page shape changed: %v", err)
+	}
+	if !strings.Contains(narrow, ".pane-bar select, #hk-filter { max-width: 38vw; }") {
+		t.Error("≤480px select cap changed — the picker fix is a label change, not a wider select (c_b6chn5)")
+	}
+}
