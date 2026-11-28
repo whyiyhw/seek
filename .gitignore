@@ -63,3 +63,9 @@ bench-*.json
 # butler reads it from the checkout's disk at merge time, so tracked or not
 # never affects the gates; a fresh clone simply lenient-skips. Never commit.
 .butler/
+
+# butler dispatch sessions write their close-out note here — a machine-local
+# scheduler artefact, never part of a branch (same standing as .butler/ above).
+# On 2026-11-27 a close-out "insurance" `git add -A` swept it into a drive
+# branch (c_pozbmd); the dispatcher names the path, git never needs it.
+.butler-commit.md

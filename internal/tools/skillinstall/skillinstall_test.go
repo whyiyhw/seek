@@ -39,7 +39,33 @@ func pinUserSkillsDir(t *testing.T) {
 	t.Setenv("SEEK_HOME", t.TempDir())
 }
 
+// pinStagingTmp points os.TempDir() at a per-test dir. skillmgr.Stage
+// creates its seek-skill-staging-* tree under os.TempDir(), so without
+// this every fetch-without-commit case below stages into the
+// developer's real $TMPDIR and leaves it there (7 dirs per run of this
+// package). Tests that never reach Stage don't need it.
+func pinStagingTmp(t *testing.T) {
+	t.Helper()
+	t.Setenv("TMPDIR", t.TempDir())
+}
+
+// fetchLocal runs skill_fetch on a local skill dir and returns the
+// staged result; the caller decides whether to commit.
+func fetchLocal(t *testing.T, src string) fetchResult {
+	t.Helper()
+	out, err := NewFetch().Execute(context.Background(), mustJSON(map[string]string{"source": src}))
+	if err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+	var fr fetchResult
+	if err := json.Unmarshal([]byte(out), &fr); err != nil {
+		t.Fatalf("unmarshal fetch result: %v", err)
+	}
+	return fr
+}
+
 func TestFetch_ProducesValidMetadata(t *testing.T) {
+	pinStagingTmp(t)
 	src := stageLocalSkill(t, "tiny-skill")
 
 	tool := NewFetch()
@@ -84,6 +110,7 @@ func TestFetch_MissingSource(t *testing.T) {
 }
 
 func TestFetch_InvalidSkillSource(t *testing.T) {
+	pinStagingTmp(t)
 	// A directory with no SKILL.md should fail validation cleanly —
 	// the LLM sees a clear "not a valid skill package" message
 	// rather than a stack trace.
@@ -133,6 +160,7 @@ func newAskPolicy(t *testing.T, ask *stubAskFn) *permission.Policy {
 
 func TestCommit_UserScope(t *testing.T) {
 	pinUserSkillsDir(t)
+	pinStagingTmp(t)
 	src := stageLocalSkill(t, "happy-skill")
 
 	// Fetch first so we have a real staging path.
@@ -187,9 +215,16 @@ func TestCommit_UserScope(t *testing.T) {
 	if !strings.Contains(out, "user scope") {
 		t.Errorf("result should declare 'user scope' explicitly, got:\n%s", out)
 	}
+	// The staging tree is spent: nothing may stay behind in os.TempDir().
+	// Commit only renames pkg/ away — the seek-skill-staging-<n>/ parent
+	// is the tool's to remove, and this path used to leak one per install.
+	if entries, _ := os.ReadDir(os.TempDir()); len(entries) != 0 {
+		t.Errorf("staging dir must be removed after a successful commit, found: %v", entries)
+	}
 }
 
 func TestCommit_ProjectScope(t *testing.T) {
+	pinStagingTmp(t)
 	// Project scope lands the skill under <cwd>/.seek/skills/<name>/
 	// instead of ~/.seek/skills/. Run the commit from a tempdir so
 	// we don't actually write into the seek repo we're testing in.
@@ -237,10 +272,14 @@ func TestCommit_ProjectScope(t *testing.T) {
 	if !strings.Contains(out, "project scope") {
 		t.Errorf("result should declare 'project scope' explicitly, got:\n%s", out)
 	}
+	if entries, _ := os.ReadDir(os.TempDir()); len(entries) != 0 {
+		t.Errorf("staging dir must be removed after a successful commit, found: %v", entries)
+	}
 }
 
 func TestCommit_RejectsMissingScope(t *testing.T) {
 	pinUserSkillsDir(t)
+	pinStagingTmp(t)
 	src := stageLocalSkill(t, "needs-scope")
 
 	fetchOut, _ := NewFetch().Execute(context.Background(),
@@ -268,6 +307,7 @@ func TestCommit_RejectsMissingScope(t *testing.T) {
 
 func TestCommit_RejectsInvalidScope(t *testing.T) {
 	pinUserSkillsDir(t)
+	pinStagingTmp(t)
 	src := stageLocalSkill(t, "bad-scope-skill")
 
 	fetchOut, _ := NewFetch().Execute(context.Background(),
@@ -297,6 +337,7 @@ func TestCommit_RejectsInvalidScope(t *testing.T) {
 
 func TestCommit_Denied(t *testing.T) {
 	pinUserSkillsDir(t)
+	pinStagingTmp(t)
 	src := stageLocalSkill(t, "denied-skill")
 
 	fetchOut, err := NewFetch().Execute(context.Background(),
@@ -329,6 +370,11 @@ func TestCommit_Denied(t *testing.T) {
 	if entries, _ := os.ReadDir(userSkills); len(entries) > 0 {
 		t.Errorf("user skills dir should be empty after denial, got: %v", entries)
 	}
+	// A denial is not a verdict on the staging tree: the model may ask
+	// again or switch scope, and that retry needs the staged files.
+	if _, err := os.Stat(fr.StagingPath); err != nil {
+		t.Errorf("staging dir must survive a denied commit (a retry needs it): %v", err)
+	}
 }
 
 func TestCommit_RejectsBogusStagingPath(t *testing.T) {
@@ -356,6 +402,7 @@ func TestCommit_RejectsBogusStagingPath(t *testing.T) {
 
 func TestCommit_NameMismatch(t *testing.T) {
 	pinUserSkillsDir(t)
+	pinStagingTmp(t)
 	src := stageLocalSkill(t, "real-name")
 
 	fetchOut, _ := NewFetch().Execute(context.Background(),
@@ -383,6 +430,62 @@ func TestCommit_NameMismatch(t *testing.T) {
 	}
 	if ask.called {
 		t.Errorf("approval prompt fired despite name mismatch — should be caught before the user is asked")
+	}
+	// Refused before any mutation: the staged package is untouched, so
+	// the caller can re-commit with the right name.
+	if _, statErr := os.Stat(filepath.Join(fr.StagingPath, "SKILL.md")); statErr != nil {
+		t.Errorf("staged SKILL.md must survive a refused commit: %v", statErr)
+	}
+}
+
+// TestCommit_StagingParentRemovedOnlyOnSuccess pins the cleanup contract
+// as a whole: a fetch leaves exactly one staging parent behind until a
+// commit succeeds, and nothing else in os.TempDir() ever appears.
+func TestCommit_StagingParentRemovedOnlyOnSuccess(t *testing.T) {
+	pinUserSkillsDir(t)
+	pinStagingTmp(t)
+	src := stageLocalSkill(t, "lifecycle-skill")
+
+	fr := fetchLocal(t, src)
+	parent := filepath.Dir(fr.StagingPath)
+	stagingParents := func() []string {
+		entries, _ := os.ReadDir(os.TempDir())
+		var names []string
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		return names
+	}
+	if got := stagingParents(); len(got) != 1 || !strings.HasPrefix(got[0], "seek-skill-staging-") {
+		t.Fatalf("after fetch: want exactly one seek-skill-staging-* dir, got %v", got)
+	}
+
+	ask := &stubAskFn{allow: false}
+	commit := NewCommit(newAskPolicy(t, ask))
+	args := map[string]any{
+		"staging_path": fr.StagingPath,
+		"name":         fr.Name,
+		"source":       fr.Source,
+		"scope":        "user",
+	}
+	if _, err := commit.Execute(context.Background(), mustJSON(args)); !errors.Is(err, permission.ErrDenied) {
+		t.Fatalf("denied commit: want ErrDenied, got %v", err)
+	}
+	if _, err := os.Stat(parent); err != nil {
+		t.Fatalf("staging parent must survive a denied commit: %v", err)
+	}
+
+	ask.allow = true
+	if _, err := commit.Execute(context.Background(), mustJSON(args)); err != nil {
+		t.Fatalf("retry commit: %v", err)
+	}
+	if got := stagingParents(); len(got) != 0 {
+		t.Errorf("after a successful commit os.TempDir() must hold no staging dir, got %v", got)
+	}
+	// The retry landed the package exactly once.
+	installed := filepath.Join(os.Getenv("SEEK_HOME"), "skills", "lifecycle-skill", "SKILL.md")
+	if _, err := os.Stat(installed); err != nil {
+		t.Errorf("installed SKILL.md missing after retry: %v", err)
 	}
 }
 
