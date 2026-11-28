@@ -100,6 +100,12 @@ ws.onmessage = e => {
     m.error ? rej(new Error(m.error.message)) : res(m.result);
   }
 };
+// 通用 CDP 调用（W6-7 起用到：量面板几何前把视口定到桌面宽）。
+const cdp = (method, params) => new Promise((res, rej) => {
+  const id = ++seq;
+  pending.set(id, { res, rej });
+  ws.send(JSON.stringify({ id, method, params }));
+});
 async function evalJS(expr) {
   const r = await new Promise((res, rej) => {
     const id = ++seq;
@@ -142,6 +148,18 @@ const snapshot = () => evalJS(`(() => ({
 }))()`);
 const clickSel = sel => evalJS(`(document.querySelector(${JSON.stringify(sel)})||{click(){}}).click(),'ok'`);
 const clickRow = sid => clickSel(`#ag-list .ag-row[data-sid="${sid}"]`);
+// 面板归位后的形状（W6-7 c_w74tuo）：列表 / 详情的几何 + 选中态投影（.has-sel）。
+const geo = () => evalJS(`(() => {
+  const sec = document.getElementById('agents'), l = document.getElementById('ag-list'),
+    d = document.getElementById('ag-detail'), b = document.getElementById('agents-body');
+  const lr = l.getBoundingClientRect(), dr = d.getBoundingClientRect(),
+    pad = parseFloat(getComputedStyle(b).paddingLeft);
+  return { sel: sec.classList.contains('has-sel'), ld: getComputedStyle(l).display,
+    dd: getComputedStyle(d).display, lw: Math.round(lr.width), dw: Math.round(dr.width),
+    gap: Math.round(dr.left - lr.right), col: b.clientWidth - 2 * pad,
+    back: getComputedStyle(document.querySelector('#ag-detail .pane-back')).display,
+    cnt: document.getElementById('ag-cnt').textContent,
+    dot: getComputedStyle(document.querySelector('.ag-badge'), '::before').width }; })()`);
 const send = text => evalJS(
   `fetch(q('/msg'), { method: 'POST',
      headers: { 'Content-Type': 'application/json', 'X-Seek-Conversation': CONV },
@@ -217,6 +235,15 @@ try {
     s.rows.every(r => r.status === r.badgeStatus && r.status !== ''), JSON.stringify(s.rows));
   ck('后台行带 bg· 前缀', by['bg-1'].badgeText.includes('bg·'), by['bg-1'].badgeText);
   ck('行描述来自索引', by['done-1'].desc === 'find handlers', by['done-1'].desc);
+  // W6-7：未选中 = 只有列表，占满 768 阅读列，详情不出场（旧的半屏占位退役）。
+  // 几何要在桌面宽量：脚本缺省窗口不到 1200，会落进「详情替换列表」的窄屏口径
+  // （那一档由 web-mobile 无头验），这里起把视口定在 1440。
+  await cdp('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+  await delay(300);
+  const g0 = await geo();
+  ck('未选中：详情不出场（没有半屏占位）', !g0.sel && g0.dd === 'none', JSON.stringify(g0));
+  ck('未选中：列表占满 768 阅读列', g0.ld !== 'none' && g0.lw === 768 && g0.col === 768, JSON.stringify(g0));
+  ck('状态 = 6px 圆点 + 文字', g0.dot === '6px', g0.dot);
 } catch (e) { ck('进面板 + 徽标', false, e.message); await dump(); }
 
 // 景 2：详情展开 —— 字段表 + transcript 尾（与 /subagents?sub= 同信息量）。
@@ -260,6 +287,35 @@ try {
   ck('定时器自己拉了一次快照（agLoads 递增）', ticked.loads > before.loads,
     `before=${before.loads} after=${ticked.loads}`);
 } catch (e) { ck('刷新（事件驱动 + 定时）', false, e.message); await dump(); }
+
+// 景 3b：归位后的形状（W6-7）——选中后（1440 宽 ≥1200）列表 320 + 详情并排、
+// 合计仍在 768 列、「返回列表」不出场；<1200px 详情替换列表、出「返回列表」；
+// 面板头的关闭钮 = 回对话（togglePane 的已开即关）。
+trace('景 3b：归位形状');
+try {
+  const g1 = await geo();
+  ck('选中（1440 宽）：列表 320 + 详情并排，合计仍在 768 列',
+    g1.sel && g1.ld !== 'none' && g1.dd !== 'none' && g1.lw === 320 && g1.dw === 432 && g1.gap === 16, JSON.stringify(g1));
+  ck('选中（1440 宽）：不出「返回列表」', g1.back === 'none', g1.back);
+  ck('面板头条数 = 行数', g1.cnt === '4 条', g1.cnt);
+  // 窄屏（<1200px）：详情替换列表、顶上出「返回列表」，点它回列表。
+  await cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
+  await delay(400);
+  const g2 = await geo();
+  ck('选中（390 宽）：详情替换列表、满列、出「返回列表」',
+    g2.sel && g2.ld === 'none' && g2.dd !== 'none' && g2.back !== 'none' && g2.dw === g2.col, JSON.stringify(g2));
+  await clickSel('#ag-detail .pane-back');
+  const g3 = await geo();
+  ck('返回列表：回未选中（详情不出场、列表满列）', !g3.sel && g3.ld !== 'none' && g3.dd === 'none' && g3.lw === g3.col, JSON.stringify(g3));
+  await cdp('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+  await delay(300);
+  await clickRow('bg-1');   // 恢复选中态
+  await clickSel('#agents .pane-x');
+  const s = await until('关闭钮回对话', s => !s.agentsView && s.formShown, 5000);
+  ck('面板头关闭钮 = 回对话（定时器同停）', s.formShown && !s.browsing && !s.timerOn, '');
+  await clickSel('#agents-btn');   // 重开给景 4（它点 #agents-btn 回聊天）
+  await until('面板重开', s => s.agentsView, 5000);
+} catch (e) { ck('归位形状', false, e.message); await dump(); }
 
 // 景 4：回聊天 —— 旧端点与聊天面零回归（验收 ③ 的 UI 半边）。
 trace('景 4：回聊天');

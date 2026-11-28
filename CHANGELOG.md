@@ -43,6 +43,7 @@
 - c_mo7quv：W6-5 web 点会话即进入：只读浏览器与「继续此会话」退役，历史渲进主转录区，首条消息时懒 /resume
 - c_7wyr6t：seek·卫生：.gitignore 收 .butler-commit.md + 修 skill 两步装的暂存目录泄漏（skill_commit 成功后父目录不删、测试打真 TMPDIR）
 - c_ekuuof：W6-6 web 设置改 dsh 式居中模态框：左 tab（通用/服务配置/关于）+ 右行式表单
+- c_w74tuo：W6-7 web 资产面板归位：记忆/统计/后台/审计用会话头同款标题栏 + 单列列表，去掉空荡的左右分栏与斜体占位
 
 ## v0.13.1（2026-11-24）
 

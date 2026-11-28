@@ -724,7 +724,7 @@
   #side-nav .ic { width: 16px; height: 16px; flex: none; }
   #side-nav button:hover:not(.cur) { background: var(--seek-hover); }
   #set-btn { margin-top: 4px; border-top: 1px solid var(--seek-line); }
-  #side-err { padding: 6px 12px; }
+  #side-err { padding: 6px 12px; text-align: left; font-size: 13px; }
   .ws-more { display: block; width: calc(100% - 24px); margin: 4px 12px 8px;
              padding: 6px; border-radius: 8px; font-size: 13px;
              background: var(--seek-soft); }
@@ -867,104 +867,101 @@
   .ws-head .ws-acts .btn-icon.sm { width: 20px; height: 20px; }
   .ws-head .ws-acts .ic { width: 12px; height: 12px; }
   .ws-group .sess-row { padding-left: 24px; }
-  .pane-hint { color: var(--seek-fg-dim); font-style: italic; padding: 14px; }
-
-  /* ---- 任务面板（W3.3 编排 P1 可视化）---- */
-  /* 与三个资产面板同一开合闸（browsing=隐聊天 + 恰好一个 *-view 亮面板），
-     故这里只负责「本面板亮」；隐聊天/互斥由 body.browsing 与各 body:not(.x-view)
-     选择器承担（W4.5 拆分后的口径）。 */
+  /* ---- 资产面板（W6-7 c_w74tuo）：记忆 / 统计 / 后台 / 审计同一副形状 ----
+     头与 #conv-head 同款（.pane-bar：名 16/600 + 条数 13 三级色 | 工具 + 关闭钮 返回
+     对话）；内容进 768 阅读列（内边距 max(32px,(100%−768px)/2)，与 #hist 同刻）。
+     记忆 / 后台：未选中只有列表，行同侧栏会话行（40 / r8 / 主文 14 + 右侧 12
+     三级色 / 悬停底）；选中（面板挂 .has-sel）后 ≥1200px 列表 320 + 详情并排
+     （合计仍 768），更窄时详情替换列表、顶上出「‹ 返回列表」。空态一行居中。 */
+  .pane { flex: 1; display: flex; flex-direction: column; min-height: 0; }
   #agents { flex: 1; display: none; flex-direction: column; min-height: 0; }
   body.agents-view #agents { display: flex; }
-  #agents-body { flex: 1; display: flex; min-height: 0; }
-  #ag-list { width: 380px; flex: none; overflow-y: auto;
-             border-right: 1px solid var(--seek-line); }
-  .ag-row { display: block; width: 100%; text-align: left; border-radius: 0;
-            border-bottom: 1px solid var(--seek-line-2); padding: 8px 12px;
-            background: transparent; }
-  .ag-row.cur { background: var(--seek-sel); }
-  .ag-row .t1 { display: flex; gap: 6px; align-items: baseline; }
-  .ag-row .desc { flex: 1; overflow: hidden; text-overflow: ellipsis;
-                  white-space: nowrap; }
-  .ag-row .t2 { display: block; color: var(--seek-fg-dim); font-size: 12px; margin-top: 2px; }
-  /* 选中行的 t2 升主文色（c_lbys7d）：同 .sess-row.cur——选中层压 dim 的余量
-     薄，升到主文色后两主题都留足。 */
-  .ag-row.cur .t2 { color: var(--seek-fg); }
-  .ag-badge { display: inline-flex; align-items: center; gap: 2px;
+  body:not(.mem-view) #memory, body:not(.stat-view) #stats,
+  body:not(.hooks-view) #hooks { display: none; }
+  .pane-bar { flex: none; display: flex; align-items: center; gap: 10px; min-height: 44px;
+              padding: 12px 20px 0; border-bottom: 1px solid var(--seek-line); }
+  .pane-bar .ch-l { gap: 8px; }
+  .pane-title { flex: none; font-size: 16px; line-height: 24px; font-weight: 600; white-space: nowrap; }
+  .pane-bar .cnt { color: var(--seek-fg-dim); font-size: 13px; white-space: nowrap; }
+  .pane-bar .ch-r { flex: none; display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .pane-bar select, #hk-filter { background: var(--seek-inset); color: inherit;
+              border: 1px solid var(--seek-line); border-radius: 8px; padding: 4px 8px;
+              font: inherit; min-width: 0; max-width: 280px; }
+  .pane-hint { color: var(--seek-fg-dim); font-size: 14px; line-height: 20px;
+               padding: 32px 16px; text-align: center; }
+  .pane-hint.ws-empty { padding: 10px 14px; text-align: left; font-size: 13px; }
+  /* 768 列的定位盒：记忆 / 后台（列表 + 详情）。 */
+  #mem-body, #agents-body { flex: 1; display: flex; justify-content: center; gap: 16px;
+                            min-height: 0; padding: 16px max(32px, calc((100% - 768px) / 2)); }
+  #mem-list, #ag-list { flex: 1; min-width: 0; overflow-y: auto; display: flex;
+                        flex-direction: column; gap: 2px; }
+  #mem-detail, #ag-detail { display: none; flex: 1; flex-direction: column; min-width: 0;
+                            min-height: 0; overflow-y: auto; }
+  .has-sel #mem-list, .has-sel #ag-list { flex: none; width: 320px; }
+  .has-sel #mem-detail, .has-sel #ag-detail { display: flex; }
+  .pane-back { display: none; align-self: flex-start; margin-bottom: 6px; }
+  @media (max-width: 1199px) {
+    .has-sel #mem-list, .has-sel #ag-list { display: none; }
+    .has-sel .pane-back { display: inline-flex; }
+  }
+  /* 行（记忆 / 后台同一款，= 侧栏会话行）：主文 14 左、元信息 12 三级色右。 */
+  .mem-row, .ag-row { display: flex; align-items: center; gap: 10px; width: 100%; height: 40px;
+                      flex: none; padding: 0 8px; border-radius: 8px; text-align: left;
+                      background: transparent; }
+  .mem-row:hover, .ag-row:hover { background: var(--seek-hover); }
+  .mem-row.cur, .ag-row.cur { background: var(--seek-sel); }
+  .mem-row .t1, .ag-row .t1 { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px;
+                              overflow: hidden; }
+  .mem-row .t1 .nm, .ag-row .t1 .desc { min-width: 0; overflow: hidden; text-overflow: ellipsis;
+                                        white-space: nowrap; }
+  .mem-row .t1 .ic { width: 13px; height: 13px; color: var(--seek-fg-dim); flex: none; }
+  /* 元信息列可收缩到 46% 后按 ellipsis 折；选中行升主文色（c_lbys7d）。 */
+  .mem-row .t2, .ag-row .t2 { flex: none; max-width: 46%; display: flex; align-items: center;
+                              gap: 3px; color: var(--seek-fg-dim); font-size: 12px;
+                              white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mem-row .t2 .tx { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mem-row .t2 .ic { width: 12px; height: 12px; color: var(--seek-warn); flex: none; }
+  .mem-row.cur .t2, .ag-row.cur .t2 { color: var(--seek-fg); }
+  /* 状态 = 6px 圆点 + 文字：圆点走状态色（运行品牌蓝 / 成功绿 / 失败红），文字
+     留主文色——品牌蓝在白底只有 4.3:1，做文字不够 AA，做图形（≥3:1）够。
+     类名仍是断言面（无头读 class / dataset.status）。 */
+  .ag-badge { display: inline-flex; align-items: center; gap: 6px;
               font-size: 12px; flex: none; white-space: nowrap; }
+  .ag-badge::before { content: ''; width: 6px; height: 6px; border-radius: 999px;
+                      background: var(--dot); }
+  .ag-badge.st-running { --dot: var(--seek-brand); }
+  .ag-badge.st-done    { --dot: var(--seek-ok); }
+  .ag-badge.st-error   { --dot: var(--seek-err); }
   .ag-badge .ic { width: 10px; height: 10px; }
-  /* 三态徽标（卡 c_4doebx）：running/done/error 走类名而不是内联色——
-     颜色一处定义，无头验收读 class/dataset.status 即断言面。值走 token
-     （merge main 2026-11-20）：暗色谱 hex 在亮色主题下只有 ~2:1。 */
-  .ag-badge.st-running { color: var(--seek-warn); }
-  .ag-badge.st-done    { color: var(--seek-ok); }
-  .ag-badge.st-error   { color: var(--seek-err); }
-  #ag-detail { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-  #ag-meta { padding: 6px 14px; border-bottom: 1px solid var(--seek-line);
-             color: var(--seek-fg-dim); white-space: nowrap; overflow: hidden;
-             text-overflow: ellipsis; }
+  #ag-meta { padding: 4px 0 8px; color: var(--seek-fg-dim); font-size: 13px;
+             white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   /* 详情字段表（卡 c_4doebx）：与 /subagents?sub= 同信息量的可读面。 */
-  #ag-fields { padding: 6px 14px; border-bottom: 1px solid var(--seek-line); }
+  #ag-fields { padding: 8px 0; }
   #ag-fields:empty { display: none; }
-  .ag-field { display: flex; gap: 10px; font-size: 12px; padding: 1px 0; }
+  .ag-field { display: flex; gap: 10px; font-size: 12px; padding: 2px 0; }
   .ag-field .k { color: var(--seek-fg-dim); flex: none; min-width: 96px; }
   .ag-field .v { color: var(--seek-fg); overflow: hidden; text-overflow: ellipsis;
                  white-space: nowrap; }
-  #ag-last { flex: 1; overflow-y: auto; padding: 14px; }
-
-  /* ---- 记忆浏览器 + 统计视图（W4.5 资产面 UI·二）---- */
-  .pane { flex: 1; display: flex; flex-direction: column; min-height: 0; }
-  body:not(.mem-view) #memory { display: none; }
-  body:not(.stat-view) #stats { display: none; }
-  .pane-head { display: flex; gap: 8px; align-items: center; padding: 6px 14px;
-               border-bottom: 1px solid var(--seek-line); }
-  .pane-head select { background: var(--seek-inset); color: inherit; border: 1px solid var(--seek-line);
-                      border-radius: 8px; padding: 4px 8px; font: inherit;
-                      max-width: 60%; }
-  .pane-head .cnt { color: var(--seek-fg-dim); font-size: 12px; }
-  #mem-body { flex: 1; display: flex; min-height: 0; }
-  #mem-list { width: 320px; flex: none; overflow-y: auto;
-              border-right: 1px solid var(--seek-line); }
-  .mem-row { display: block; width: 100%; text-align: left; border-radius: 0;
-             border-bottom: 1px solid var(--seek-line-2); padding: 8px 12px;
-             background: transparent; }
-  .mem-row.cur { background: var(--seek-sel); }
-  .mem-row .t1 { display: flex; align-items: center; gap: 4px; min-width: 0;
-                 overflow: hidden; }
-  .mem-row .t1 .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .mem-row .t1 .ic { width: 12px; height: 12px; color: var(--seek-fg-dim); flex: none; }
-  .mem-row .t2 { display: flex; align-items: center; gap: 3px; color: var(--seek-fg-dim);
-                 font-size: 12px; margin-top: 2px; min-width: 0; }
-  .mem-row .t2 .tx { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .mem-row .t2 .ic { width: 12px; height: 12px; color: var(--seek-warn); flex: none; }
-  /* 选中行 t2 升主文色（c_lbys7d）：选中层压 dim 的余量薄，升到主文色同
-     .sess-row.cur。.t2 .ic 的 warn 是图标位（1.4.11 的 3:1 门槛），
-     它直接声明在 svg 上，不受父级这条 color 影响，语义色保留。 */
-  .mem-row.cur .t2 { color: var(--seek-fg); }
-  #mem-detail { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-  /* 未选条目时元信息行与标签行是空的：不兜底会留下两条只有 padding 与下边框
-     的空带（2026-11-27 复核实录）。 */
+  #ag-last { flex: none; padding: 8px 0 16px; }
+  /* 未选条目时元信息行与标签行是空的：不兜底会留下两条只有 padding 的空带
+     （2026-11-27 复核实录）。 */
   #mem-meta:empty, #mem-tags:empty { display: none; }
-  #mem-meta { padding: 6px 14px; border-bottom: 1px solid var(--seek-line); color: var(--seek-fg-dim); }
-  #mem-tags { padding: 4px 14px; border-bottom: 1px solid var(--seek-line); }
+  #mem-meta { padding: 4px 0 8px; color: var(--seek-fg-dim); font-size: 13px; }
+  #mem-tags { padding: 4px 0 8px; }
   #mem-tags .chip { display: inline-block; background: var(--seek-panel); border: 1px solid var(--seek-line);
                     border-radius: 999px; padding: 0 8px; margin: 2px 4px 2px 0;
                     font-size: 12px; color: var(--seek-fg-soft); }
-  #mem-content { flex: 1; overflow-y: auto; padding: 14px;
-                 white-space: pre-wrap; word-break: break-word; }
-  /* 统计面板节奏（c_jf3grt）：卡片间距/内边距原本靠每张卡 12px margin 堆，
-     末卡还多一截尾巴、三张快照卡竖排到 1/3 屏以下。改成「容器管间隙、
-     卡不管外边距」的单一节奏（column gap 12 + 面板 padding 14，与设置面板
-     同刻），三张快照卡用 auto-fit 网格——宽屏一行排开、390px 自然落回
-     单列（minmax 下限 220px）。 */
-  #stat-body { flex: 1; overflow-y: auto; padding: 14px;
-               display: flex; flex-direction: column; gap: 12px; }
-  .stat-card { background: var(--seek-soft); border-radius: 8px; padding: 12px 14px; }
+  #mem-content { padding: 8px 0 16px; white-space: pre-wrap; word-break: break-word; }
+  /* 统计：卡片走层色（panel）、r=12、无粗边框；容器管间隙、卡不管外边距
+     （c_jf3grt 的单一节奏），auto-fit 网格 390px 自然落回单列。 */
+  #stat-body { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 12px;
+               padding: 16px max(32px, calc((100% - 768px) / 2)); }
+  .stat-card { background: var(--seek-panel); border-radius: 12px; padding: 14px 16px; }
   #stat-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
                 gap: 12px; align-items: start; }
-  #stat-cards > .pane-hint { grid-column: 1 / -1; padding: 0 2px; }
-  .stat-card h3 { margin: 0 0 8px; font-size: 14px; color: var(--seek-fg-soft); font-weight: 600; }
-  .stat-row { display: flex; justify-content: space-between; gap: 12px;
-              padding: 3px 0; }
+  #stat-cards > .pane-hint { grid-column: 1 / -1; }
+  .stat-card h3 { margin: 0 0 10px; font-size: 14px; line-height: 20px; color: var(--seek-fg-soft); font-weight: 600; }
+  .stat-row { display: flex; justify-content: space-between; gap: 12px; padding: 4px 0; }
   .stat-row .v { color: var(--seek-fg); font-variant-numeric: tabular-nums; }
   /* 成本数字走 --seek-usd（c_jf3grt）：命中率条/趋势的绿是「健康度」，
      钱不是健康度——同色会让「花了 $3」读成「缓存命得好」。 */
@@ -1042,8 +1039,8 @@
   .tbtn { color: var(--seek-fg-soft); background: var(--seek-panel);
           border-radius: 12px; padding: 2px 8px; font: inherit; font-size: 12px; }
   .tbtn.on { color: var(--seek-fg); background: var(--seek-sel); }
-  #trend-plot { position: relative; min-height: 96px; margin-top: 8px; }
-  #trend-plot svg { display: block; width: 100%; height: 96px; }
+  #trend-plot { position: relative; min-height: 130px; margin-top: 8px; }
+  #trend-plot svg { display: block; width: 100%; height: 130px; }
   .axis { stroke: var(--seek-line); stroke-width: 1; }
   .tline { fill: none; stroke: var(--seek-usd); stroke-width: 1.6; }
   .tline.tokens { stroke: var(--seek-fg); }
@@ -1120,10 +1117,11 @@
   #set-theme button:hover { background: var(--seek-hover); }
   #set-theme button.on { background: var(--seek-sel); color: var(--seek-fg); }
 
-  /* ---- hooks 审计面板（W5 c_xz2bey 实时审计视图）---- */
-  body:not(.hooks-view) #hooks { display: none; }
-  #hk-log { flex: 1; overflow-y: auto; padding: 8px 14px;
+  /* ---- hooks 审计面板（W5 c_xz2bey；W6-7 并入统一形状）：tail 行等宽 12/19，
+     空态与头部的其余文字无衬线。 ---- */
+  #hk-log { flex: 1; overflow-y: auto; padding: 12px max(32px, calc((100% - 768px) / 2));
             font-family: var(--seek-mono); font-size: 12px; line-height: 19px; }
+  #hk-log .pane-hint { font-family: var(--seek-sans); }
   .hk-row { display: flex; gap: 10px; white-space: nowrap; }
   .hk-row .hk-ts { color: var(--seek-fg-dim); flex: none; }
   .hk-row .hk-hook { color: var(--seek-ok); flex: none; max-width: 180px;
@@ -1131,10 +1129,7 @@
   .hk-row .hk-ev { color: var(--seek-warn); flex: none; }
   .hk-row .hk-rest { color: var(--seek-fg-soft); overflow: hidden; text-overflow: ellipsis; }
   .hk-row.denied .hk-rest, .hk-row.denied .hk-ev { color: var(--seek-err); }
-  #hk-cnt { cursor: default; }
-  #hk-cnt.fresh { color: var(--seek-warn); cursor: pointer; }
-  #hk-pause { padding: 4px 12px; font-size: 13px; }
-  #hk-pause.held { background: var(--seek-sel); }
+  #hk-filter { flex: 0 1 200px; width: 200px; }
 
   /* ---- 390px 手机宽响应式（W5 卡 c_lqtt2m）----
      单一 ≤480px 断点管全部窄屏降级（640px 块只管输入弹层，互不吞）。
@@ -1164,11 +1159,18 @@
       width: min(300px, 84vw); box-shadow: var(--seek-shadow);
     }
     body:not(.side-collapsed) #side-scrim { display: block; }
-    /* 资产面板同款单栏化：记忆/后台的列表列（320/380px 定宽）在 390px
-       会把详情列挤没——上下堆叠：列表 ≤38vh、详情占余，各自可滚 */
-    #mem-body, #agents-body { flex-direction: column; }
-    #mem-list, #ag-list { width: auto; flex: none; max-height: 38vh;
-                          border-right: 0; border-bottom: 1px solid var(--seek-line); }
+    /* 资产面板（W6-7）：头与 768 列收到 16px 边距，工具可缩；列表 / 详情的
+       「详情替换列表」已由 <1200px 一条口径管，这里不再单列。 */
+    .pane-bar { padding: 12px 16px 0; }
+    .pane-bar .ch-l { min-width: 0; }
+    .pane-bar select, #hk-filter { max-width: 38vw; }
+    /* 审计头在 390px 放不下「过滤框 + 带字的暂停钮 + 计数 + 关闭钮」：暂停钮
+       收成纯图标、过滤框再让一截，标题才不会被挤成一个字。 */
+    #hk-filter { max-width: 30vw; }
+    #hk-pause { width: 26px; height: 26px; padding: 0; }
+    #hk-pause span { display: none; }
+    #mem-body, #agents-body, #stat-body, #hk-log {
+      padding-left: 16px; padding-right: 16px; }
     /* 气泡放宽一档：单栏下代码块（pre 本就 overflow-x:auto，markdown
        卡同容器）多一截横向空间 */
     .msg.user .bub { max-width: 94%; }
@@ -1305,10 +1307,18 @@
       <div class="hero"><svg class="hero-mark" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 1.6 18.4 10 10 18.4 1.6 10Z" fill="currentColor"/></svg><span class="hero-t">seek</span></div>
       <div class="ce-x">新会话——直接输入消息开始；第一条发出时才真正开新会话。</div>
     </div>
-    <section id="agents">
+    <!-- 四个资产面板同一副形状（W6-7 c_w74tuo）：.pane-bar 头（名 + 条数 | 工具 +
+         关闭钮返回对话），内容进 768 阅读列；记忆 / 后台选中后详情才出场，窄屏顶上
+         出「‹ 返回列表」。开合闸仍是 body 的 *-view 类与 togglePane。 -->
+    <section id="agents" class="pane">
+      <div class="pane-bar">
+        <div class="ch-l"><span class="pane-title">后台</span><span class="cnt" id="ag-cnt"></span></div>
+        <div class="ch-r"><button class="btn-icon pane-x" type="button" data-pane="agents" title="返回对话" aria-label="返回对话"><svg class="ic" aria-hidden="true"><use href="#i-x"/></svg></button></div>
+      </div>
       <div id="agents-body">
         <div id="ag-list"></div>
         <div id="ag-detail">
+          <button class="pane-back" type="button" data-pane="agents">‹ 返回列表</button>
           <div id="ag-meta"></div>
           <div id="ag-fields"></div>
           <div id="ag-last"></div>
@@ -1316,13 +1326,14 @@
       </div>
     </section>
     <section id="memory" class="pane">
-      <div class="pane-head">
-        <select id="mem-proj" aria-label="项目"></select>
-        <span class="cnt" id="mem-cnt"></span>
+      <div class="pane-bar">
+        <div class="ch-l"><span class="pane-title">记忆</span><span class="cnt" id="mem-cnt"></span></div>
+        <div class="ch-r"><select id="mem-proj" aria-label="项目"></select><button class="btn-icon pane-x" type="button" data-pane="memory" title="返回对话" aria-label="返回对话"><svg class="ic" aria-hidden="true"><use href="#i-x"/></svg></button></div>
       </div>
       <div id="mem-body">
         <div id="mem-list"></div>
         <div id="mem-detail">
+          <button class="pane-back" type="button" data-pane="memory">‹ 返回列表</button>
           <div id="mem-meta"></div>
           <div id="mem-tags"></div>
           <div id="mem-content"></div>
@@ -1330,8 +1341,9 @@
       </div>
     </section>
     <section id="stats" class="pane">
-      <div class="pane-head">
-        <select id="stat-sess" aria-label="会话"></select>
+      <div class="pane-bar">
+        <div class="ch-l"><span class="pane-title">统计</span></div>
+        <div class="ch-r"><select id="stat-sess" aria-label="会话"></select><button class="btn-icon pane-x" type="button" data-pane="stats" title="返回对话" aria-label="返回对话"><svg class="ic" aria-hidden="true"><use href="#i-x"/></svg></button></div>
       </div>
       <div id="stat-body">
         <!-- 跨会话趋势（W5 卡 c_6xktw4）：近 N 会话的 tokens/$ 曲线 + cache
@@ -1349,11 +1361,15 @@
          ?topic=hooks（审计日志是全局的，无需 /bind），快照走 POST /rpc
          hooks/audit/tail；推送逐行追加，可暂停/按 hook 名过滤。 -->
     <section id="hooks" class="pane">
-      <div class="pane-head">
-        <input id="hk-filter" type="search" autocomplete="off"
-               placeholder="按 hook 名过滤…" aria-label="按 hook 名过滤审计行">
-        <button id="hk-pause" type="button" title="暂停/恢复实时追加（暂停期间仍积累，恢复时补齐）"><svg class="ic" aria-hidden="true"><use href="#i-pause"/></svg><span>暂停</span></button>
-        <span class="cnt" id="hk-cnt" title="显示行数"></span>
+      <div class="pane-bar">
+        <div class="ch-l"><span class="pane-title">审计</span></div>
+        <div class="ch-r">
+          <input id="hk-filter" type="search" autocomplete="off"
+                 placeholder="按 hook 名过滤…" aria-label="按 hook 名过滤审计行">
+          <button id="hk-pause" type="button" title="暂停/恢复实时追加（暂停期间仍积累，恢复时补齐）"><svg class="ic" aria-hidden="true"><use href="#i-pause"/></svg><span>暂停</span></button>
+          <span class="cnt" id="hk-cnt" title="显示行数"></span>
+          <button class="btn-icon pane-x" type="button" data-pane="hooks" title="返回对话" aria-label="返回对话"><svg class="ic" aria-hidden="true"><use href="#i-x"/></svg></button>
+        </div>
       </div>
       <div id="hk-log"></div>
     </section>
@@ -3548,7 +3564,7 @@ function renderSessRows() {
   if (!groups.length) {
     paneHint(sessList, allSessions.length || (bindData && bindData.length)
       ? '（没有匹配的工作区或会话）'
-      : '（还没有工作区）点侧栏头的「新建」选一个目录开始。');
+      : '还没有工作区，点侧栏头的「新建」选一个目录开始。');
     return;
   }
   // 全树行数帽：组头恒显，会话行按 30 条一页累加（跨组共享一个帽子，
@@ -4046,6 +4062,8 @@ const agList = document.getElementById('ag-list');
 const agMeta = document.getElementById('ag-meta');
 const agFields = document.getElementById('ag-fields');
 const agLast = document.getElementById('ag-last');
+const agCnt = document.getElementById('ag-cnt');
+const agentsEl = document.getElementById('agents');
 let agRows = [];      // 折叠行（GET 快照 + topic 推送合并后的当前态）
 let agOpen = null;    // 详情打开中的 sub_sid
 let topicES = null;   // 面板专用 SSE 连接（进入面板且已绑定时才开）
@@ -4076,6 +4094,14 @@ const panes = {
   agents:   { btn: agentsBtn, icon: 'tasks',    label: '后台', cls: 'agents-view',   load: loadAgentsPane },
   hooks:    { btn: hkBtn,     icon: 'activity', label: '审计', cls: 'hooks-view',    load: loadHooksPane },
 };
+// 面板头的关闭钮与「‹ 返回列表」（W6-7）：关闭钮走 togglePane 的「已开即关」；
+// 返回 = 清选中回列表（详情不出场，面板挂的 .has-sel 摘掉）。
+for (const b of document.querySelectorAll('.pane-x, .pane-back')) {
+  b.addEventListener('click', () => {
+    if (b.classList.contains('pane-x')) return togglePane(b.dataset.pane);
+    if (b.dataset.pane === 'memory') closeMem(); else closeAgent();
+  });
+}
 function closePanes() {
   const wasViewing = document.body.classList.contains('viewing');
   closeSettings({ restoreFocus: false });
@@ -4115,11 +4141,7 @@ function togglePane(name) {
 function loadAgentsPane() {
   syncTopicStream();
   loadAgents();
-  if (!agOpen) {
-    agMeta.textContent = '';
-    agFields.replaceChildren();
-    paneHint(agLast, '（在左侧选一条记录看末条输出）');
-  }
+  syncAgSel();   // 未选中 = 只有列表：详情不出场，不再摆一行占位
 }
 
 // 状态徽标三态（卡 c_4doebx）：running / done / error。颜色由类名承载
@@ -4165,7 +4187,8 @@ function agTokensText(t) {
 
 async function loadAgents() {
   if (!boundProjectID) {
-    return paneHint(agList, '还没绑定工作区——点左栏的「新建」选一个目录后再来');
+    agCnt.textContent = '';
+    return paneHint(agList, '还没绑定工作区，先在左栏新建或选一个目录');
   }
   agLoads++;
   try {
@@ -4177,15 +4200,25 @@ async function loadAgents() {
     if (agOpen) {
       const row = agRows.find(x => x.sub_sid === agOpen);
       if (row) renderAgDetail({ sub: row, last_assistant: null, _keepLast: true });
-      else { agOpen = null; agFields.replaceChildren(); paneHint(agLast, '（这条记录已不在索引里）'); }
+      else closeAgent();   // 这条记录已不在索引里：回列表
     }
   } catch (e) { paneHint(agList, 'subagent/list 失败：' + e.message); }
+}
+// 选中态只有 agOpen 一个真源：.has-sel 是它的投影（≥1200px 列表 + 详情并排，
+// 更窄时详情替换列表）。返回列表 = 清选中 + 清详情。
+function syncAgSel() { agentsEl.classList.toggle('has-sel', !!agOpen); }
+function closeAgent() {
+  agOpen = null; syncAgSel();
+  agMeta.textContent = '';
+  agFields.replaceChildren(); agLast.replaceChildren();
+  for (const row of agList.children) row.classList.remove('cur');
 }
 
 // 列表全量重画（面板量级几十行，无所谓）；textContent-only 纪律同聊天面。
 function renderAgList() {
   agList.replaceChildren();
-  if (!agRows.length) return paneHint(agList, '（还没有子代理记录）');
+  agCnt.textContent = agRows.length ? agRows.length + ' 条' : '';
+  if (!agRows.length) return paneHint(agList, '还没有子代理记录');
   for (const s of agRows) {
     const row = document.createElement('button');
     row.type = 'button';
@@ -4208,7 +4241,7 @@ function renderAgList() {
     }
     const desc = document.createElement('span');
     desc.className = 'desc';
-    desc.textContent = s.description || '（无描述）';
+    desc.textContent = s.description || '无描述';
     t1.appendChild(badge);
     t1.appendChild(desc);
     const t2 = document.createElement('span');
@@ -4228,7 +4261,7 @@ function renderAgList() {
 // transcript 末条 assistant，与旧 /subagents?sub= 同信息量（summary 单源：
 // 索引不带 summary，子自己的 transcript 才是全文）。
 async function openAgent(sid) {
-  agOpen = sid;
+  agOpen = sid; syncAgSel();
   for (const row of agList.children) row.classList.toggle('cur', row.dataset.sid === sid);
   agMeta.textContent = '读取中…';
   agFields.replaceChildren();
@@ -4283,7 +4316,7 @@ function renderAgDetail(d) {
   if (d._keepLast) return;
   if (d.last_assistant) renderBody(agLast, d.last_assistant);  // 纯 DOM 构建
   else paneHint(agLast, s.status === 'active'
-    ? '（子代理还在跑——尚无已落盘的输出）' : '（没有可读的 transcript）');
+    ? '子代理还在跑，还没有落盘的输出' : '没有可读的 transcript');
 }
 
 // topic 订阅生命周期：面板开着且已绑定才连；面板关掉即断；换绑项目后
@@ -4380,8 +4413,8 @@ function hkRender(stick) {
     hkLog.appendChild(hkRowEl(r));
     shown++;
   }
-  if (!rows.length) paneHint(hkLog, '（还没有 hooks 审计记录——hooks 在子进程 seek 里执行后落审计日志）');
-  else if (!shown) paneHint(hkLog, '（过滤后无匹配行）');
+  if (!rows.length) paneHint(hkLog, '还没有审计记录，hooks 在子进程 seek 里执行后会落到这里');
+  else if (!shown) paneHint(hkLog, '没有匹配的行');
   if (stick) { hkLog.scrollTop = hkLog.scrollHeight; hkUnread = 0; }
   hkUpdateCnt();
 }
@@ -4514,7 +4547,15 @@ const memList = document.getElementById('mem-list');
 const memMeta = document.getElementById('mem-meta');
 const memTags = document.getElementById('mem-tags');
 const memContent = document.getElementById('mem-content');
+const memoryEl = document.getElementById('memory');
 let memSel = null;  // {proj, name} 当前打开的详情；null = 未开
+// 选中态只有 memSel 一个真源：.has-sel 是它的投影（与后台的 syncAgSel 同构）。
+function setMemSel(v) { memSel = v; memoryEl.classList.toggle('has-sel', !!v); }
+function closeMem() {
+  setMemSel(null);
+  memMeta.textContent = ''; memTags.replaceChildren(); memContent.replaceChildren();
+  for (const row of memList.children) row.classList.remove('cur');
+}
 
 async function loadMemPane() {
   paneHint(memList, '加载中…');
@@ -4523,9 +4564,8 @@ async function loadMemPane() {
     memProj.replaceChildren();
     if (!res.projects.length) {
       memCnt.textContent = '';
-      memSel = null;
-      memMeta.textContent = ''; memTags.replaceChildren(); memContent.replaceChildren();
-      return paneHint(memList, '（磁盘上没有项目——先在终端里用 seek 跑一阵）');
+      closeMem();
+      return paneHint(memList, '磁盘上还没有项目，先用 seek 跑一阵');
     }
     for (const p of res.projects) {
       const opt = document.createElement('option');
@@ -4539,14 +4579,13 @@ async function loadMemPane() {
 }
 
 async function loadMemList(proj) {
-  memSel = null;
-  memMeta.textContent = ''; memTags.replaceChildren(); memContent.replaceChildren();
+  closeMem();
   paneHint(memList, '加载中…');
   try {
     const res = await rpc('memory/list', { project_id: proj });
     memList.replaceChildren();
     memCnt.textContent = res.memories.length + ' 条记忆';
-    if (!res.memories.length) return paneHint(memList, '（这个项目还没有记忆）');
+    if (!res.memories.length) return paneHint(memList, '这个项目还没有记忆');
     for (const m of res.memories) {
       const row = document.createElement('button');
       row.type = 'button';
@@ -4576,7 +4615,7 @@ async function loadMemList(proj) {
 }
 
 async function openMem(proj, name) {
-  memSel = { proj, name };
+  setMemSel({ proj, name });
   memMeta.textContent = '读取中…';
   memTags.replaceChildren();
   memContent.replaceChildren();
@@ -4598,7 +4637,7 @@ async function openMem(proj, name) {
       chip.textContent = '#' + t;
       memTags.appendChild(chip);
     }
-    renderBody(memContent, m.content || '（无正文）');
+    renderBody(memContent, m.content || '无正文');
   } catch (e) {
     memMeta.textContent = 'memory/get 失败：' + e.message;
   }
@@ -4634,7 +4673,7 @@ async function loadStatPane() {
     const res = await rpc('session/list', {});
     statSess.replaceChildren();
     if (!res.sessions.length) {
-      return paneHint(statCards, '（没有历史会话——先在终端里用 seek 跑一阵）');
+      return paneHint(statCards, '没有历史会话，先用 seek 跑几个');
     }
     for (const s of res.sessions) {
       const opt = document.createElement('option');
@@ -5007,13 +5046,17 @@ function renderTrend() {
   const pts = trend.data || [];
   trendPlot.replaceChildren();
   if (!pts.length) {
-    return paneHint(trendPlot, '（还没有历史会话——先在终端里跑几个会话）');
+    return paneHint(trendPlot, '还没有历史会话，先跑几个会话再来看');
   }
-  const H = 96, L = 30, R = 8, T = 4, B = 12;
+  // 每行 = 标签一行（上 14px）+ 折线带。标签原先在折线左端（x=2），而折线从
+  // x=30 就起笔——「成本 $0.0017」这类长标签被同色折线从数字中间划穿
+  //（W6-7 并入项 D）。挪到折线上方后，任何宽度都不相交；折线还拿回了左端
+  // 30px 的横向跨度（390px 下约多一成半）。
+  const BAND = 38, R = 4, T = 4, B = 12, LAB = 16;
+  const H = T + BAND * 3 + B;
   const W = Math.max(trendPlot.clientWidth || 300, 160);
-  const plotW = W - L - R;
-  const band = (H - T - B) / 3;
-  const x = i => (pts.length === 1 ? L + plotW / 2 : L + (plotW * i) / (pts.length - 1));
+  const plotW = W - R;
+  const x = i => (pts.length === 1 ? plotW / 2 : (plotW * i) / (pts.length - 1));
   const rows = [
     { cls: 'tokens', label: 'tok', v: p => (p.prompt_tokens || 0) + (p.completion_tokens || 0), f: fmtTok },
     { cls: '', label: '成本', v: p => p.cost_usd || 0, f: fmtUSD },   // fmtUSD 自带 $：标签别再写 '$'
@@ -5023,13 +5066,13 @@ function renderTrend() {
     role: 'img', 'aria-label': '近 ' + pts.length + ' 个会话的 tokens / 成本 / 缓存命中趋势' });
   const guides = [];
   rows.forEach((row, ri) => {
-    const y0 = T + band * ri, y1 = y0 + band - 8;
+    const y0 = T + BAND * ri + LAB, y1 = T + BAND * (ri + 1) - 2;
     const vals = pts.map(row.v);
     let max = row.cls === 'cache' ? 100 : Math.max.apply(null, vals);
     if (!(max > 0)) max = 1;
     const y = v => y1 - ((y1 - y0) * Math.min(Math.max(v, 0), max)) / max;
-    svg.appendChild(svgEl('line', { x1: L, y1: y1, x2: W - R, y2: y1, class: 'axis' }));
-    const name = svgEl('text', { x: 2, y: y0 + 9, class: 'tlab' });
+    svg.appendChild(svgEl('line', { x1: 0, y1: y1, x2: W - R, y2: y1, class: 'axis' }));
+    const name = svgEl('text', { x: 0, y: T + BAND * ri + 11, class: 'tlab' });
     name.textContent = row.label + ' ' + row.f(Math.max.apply(null, vals));
     svg.appendChild(name);
     const d = pts.map((p, i) => x(i) + ',' + y(row.v(p))).join(' ');
@@ -5049,7 +5092,7 @@ function renderTrend() {
   // x 轴两端的时间（中间点靠 tooltip 说）：MM-DD 手拼，不吃 locale
   // （c_jf3grt：toLocaleDateString 在窄图里可能挤成无分隔的一串数字）。
   const day = fmtDay;
-  const xl = svgEl('text', { x: L, y: H - 2, class: 'tlab' });
+  const xl = svgEl('text', { x: 0, y: H - 2, class: 'tlab' });
   xl.textContent = day(pts[0].at);
   svg.appendChild(xl);
   if (pts.length > 1) {
@@ -5058,8 +5101,8 @@ function renderTrend() {
     svg.appendChild(xr);
   }
   if (pts.length === 1) {
-    const one = svgEl('text', { x: L + plotW / 2, y: H - 2, class: 'tlab', 'text-anchor': 'middle' });
-    one.textContent = '（只有 1 个会话——折线需要 ≥2 个点）';
+    const one = svgEl('text', { x: plotW / 2, y: H - 2, class: 'tlab', 'text-anchor': 'middle' });
+    one.textContent = '只有 1 个会话，折线需要 ≥2 个点';
     svg.appendChild(one);
   }
 
@@ -5068,7 +5111,7 @@ function renderTrend() {
   const tip = document.createElement('div');
   tip.id = 'trend-tip';
   tip.hidden = true;
-  const hit = svgEl('rect', { x: L, y: T, width: plotW, height: H - T - B,
+  const hit = svgEl('rect', { x: 0, y: T, width: plotW, height: H - T - B,
     fill: 'transparent' });
   const show = i => {
     const p = pts[i];

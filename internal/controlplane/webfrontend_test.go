@@ -1375,6 +1375,72 @@ func TestWeb_PageLazyResumeW65(t *testing.T) {
 	}
 }
 
+// TestWeb_PageAssetPanelsW67 pins the W6-7 shape: memory / stats / agents /
+// hooks share one head (.pane-bar — name + count | tools + close) and put
+// their content in the 768 reading column; the list+detail panels show the
+// detail only while a row is selected (.has-sel is the projection of
+// memSel / agOpen), side by side from 1200px and as a replacement with a
+// back row below that; empty states are one centred line — no italic, no
+// full-width-parenthetical placeholders. Also the trend chart (merged-in
+// item D): row labels sit above their own line, never where it starts.
+func TestWeb_PageAssetPanelsW67(t *testing.T) {
+	page := string(webPage)
+	for _, need := range []string{
+		`<section id="agents" class="pane">`, // agents joins the .pane family
+		`data-pane="agents"`, `data-pane="memory"`, `data-pane="stats"`, `data-pane="hooks"`,
+		`<span class="pane-title">`,
+		"padding: 16px max(32px, calc((100% - 768px) / 2))", // the 768 column
+		".has-sel #mem-list, .has-sel #ag-list { flex: none; width: 320px; }",
+		".has-sel #mem-detail, .has-sel #ag-detail { display: flex; }",
+		"@media (max-width: 1199px) {",
+		".has-sel #mem-list, .has-sel #ag-list { display: none; }",
+		".has-sel .pane-back { display: inline-flex; }",
+		".mem-row, .ag-row {", "height: 40px;", // session-row look
+		".ag-badge::before { content: ''; width: 6px; height: 6px;", // status dot
+		".ag-badge.st-running { --dot: var(--seek-brand); }",
+		".ag-badge.st-done    { --dot: var(--seek-ok); }",
+		".ag-badge.st-error   { --dot: var(--seek-err); }",
+		"function syncAgSel()", "function closeAgent()",
+		"function setMemSel(v)", "function closeMem()",
+		"if (b.classList.contains('pane-x')) return togglePane(b.dataset.pane);",
+		"‹ 返回列表",
+		// Trend chart: label line above the plot strip of its own band.
+		"const BAND = 38, R = 4, T = 4, B = 12, LAB = 16;",
+		"{ x: 0, y: T + BAND * ri + 11, class: 'tlab' }",
+	} {
+		if !strings.Contains(page, need) {
+			t.Errorf("embedded page lost the W6-7 asset-panel piece %q (c_w74tuo)", need)
+		}
+	}
+	// All four panels wear the same head.
+	if got := strings.Count(page, `<div class="pane-bar">`); got != 4 {
+		t.Errorf("W6-7: want exactly 4 .pane-bar heads (memory/stats/agents/hooks), got %d", got)
+	}
+	// The retired middle-pane face of the panels.
+	for _, gone := range []string{
+		"（在左侧选一条记录",               // the half-screen placeholder
+		"font-style: italic",      // italic hints are gone page-wide
+		".pane-head",              // the old grey strip
+		"#ag-list { width: 380px", // fixed list column
+		"#mem-list { width: 320px",
+		"const H = 96, L = 30", // trend: label left of the line start
+		"{ x: 2, y: y0 + 9, class: 'tlab' }",
+	} {
+		if strings.Contains(page, gone) {
+			t.Errorf("page still carries the retired panel piece %q (W6-7 replaces, not stacks)", gone)
+		}
+	}
+	// Empty-state copy is a plain sentence, not a parenthetical aside.
+	for _, banned := range []string{
+		"（还没有", "（这个项目还没有", "（没有历史会话", "（过滤后", "（无正文）", "（只有 1 个会话",
+		"s.description || '（无描述）'", // the agents row default (chat tool lines keep theirs)
+	} {
+		if strings.Contains(page, banned) {
+			t.Errorf("panel empty state still wrapped in full-width parentheses: %q", banned)
+		}
+	}
+}
+
 // assertNoResidentGlobalKeydown pins the c_7lsngm discipline: the page keeps
 // no resident document/window keydown listener, so Escape is never hijacked
 // page-wide. The one sanctioned shape (W6-6 settings modal) arms a listener

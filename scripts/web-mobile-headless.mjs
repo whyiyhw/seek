@@ -15,7 +15,7 @@
 //   ellipsis → 每个面 documentElement.scrollWidth ≤ innerWidth
 //            （页面级零横向溢出）；设置面板 .set-row 纵向堆叠
 //            （computed flexDirection=column）、长路径值带 ellipsis；
-//   资产面 → 记忆/后台列表列纵向堆叠（不再 320/380px 挤没详情列）；
+//   资产面 → 记忆/后台未选中只列表、选中后详情替换列表并可返回（W6-7）；
 //   截图   → 两主题 × 聊天/抽屉/会话正文/设置/记忆/统计/后台/审计。
 //
 // 用法：node web-mobile-headless.mjs <页面URL> <截图输出目录> [--chrome <路径>]
@@ -310,8 +310,34 @@ for (const theme of ['dark', 'light']) {
   // 记忆 / 统计 / 后台 / 审计
   await evalJS(`document.getElementById('mem-btn').click()`);
   await delay(500);
-  ck(`${theme} 记忆列纵向堆叠`,
-    await evalJS(`getComputedStyle(document.getElementById('mem-body')).flexDirection`) === 'column');
+  // 资产面板（W6-7）：窄屏未选中 = 只有列表（满列宽），详情不出场；选中后详情
+  // 替换列表、顶上出「‹ 返回列表」；返回即回列表。旧的「列表叠在详情上」退役。
+  const memShape = await evalJS(`(async () => {
+    const sec = document.getElementById('memory'), list = document.getElementById('mem-list'),
+      det = document.getElementById('mem-detail');
+    const vis = e => getComputedStyle(e).display !== 'none';
+    const unselected = !vis(det) && !sec.classList.contains('has-sel')
+      && Math.abs(list.getBoundingClientRect().right
+        - (document.getElementById('mem-body').getBoundingClientRect().right - 16)) <= 1;
+    let row = null;   // 列表是两跳 rpc 之后才出行：最多等 3s
+    for (let i = 0; i < 30 && !row; i++) {
+      row = list.querySelector('.mem-row');
+      if (!row) await new Promise(r => setTimeout(r, 100));
+    }
+    if (!row) return { unselected, rowless: true, text: list.textContent.slice(0, 40), picked: false, back: false };
+    row.click(); await new Promise(r => setTimeout(r, 500));
+    const back = det.querySelector('.pane-back');
+    const picked = !vis(list) && vis(det) && sec.classList.contains('has-sel')
+      && back.getBoundingClientRect().height > 0;
+    back.click(); await new Promise(r => setTimeout(r, 300));
+    return { unselected, rowless: false, picked,
+      back: vis(list) && !vis(det) && !sec.classList.contains('has-sel') };
+  })()`);
+  // 本族夹具未绑定、也没有记忆数据（列表是空态一行），选中 → 详情替换 → 返回
+  // 的硬断言在 web-subagents 无头（它带行、也压 390 宽）；截图审查的
+  // manifest.panel_shape 另把两个宽度都记一遍。
+  ck(`${theme} 记忆窄屏：未选中只列表（详情不出场、列表满列）`,
+    memShape.unselected && (memShape.rowless || (memShape.picked && memShape.back)), JSON.stringify(memShape));
   const o5 = await evalJS(OVERFLOW_JS);
   ck(`${theme} 记忆面零横向溢出`, o5.doc <= 0, 'doc=' + o5.doc);
   await shot(`${theme === 'dark' ? '1' : '2'}5-memory`);
@@ -324,8 +350,32 @@ for (const theme of ['dark', 'light']) {
 
   await evalJS(`document.getElementById('agents-btn').click()`);
   await delay(400);
-  ck(`${theme} 后台列纵向堆叠`,
-    await evalJS(`getComputedStyle(document.getElementById('agents-body')).flexDirection`) === 'column');
+  const agShape = await evalJS(`(async () => {
+    const sec = document.getElementById('agents'), list = document.getElementById('ag-list'),
+      det = document.getElementById('ag-detail');
+    const vis = e => getComputedStyle(e).display !== 'none';
+    const unselected = !vis(det) && !sec.classList.contains('has-sel')
+      && Math.abs(list.getBoundingClientRect().right
+        - (document.getElementById('agents-body').getBoundingClientRect().right - 16)) <= 1;
+    let row = null;   // 列表是两跳 rpc 之后才出行：最多等 3s
+    for (let i = 0; i < 30 && !row; i++) {
+      row = list.querySelector('.ag-row');
+      if (!row) await new Promise(r => setTimeout(r, 100));
+    }
+    if (!row) return { unselected, rowless: true, text: list.textContent.slice(0, 40), picked: false, back: false };
+    row.click(); await new Promise(r => setTimeout(r, 500));
+    const back = det.querySelector('.pane-back');
+    const picked = !vis(list) && vis(det) && sec.classList.contains('has-sel')
+      && back.getBoundingClientRect().height > 0;
+    back.click(); await new Promise(r => setTimeout(r, 300));
+    return { unselected, rowless: false, picked,
+      back: vis(list) && !vis(det) && !sec.classList.contains('has-sel') };
+  })()`);
+  // 本族夹具未绑定、也没有记忆数据（列表是空态一行），选中 → 详情替换 → 返回
+  // 的硬断言在 web-subagents 无头（它带行、也压 390 宽）；截图审查的
+  // manifest.panel_shape 另把两个宽度都记一遍。
+  ck(`${theme} 后台窄屏：未选中只列表（详情不出场、列表满列）`,
+    agShape.unselected && (agShape.rowless || (agShape.picked && agShape.back)), JSON.stringify(agShape));
   const o7 = await evalJS(OVERFLOW_JS);
   ck(`${theme} 后台面零横向溢出`, o7.doc <= 0, 'doc=' + o7.doc);
   await shot(`${theme === 'dark' ? '1' : '2'}7-subagents`);
