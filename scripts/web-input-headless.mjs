@@ -15,8 +15,10 @@
 //   C '@'     '@' 弹最近会话（/rpc session/list 的夹具）；Enter 选中后
 //             草稿落 @<sid>，并自动发出 /resume <sid>——/state 的会话
 //             字段翻成该 sid 即「切换语义」落地。
-//   边界    窄屏（390×700）：弹层满宽、输入 16px、条目可换行，键盘路径
-//             仍通（重跑一遍 B 的最短路径）。
+//   边界    窄屏（390×700）：弹层铺满 composer 内容区、输入 16px、条目可
+//             换行，键盘路径仍通（重跑一遍 B 的最短路径）。「满宽」量的是
+//             内容区不是视口：窄屏有 56px 图标轨 + 12px 侧留白（W6-8 /
+//             c_4wpajv），详见 D 段断言的注（c_rddtrm 修陈旧阈值）。
 //
 // 用法：node scripts/web-input-headless.mjs <页面URL> <桩项目路径> <会话sid>
 //       [--chrome <chrome 可执行文件>]
@@ -386,7 +388,7 @@ trace("C '@' 会话引用");
   }
 }
 
-// ---- D. 窄屏降级：弹层满宽、16px 输入、条目可换行，键盘路径仍通 ----
+// ---- D. 窄屏降级：弹层铺满内容区、16px 输入、条目可换行，键盘路径仍通 ----
 trace('D 窄屏 390×700');
 await call('Emulation.setDeviceMetricsOverride',
   { width: 390, height: 700, deviceScaleFactor: 2, mobile: true });
@@ -402,11 +404,24 @@ await delay(150);
     const i = document.getElementById('input');
     const cs = getComputedStyle(i);
     const r = m.getBoundingClientRect();
+    const f = document.getElementById('form');   // 弹层的定位父级（composer 卡片，W6-4）
     return { w: Math.round(r.width), vw: innerWidth, fs: cs.fontSize,
              wrap: getComputedStyle(m.querySelector('.mi')).flexWrap,
-             h: Math.round(i.getBoundingClientRect().height) };
+             h: Math.round(i.getBoundingClientRect().height),
+             cw: f.clientWidth,   // 内容区宽（边框内）= 「满宽」的比较基准
+             sw: document.documentElement.scrollWidth };
   })()`);
-  ck('弹层满宽（无横向溢出）', box.w <= box.vw && box.w > box.vw * 0.8, JSON.stringify(box));
+  // 「满宽」= 铺满弹层的定位父级（composer 卡片的内容区），不是整幅视口：
+  // 窄屏有 56px 图标轨（W6-8 侧栏收起态）+ composer 左右各 12px 留白
+  // （c_4wpajv 把 width:100% 换成 calc(100% - 24px)），内容区只有
+  // 390-56-24=310 外框 / 308 内容宽——旧阈值「> 视口 80%」（312）是按
+  // 「composer 铺满视口」量出来的，轨与留白落地后必红（c_rddtrm 复跑实测
+  // w=308 cw=308 sw=390）。改为量相对内容区：差值 ≤2px（取整容差）即铺满，
+  // 同时保留「不超视口 / 文档无横向溢出」两条硬边界——丢回桌面的
+  // left/right:8px 会让 w=292，这条仍然抓得住。
+  ck('弹层铺满内容区（无横向溢出）',
+    box.w <= box.vw && Math.abs(box.w - box.cw) <= 2 && box.sw <= box.vw,
+    JSON.stringify(box));
   ck('输入字号 16px（防 iOS 聚焦缩放）', box.fs === '16px', JSON.stringify(box));
   ck('条目可换行（窄屏不挤成一行）', box.wrap === 'wrap', JSON.stringify(box));
   await press('Tab');
