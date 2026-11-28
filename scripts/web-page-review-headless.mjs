@@ -541,7 +541,6 @@ const W6_SCENES = [
     dsh: ['dsh-09-mobile-rail-zh.png'], narrow: true },
 ];
 // §2 的亮色列；容差：长度 ±1px，颜色按 rgb() 串逐字比。
-const W6_TOKENS = '\\n\\n| 项 | 期望（notes §2，亮） | 实测 | 是否一致 |\\n|---|---|---|---|';
 const w6Final = { ok: null, probe: null, compare: null };
 if (process.env.W6_FINAL === '1') {
   phase = 'W6-final';
@@ -596,13 +595,20 @@ if (process.env.W6_FINAL === '1') {
       const sr = send.getBoundingClientRect();
       o.sendSize = Math.round(sr.width) + '×' + Math.round(sr.height);
       o.sendRadius = cs(send).borderRadius; o.sendBg = cs(send).backgroundColor;
-      // 夹具会话的等宽块是工具结果卡（不一定是围栏代码）：取转录区里第一个等宽字族的元素。
-      // §2 的「代码 12/19」说的是块级代码与工具输出（pre / .tpre）；行内 code 的
-      // 行高随正文（24），夹具没有围栏代码块时如实标成行内码。
-      const block = document.querySelector('#hist pre, #hist .tpre');
+      // §2 的「代码 12/19」说的是块级代码与工具输出（pre / .tpre）。工具行的
+      // .tdetail 是懒构建的（点开才有 <pre class="tpre">），所以这里先点开一条
+      // .tcall 造出真实块级载体，量完再收回去；确实造不出来（例如无工具行）才
+      // 退到行内码，并在表里如实标「未覆盖」而不是判成一致。
+      let block = document.querySelector('#hist pre, #hist .tpre');
+      const tcallBtn = !block && document.querySelector('#hist button.tcall');
+      if (tcallBtn) {
+        tcallBtn.click(); await wait(300);
+        block = document.querySelector('#hist .tpre');
+      }
       const mono = block || [...document.querySelectorAll('#hist *')].find(isMono);
       o.codeKind = block ? 'block' : (mono ? 'inline' : 'none');
       if (mono) { o.codeFont = cs(mono).fontFamily; o.codeSize = cs(mono).fontSize + '/' + cs(mono).lineHeight; }
+      if (tcallBtn && block) { tcallBtn.click(); await wait(150); }   // 收回展开态，不影响后续量与截图
       // 设置模态
       document.getElementById('set-btn').click(); await wait(500);
       const dlg = document.getElementById('settings'); const dr = dlg.getBoundingClientRect();
@@ -630,16 +636,18 @@ if (process.env.W6_FINAL === '1') {
       ['侧栏行右 padding（组内行左缩进 24 是设计）', '8', m.rowPadR, eq(m.rowPadR, '8px')],
       ['新会话按钮高 / 圆角', '38 / 12', `${m.newBtnH} / ${m.newBtnRadius}`, near(m.newBtnH, 38) && eq(m.newBtnRadius, '12px')],
       ['会话头 padding', '12px 28px 0 20px', m.convHeadPad, eq(m.convHeadPad, '12px 28px 0px 20px')],
+      ['#conv-head 高（§1 线框图 h≈56）', '≈56', m.convHeadH, near(m.convHeadH, 56)],
       ['阅读列宽', '768', m.colW, near(m.colW, 768)],
       ['转录区 padding', '16px 32px', m.histPad, eq(m.histPad, '16px 32px')],
       ['用户气泡底', '#edf3fe', m.bubBg, eq(m.bubBg, hex('#edf3fe'))],
       ['用户气泡圆角', '22', m.bubRadius, eq(m.bubRadius, '22px')],
+      ['用户气泡 padding（§2 未给值，按 W6-3 落定值 10 / 16）', '10px 16px', m.bubPad, eq(m.bubPad, '10px 16px')],
       ['composer 外框宽', '774', m.composerW, near(m.composerW, 774)],
       ['composer 圆角', '22', m.composerRadius, eq(m.composerRadius, '22px')],
       ['composer 阴影', '0 4px 12px rgba(0,0,0,.02), 0 0 1px rgba(0,0,0,.08)', m.composerShadow, has(m.composerShadow, '4px 12px') && has(m.composerShadow, '0px 0px 1px')],
       ['发送钮', '圆形、品牌蓝一档', `${m.sendSize} / r=${m.sendRadius} / ${m.sendBg}`, eq(m.sendRadius, '999px') && has(m.sendBg, '53, 101, 210')],
-      ['代码字号 / 行高（块级代码、工具输出）', '12/19', `${m.codeSize ?? '（未取到）'}${m.codeKind === 'inline' ? '（行内码，行高随正文）' : ''}`,
-        m.codeKind === 'block' ? eq(m.codeSize, '12px/19px') : m.codeKind === 'inline' && eq(String(m.codeSize).split('/')[0], '12px')],
+      ['代码字号 / 行高（块级代码、工具输出）', '12/19', `${m.codeSize ?? '（未取到）'}${m.codeKind === 'block' ? '' : `（${m.codeKind === 'inline' ? '行内码' : '无代码'}，行高随正文，块级未覆盖）`}`,
+        m.codeKind === 'block' ? eq(m.codeSize, '12px/19px') : 'skip'],
       ['悬停 / 选中 token', 'rgba(0,0,0,.06) / rgba(38,49,72,.06)', `${m.hoverTok} / ${m.selTok}`,
         eq(String(m.hoverTok).replace(/\\s/g, ''), 'rgba(0,0,0,.06)') && eq(String(m.selTok).replace(/\\s/g, ''), 'rgba(38,49,72,.06)')],
       ['品牌蓝 token', '#4176e6', m.brandTok, eq(m.brandTok, '#4176e6')],
@@ -647,13 +655,20 @@ if (process.env.W6_FINAL === '1') {
       ['设置对话框圆角', '24', m.dlgRadius, eq(m.dlgRadius, '24px')],
       ['设置对话框阴影', '0 0 1px rgba(0,0,0,.2), 0 12px 32px rgba(0,0,0,.08)', m.dlgShadow, has(m.dlgShadow, '0px 0px 1px') && has(m.dlgShadow, '12px 32px')],
       ['设置遮罩（亮）', 'rgba(0,0,0,.24)', m.scrimBg, eq(m.scrimBg, 'rgba(0, 0, 0, 0.24)')],
-    ].map(([k, want, got, ok]) => `| ${k} | ${want} | ${got ?? '（未取到）'} | ${ok ? '一致' : '**不一致**'} |`);
+    ].map(([k, want, got, ok]) => {
+      // 夹具没取到块级代码时如实标「未覆盖」，不算进一致数（返工 c_3dz3kg 轮 1 缺陷 c）。
+      const st = ok === 'skip' ? '未覆盖（夹具无块级代码，不计入一致数）'
+        : (ok ? '一致' : '**不一致**');
+      return `| ${k} | ${want} | ${got ?? '（未取到）'} | ${st} |`;
+    });
     const bad = rows.filter(r => r.includes('**不一致**')).length;
+    const skipped = rows.filter(r => r.includes('未覆盖')).length;
+    const consistent = rows.length - bad - skipped;
     writeFileSync(path.join(outDir, 'probe.md'),
       `# W6 终验 · computed-style 探针\n\n对 \`docs/notes-web-w6-dsh-shell.md\` §2 逐项核（亮色，1440×900，rev ${process.env.PAGE_REVIEW_GIT_REV || 'unknown'}）。\n`
       + `自动比对以字面值为准；两项按设计偏离字面值，见文末。\n\n`
       + '| 项 | 期望（notes §2） | 实测 | 是否一致 |\n|---|---|---|---|\n' + rows.join('\n') + '\n\n'
-      + `自动比对：${rows.length - bad}/${rows.length} 一致。\n\n`
+      + `自动比对：${consistent}/${rows.length} 一致${skipped ? `（${skipped} 项未覆盖，不计入）` : ''}${bad ? `，${bad} 项**不一致**` : ''}。\n\n`
       + '按设计偏离字面值的两项（不算回归）：\n'
       + '- 发送钮取 `--seek-cta`（#3565d2，品牌蓝压深一档）：§2 的品牌蓝 #4176e6 配白字只有 4.2:1，不过 AA；W6-1 起钉死。\n'
       + '- 状态色（错误 / 成功 / 警告）亮色下沿用 W5 的深值：§2 的 dsh 饱和档在白底 2.2–4.5:1，不过 AA。\n');
@@ -673,7 +688,7 @@ if (process.env.W6_FINAL === '1') {
       + `<p>左 seek（本包截图，rev ${process.env.PAGE_REVIEW_GIT_REV || 'unknown'}），右 dsh 参考图。逐项数值见同目录 probe.md。生成于 ${new Date().toISOString()}。</p>\n`
       + W6_SCENES.map(scene).join('\n') + '\n');
     w6Final.ok = true;
-    console.log(`\nW6 终验对照包：compare.html（${W6_SCENES.length} 场景）+ probe.md（${rows.length - bad}/${rows.length} 一致）→ ${outDir}`);
+    console.log(`\nW6 终验对照包：compare.html（${W6_SCENES.length} 场景）+ probe.md（${consistent}/${rows.length} 一致${skipped ? ` / ${skipped} 未覆盖` : ''}${bad ? ` / ${bad} 不一致` : ''}）→ ${outDir}`);
   } catch (e) {
     w6Final.ok = false; w6Final.error = e.message;
     console.log(`\nW6 终验对照包：采集失败（${e.message}）——不影响退出码`);
