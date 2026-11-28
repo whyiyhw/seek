@@ -471,7 +471,8 @@ func TestWeb_PagePaneEntriesWired(t *testing.T) {
 		"memBtn.addEventListener('click', () => togglePane('memory'))",
 		"statBtn.addEventListener('click', () => togglePane('stats'))",
 		"agentsBtn.addEventListener('click', () => togglePane('agents'))",
-		"settingsBtn.addEventListener('click', () => togglePane('settings'))",
+		// W6-6: the settings entry opens the MODAL, not a middle-pane face.
+		"settingsBtn.addEventListener('click', toggleSettings)",
 		"hkBtn.addEventListener('click', () => togglePane('hooks'))",
 	} {
 		if !strings.Contains(page, need) {
@@ -1374,6 +1375,94 @@ func TestWeb_PageLazyResumeW65(t *testing.T) {
 	}
 }
 
+// assertNoResidentGlobalKeydown pins the c_7lsngm discipline: the page keeps
+// no resident document/window keydown listener, so Escape is never hijacked
+// page-wide. The one sanctioned shape (W6-6 settings modal) arms a listener
+// only while the modal is open, so a global keydown listener may exist only
+// paired with its removal — an unpaired one is the page-wide hijack again.
+func assertNoResidentGlobalKeydown(t *testing.T, page string) {
+	t.Helper()
+	for _, on := range []string{"document", "window"} {
+		add := strings.Count(page, on+".addEventListener('keydown'")
+		rm := strings.Count(page, on+".removeEventListener('keydown'")
+		if add != rm {
+			t.Errorf("global %s keydown listener must be paired with its removal (Esc must not be hijacked page-wide): add=%d remove=%d", on, add, rm)
+		}
+	}
+}
+
+// TestWeb_PageSettingsModalW66 pins the W6-6 shape: settings is a MODAL
+// (role=dialog + aria-modal, scrim + centred box, three tabs), not the old
+// middle-pane card stack. Pinned both sides: the modal pieces present, the
+// retired .pane form absent, and the page free of dispatch-internal wording
+// ("卡面口径" / "本卡配额") that only the card writer should ever read.
+func TestWeb_PageSettingsModalW66(t *testing.T) {
+	page := string(webPage)
+	for _, need := range []string{
+		`id="settings" role="dialog" aria-modal="true"`, // modal semantics
+		`id="set-scrim"`,     // the overlay
+		`id="set-close"`,     // ✕ close affordance
+		`id="set-tabs"`,      // left tab rail
+		`data-tab="general"`, // 通用
+		`data-tab="serve"`,   // 服务配置
+		`data-tab="about"`,   // 关于
+		"body.settings-view #settings { display: flex; }",
+		"body.settings-view #set-scrim { display: block; }",
+		"width: min(800px, calc(100vw - 32px))",
+		"height: min(800px, calc(100vh - 100px))",
+		"border-radius: 24px; box-shadow: var(--seek-shadow-pop)",
+		"function openSettings(opener)",
+		"function closeSettings(opts)",
+		// Esc + focus trap hang off document but only while the modal is
+		// open (armed in openSettings, disarmed in closeSettings): aria-modal
+		// does not stop Tab, and a click on blank space inside the box drops
+		// focus to <body> — a listener on the box itself never sees that
+		// Escape (real-input probe, 2026-11-28).
+		"document.addEventListener('keydown', modalKeys)",
+		"document.removeEventListener('keydown', modalKeys)",
+		"function modalKeys(ev)",
+		"if (ev.key !== 'Tab') return;",
+		"(ev.shiftKey ? f[f.length - 1] : f[0]).focus();",
+		"setScrim.addEventListener('click'",   // overlay click closes
+		"back.focus();",                       // focus returns to #set-btn
+		"settings/get",                        // the read-only snapshot
+		`setRow('路径', p, '', { mono: true })`, // candidate sub-rows: real label, no "·" orphan
+		// 「跟随系统」 is 52px wide; the inherited 16px button padding left
+		// exactly 52px of content box and wrapped it onto two lines.
+		"padding: 0 2px; white-space: nowrap;",
+		// The theme note speaks user language, not "记忆位".
+		"note.textContent = storedTheme() ? '当前：' + now : '跟随系统 · 当前为' + now;",
+		// A late settings/get must still reach an already-rendered empty hero.
+		"list.querySelector('.chat-empty .hero')",
+		"{ className: 'hero-ver', textContent: sideVer.textContent }",
+	} {
+		if !strings.Contains(page, need) {
+			t.Errorf("embedded page lost the W6-6 settings-modal piece %q (c_ekuuof)", need)
+		}
+	}
+	// The retired middle-pane face: no settings entry in the pane switcher,
+	// no card stack, no right-aligned label/value pair split — and no Esc
+	// listener scoped to the box (superseded by the document-level one).
+	for _, gone := range []string{
+		"settings: { btn: settingsBtn",
+		`.set-card {`,
+		"togglePane('settings')",
+		`<section id="settings" class="pane">`,
+		"settingsModal.addEventListener('keydown'",
+		"'记忆位：' + stored",
+	} {
+		if strings.Contains(page, gone) {
+			t.Errorf("page still carries the retired settings-pane piece %q (W6-6 replaces, not stacks)", gone)
+		}
+	}
+	// Dispatch-internal wording must never reach users.
+	for _, banned := range []string{"卡面口径", "本卡配额"} {
+		if strings.Contains(page, banned) {
+			t.Errorf("page exposes dispatch-internal wording %q — write the read-only note in user language", banned)
+		}
+	}
+}
+
 // TestWeb_PageInputEnhancements pins the c_7lsngm input contract: a
 // multi-line input that sends on Enter and newlines on Shift+Enter, a
 // registry-driven '/' command menu (↑↓ / Tab / Enter / Esc), and an '@'
@@ -1429,9 +1518,6 @@ func TestWeb_PageInputEnhancements(t *testing.T) {
 	}
 	// The overlay must never capture keys globally: every listener that
 	// touches menu navigation hangs off the input element, and the page
-	// adds no document/window keydown handler.
-	if strings.Contains(page, "document.addEventListener('keydown'") ||
-		strings.Contains(page, "window.addEventListener('keydown'") {
-		t.Error("input enhancement must not install a global keydown handler (Esc must not be hijacked page-wide)")
-	}
+	// keeps no resident document/window keydown listener.
+	assertNoResidentGlobalKeydown(t, page)
 }

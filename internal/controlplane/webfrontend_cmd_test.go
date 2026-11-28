@@ -312,12 +312,5 @@ func TestWeb_PageDirPicker(t *testing.T) {
 			t.Errorf("embedded page still carries the retired '/bind ' args entry %q", banned)
 		}
 	}
-	for _, banned := range []string{
-		"document.addEventListener('keydown'", // 不新增全局键盘监听（c_7lsngm 纪律）
-		"window.addEventListener('keydown'",
-	} {
-		if strings.Contains(page, banned) {
-			t.Errorf("embedded page grew a global keydown listener: %q", banned)
-		}
-	}
+	assertNoResidentGlobalKeydown(t, page) // 不新增常驻全局键盘监听（c_7lsngm 纪律）
 }

@@ -257,11 +257,34 @@ for (const theme of ['dark', 'light']) {
   await evalJS(`viewLive()`);
   await delay(300);
 
-  // 设置面板：堆叠 + ellipsis
+  // 设置面板：W6-6 起是模态（遮罩 + 居中框 + 左 tab）。窄屏口径：对话框满宽
+  // 减 32、tab 栏横排成顶部一条、行式表单纵向堆叠、长路径按 ellipsis 折。
   await evalJS(`document.getElementById('set-btn').click()`);
   await delay(400);
-  const rail3 = await evalJS(RAIL_JS);
-  ck(`${theme} 设置页收起轨点得到（不被标题行盖住）`, rail3.length === 0, rail3.join('；'));
+  // 设置是模态（W6-6）：遮罩盖住整页，侧栏轨「点不到」正是模态语义——
+  // 旧的「设置页收起轨点得到」断言随之退役，改验遮罩真的把轨挡住了。
+  const rail3 = await evalJS(`(() => {
+    const side = document.getElementById('side');
+    const r = side.getBoundingClientRect();
+    const hit = document.elementFromPoint(r.left + 8, r.top + 8);
+    return hit ? (hit.id || hit.tagName) : '';
+  })()`);
+  ck(`${theme} 设置模态遮罩盖住整页（侧栏不可点）`, rail3 === 'set-scrim' || rail3 === 'settings',
+    'hit=' + rail3);
+  // 切到「服务配置」tab 才有值行（通用 tab 只有外观三选控件）。
+  await evalJS(`document.querySelector('.set-tab[data-tab="serve"]').click()`);
+  await delay(400);
+  const modal = await evalJS(`(() => {
+    const m = document.getElementById('settings');
+    const r = m.getBoundingClientRect();
+    return { w: Math.round(r.width), vw: innerWidth,
+      tabsRow: getComputedStyle(document.getElementById('set-tabs')).flexDirection,
+      scrim: getComputedStyle(document.getElementById('set-scrim')).display };
+  })()`);
+  ck(`${theme} 390px 对话框满宽减 32`, Math.abs(modal.w - (modal.vw - 32)) <= 2,
+    `w=${modal.w} vw=${modal.vw}`);
+  ck(`${theme} 390px tab 栏横排（顶部一条）`, modal.tabsRow === 'row', modal.tabsRow);
+  ck(`${theme} 390px 遮罩可见`, modal.scrim !== 'none', modal.scrim);
   const setStat = await evalJS(`(() => {
     const row = document.querySelector('.set-row');
     const vs = document.querySelectorAll('.set-row .v');
@@ -280,6 +303,9 @@ for (const theme of ['dark', 'light']) {
   ck(`${theme} 设置面零横向溢出`, o4.doc <= 0, 'doc=' + o4.doc);
   ck(`${theme} 设置面无裁切元素`, o4.clipped.length === 0, o4.clipped.join('；'));
   await shot(`${theme === 'dark' ? '1' : '2'}4-settings`);
+  // 关掉模态再看后面的面板（不看就会连带拍进遮罩）。
+  await evalJS(`document.getElementById('set-close').click()`);
+  await delay(300);
 
   // 记忆 / 统计 / 后台 / 审计
   await evalJS(`document.getElementById('mem-btn').click()`);

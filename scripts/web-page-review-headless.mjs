@@ -292,6 +292,7 @@ async function navigate(panel) {
   // navError 记进 manifest（审查发现，不是驱动故障）；这条 fallback 只
   // 用于取证，不当作绿灯。
   const open = await evalJS(`document.body.classList.contains('${panel.cls}')`);
+  // 设置是模态（W6-6）：开着就别再点（#set-btn 对已开模态是关闭）。
   if (!open) await evalJS(`${$id(panel.btn)}.click()`);
   let navErr = null;
   try {
@@ -299,16 +300,24 @@ async function navigate(panel) {
   } catch {
     await evalJS(`(() => {
       closePanes();   // 页面上下文：直接调页面函数
+      if ('${panel.cls}' === 'settings-view') { openSettings(); return; }   // W6-6 模态
       document.body.classList.add('${panel.cls}', 'browsing');
       ${panel.loadFn}();
     })()`);
     navErr = `pane 按钮 ${panel.btn} 点击无效（已由驱动强制加载面板取证）——疑似按钮监听缺失`;
   }
+  // 设置镜头取「服务配置」tab：dsh-06 对照的是行式表单本体，不是外观三选。
+  if (panel.key === 'settings') {
+    await evalJS(`(() => {
+      const b = document.querySelector('.set-tab[data-tab="serve"]');
+      if (b) b.click();
+    })()`);
+  }
   const readyExpr = {
     memory: `document.querySelectorAll('#mem-list .mem-row').length >= 1`,
     stats: `${$id('stat-body')}.children.length >= 1`,
     agents: `${$id('ag-list')}.children.length >= 1`,
-    settings: `${$id('set-body')}.children.length >= 1`,
+    settings: `${$id('set-body')}.children.length >= 2`,
     hooks: `document.querySelectorAll('#hk-log .hk-row').length >= 1`
   }[panel.key];
   await until(panel.label + ' 数据落 DOM', readyExpr);

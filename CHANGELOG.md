@@ -42,6 +42,7 @@
 - c_ljtmy4：W6-4 web 输入区改 dsh composer 卡片 + 空态 Hero 居中，未绑定不再是顶部黄条
 - c_mo7quv：W6-5 web 点会话即进入：只读浏览器与「继续此会话」退役，历史渲进主转录区，首条消息时懒 /resume
 - c_7wyr6t：seek·卫生：.gitignore 收 .butler-commit.md + 修 skill 两步装的暂存目录泄漏（skill_commit 成功后父目录不删、测试打真 TMPDIR）
+- c_ekuuof：W6-6 web 设置改 dsh 式居中模态框：左 tab（通用/服务配置/关于）+ 右行式表单
 
 ## v0.13.1（2026-11-24）
 
