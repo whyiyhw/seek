@@ -677,14 +677,20 @@
      五个视图钮搬进 #side-foot 的 #side-nav（侧栏底部导航行），页面顶部
      不再有第二条横栏；dsh 的入口全在左栏。#bar 的 CSS 随节点一起删。 */
 
-  /* 布局骨架：左栏常驻 + 中栏内容。收起态 = 44px 图标轨（dsh 折叠轨同
-     语言：logo/新建/搜索入轨，展开态的文字让位）。宽度过渡 150ms，与
-     prefers-reduced-motion 兜底同 W5 既有口径（无动画依赖，纯装饰）。 */
-  #shell { flex: 1; display: flex; min-height: 0; }
-  #side { width: 280px; flex: none; display: flex; flex-direction: column;
-          min-height: 0; background: var(--seek-panel); border-right: 1px solid var(--seek-line);
-          transition: width .15s; }
-  body.side-collapsed #side { width: 44px; }
+  /* ---- 布局骨架（W6-2 搬家 / W6-8 图标轨）：#shell 是两列网格「侧栏 | 主区」----
+     展开 280、收起 56px 图标轨（16px 内边距夹 40px 钮位，图标 18px；dsh-04 /
+     dsh-09 实测）。轨宽的过渡落在 grid-template-columns 上（.3s
+     cubic-bezier(.4,0,.2,1)，reduced-motion 关停）；侧栏子块在展开态与过渡期间
+     都定宽 280——轨收窄时 #side 只裁切，内容不中途回流：宽内容先淡出，过渡
+     结束才由 body.side-rail 换成轨的竖排（applySide 的两拍）。列宽定死也顺带
+     修掉「未绑定空态侧栏缩到 ~118px」——轨宽不再随内容。 */
+  #shell { flex: 1; position: relative; display: grid; min-height: 0;
+           grid-template-columns: 280px minmax(0, 1fr);
+           transition: grid-template-columns .3s cubic-bezier(.4,0,.2,1); }
+  body.side-collapsed #shell { grid-template-columns: 56px minmax(0, 1fr); }
+  #side { grid-column: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; overflow: hidden;
+          background: var(--seek-panel); border-right: 1px solid var(--seek-line); }
+  #side > * { width: 280px; min-width: 280px; }
   /* 侧栏头重排（W6-2 骨架卡，notes §1/§3）：品牌行（标识+seek+版本小字+
      折叠钮）→ 满宽「＋ 新会话」→「工作区」小节头（13px 三级色）+ 搜索
      切换/归档/新建工作区三枚图标钮 → 搜索框（默认收起，点搜索钮展开）。 */
@@ -714,13 +720,13 @@
   #side-search:focus { border-color: var(--seek-line-focus); }
   #sess-list { flex: 1; overflow-y: auto; min-height: 0; }
   /* 侧栏脚（W6-2）：#side-nav = 五个视图钮的导航行（原 #bar 搬家，图标16+
-     文字14、行高32、r8、悬停一档底），设置压底；#side-err = 侧栏写面错误位
-     （原 sideFoot.prepend 的静态落点）；「加载更多」随列表走 .ws-more。 */
+     文字14、行高32、r8），静息透明、悬停才出一档底（dsh 的素行）；设置压底；
+     #side-err = 侧栏写面错误位；「加载更多」随列表走 .ws-more。 */
   #side-foot { border-top: 1px solid var(--seek-line); }
   #side-nav { display: flex; flex-direction: column; gap: 2px; padding: 6px 8px 10px; }
   #side-nav button { display: flex; align-items: center; gap: 8px; height: 32px;
                      padding: 0 10px; border-radius: 8px; font-size: 14px;
-                     text-align: left; }
+                     text-align: left; background: transparent; }
   #side-nav .ic { width: 16px; height: 16px; flex: none; }
   #side-nav button:hover:not(.cur) { background: var(--seek-hover); }
   #set-btn { margin-top: 4px; border-top: 1px solid var(--seek-line); }
@@ -728,35 +734,50 @@
   .ws-more { display: block; width: calc(100% - 24px); margin: 4px 12px 8px;
              padding: 6px; border-radius: 8px; font-size: 13px;
              background: var(--seek-soft); }
-  /* 收起态（W6-2 后的 44px 图标轨，W6-8 会正式重排）：品牌字/版本/小节
-     标题/搜索/列表让位；新会话与视图钮收成图标；设置分离线不占位。
-     #side-nav 图标化保住了收起态的视图入口——不然五钮进了侧栏脚就被
-     收起态整体藏掉，成了「收起=没有记忆/统计」的功能回归。 */
-  body.side-collapsed .brand-name, body.side-collapsed #side-ver,
-  body.side-collapsed #side-title, body.side-collapsed #side-search,
-  body.side-collapsed #sess-list, body.side-collapsed #side-err,
-  body.side-collapsed #side-new .lbl { display: none; }
-  /* 图标轨竖排（c_lqtt2m 返工轮口径沿用）：44px 宽 − 两侧 6px padding =
-     32px 内宽，26px 钮竖排全部落在轨内、互不重叠（hit-test 断言在
-     web-mobile RAIL_JS）。搜索切换留在轨里（dsh 轨有搜索位）。 */
-  body.side-collapsed #side-head { flex-direction: column; gap: 6px;
-                                   padding: 8px 6px; justify-content: flex-start; }
-  body.side-collapsed #side-head .btn-icon { margin-left: 0; }
-  body.side-collapsed #side-new { margin: 6px 2px; width: 26px; height: 26px;
-                                  padding: 0; border: 0; gap: 0; }
-  body.side-collapsed #side-sec { flex-direction: column; padding: 0 6px; gap: 6px; }
-  body.side-collapsed #side-ws-new { width: 26px; height: 26px; padding: 0; }
-  body.side-collapsed #side-nav { padding: 6px 2px 10px; }
-  body.side-collapsed #side-nav button { width: 26px; height: 26px; padding: 0;
-                                         justify-content: center; gap: 0; }
-  body.side-collapsed #side-nav .lbl { display: none; }
-  body.side-collapsed #set-btn { margin-top: 0; border-top: 0; }
-  /* 抽屉遮罩（c_lqtt2m）：默认不出场；≤480px 展开态翻成 block（断点块），
-     点击关抽屉。z 在 #side（30）之下、盖住中栏。 */
+  /* 过渡两拍：side-fading = 宽内容透明——收起时先淡出；展开时排版先恢复、
+     下一帧才淡入。收起途中轨的图标也先不出场，过渡结束随 .side-rail 一起亮。 */
+  .brand-name, #side-ver, #side-title, #side-search, #sess-list, #side-err, .lbl,
+  #side-new, #side-sec, #side-foot { transition: opacity .15s; }
+  body.side-fading :is(.brand-name, #side-ver, #side-title, #side-search, #sess-list, #side-err, .lbl) { opacity: 0; }
+  body.side-fading.side-collapsed :is(#side-new, #side-sec, #side-foot) { opacity: 0; }
+  /* 轨（dsh-04 / dsh-09）：品牌标识即展开钮（悬停 / 聚焦换展开图标），新会话、
+     新建工作区、搜索在上，五个视图钮压底；归档切换只在展开态有。 */
+  .side-rail #side > * { width: 56px; min-width: 0; }
+  .side-rail :is(.brand-name, #side-ver, #side-title, #side-search, #sess-list, #side-err, .lbl, #side-arch) { display: none; }
+  .side-rail #side-head { display: grid; grid-template-columns: 40px; justify-content: center;
+                          padding: 16px 0 0; border-bottom: 0; }
+  .side-rail #side-head .brand-mark { grid-area: 1 / 1; width: 18px; height: 18px;
+                                      align-self: center; justify-self: center; pointer-events: none; }
+  .side-rail #side-toggle { grid-area: 1 / 1; width: 40px; height: 40px; margin: 0;
+                            z-index: 1; background: transparent; }
+  .side-rail #side-toggle .ic { display: none; width: 18px; height: 18px; }
+  .side-rail #side-head:is(:hover, :focus-within) .brand-mark { opacity: 0; }
+  .side-rail #side-head:is(:hover, :focus-within) #side-toggle .ic { display: inline-block; }
+  .side-rail #side-new { margin: 8px 8px 0; width: 40px; height: 40px; padding: 0; gap: 0;
+                         border: 0; background: transparent; }
+  /* 钮位 40 + 间距 8 = 48 一档（dsh-04：标识 36 / 新会话 84 / 新建工作区 132 /
+     搜索 180）；顺序同 dsh：新建工作区在搜索之前（DOM 里搜索在前，用 order 调）。 */
+  .side-rail #side-sec { flex-direction: column; padding: 8px 8px 0; gap: 8px; }
+  .side-rail #side-sec .btn-icon { width: 40px; height: 40px; background: transparent; }
+  .side-rail #side-sec .btn-icon:hover { background: var(--seek-hover); }
+  .side-rail #side-find { order: 2; }
+  .side-rail #side-ws-new { order: 1; }
+  .side-rail :is(#side-new, #side-sec, #side-nav) .ic { width: 18px; height: 18px; }
+  .side-rail #side-foot { margin-top: auto; border-top: 0; }
+  .side-rail #side-nav { padding: 8px 8px 15px; gap: 8px; }
+  .side-rail #side-nav button { width: 40px; height: 40px; padding: 0; justify-content: center; gap: 0; }
+  .side-rail #set-btn { margin-top: 0; border-top: 0; }
+  /* 抽屉遮罩：默认不出场；≤480px 抽屉盖出时翻成 block（断点块），点击关抽屉。 */
   #side-scrim { display: none; position: absolute; inset: 0; z-index: 20;
                 background: var(--seek-scrim); }
+  @media (prefers-reduced-motion: reduce) {
+    #shell, .brand-name, #side-ver, #side-title, #side-search, #sess-list, #side-err, .lbl,
+    #side-new, #side-sec, #side-foot { transition: none; }
+  }
 
-  #center { flex: 1; display: flex; flex-direction: column;
+  /* 主区钉在第二列：≤480px 抽屉态 #side 脱离网格流，不钉的话主区会被自动
+     排进第一列（56px 宽）。 */
+  #center { grid-column: 2; display: flex; flex-direction: column;
             min-width: 0; min-height: 0; }
   /* 会话头（W6-2 骨架卡，notes §1）：主区唯一一条头（h≈56）。左=会话标题+
      项目芯片（文件夹+目录名，title=完整路径——可见绑定信息从 #status 横栏
@@ -1131,14 +1152,11 @@
   .hk-row.denied .hk-rest, .hk-row.denied .hk-ev { color: var(--seek-err); }
   #hk-filter { flex: 0 1 200px; width: 200px; }
 
-  /* ---- 390px 手机宽响应式（W5 卡 c_lqtt2m）----
+  /* ---- 390px 手机宽响应式（W5 卡 c_lqtt2m；W6-8 换轨）----
      单一 ≤480px 断点管全部窄屏降级（640px 块只管输入弹层，互不吞）。
-     口径=「无不可达入口/不可读裁切」：双栏折叠单栏（侧栏抽屉化——展开态
-     absolute 覆盖中栏 + 遮罩点击关，聊天列恒满宽；收起态 44px 图标轨
-     原宽，轨内图标钮竖排让 ⟩ 留在轨内）、按钮组换行全显、长串按 ellipsis 折、
-     设置面板 label/value 上下堆叠。缺省收起沿用 <1024 宽度判定
-     （readSideCollapsed，dsh SIDEBAR_AUTO_COLLAPSE 同款断点），本块
-     只管「展开时不挤中栏」。 */
+     口径=「无不可达入口/不可读裁切」：侧栏轨常驻（<1024 自动收成 56px 轨，
+     dsh SIDEBAR_AUTO_COLLAPSE 同款断点），点标识把完整侧栏以抽屉盖出 + 遮罩
+     点击关；按钮组换行全显、长串按 ellipsis 折、设置 label/value 上下堆叠。 */
   @media (max-width: 480px) {
     /* 状态条：计量右段允许收缩成 ellipsis（「恒完整」是桌面口径，窄屏
        让位给可读）；ctx 计量藏型号名保「条+百分比」——全名「设置」可读 */
@@ -1150,15 +1168,15 @@
     #composer-meta { padding: 4px 16px 8px 12px; }
     #ws-chip { max-width: 44vw; }
     #model-tag { display: none; }
-    form { margin: 4px 10px 8px; }
-    /* 双栏→单栏：展开态抽屉化（脱离文档流覆盖中栏），收起态 44px 轨
-       保持原样；遮罩同态翻出（基线 display:none） */
-    #shell { position: relative; }
-    body:not(.side-collapsed) #side {
-      position: absolute; top: 0; bottom: 0; left: 0; z-index: 30;
-      width: min(300px, 84vw); box-shadow: var(--seek-shadow);
-    }
-    body:not(.side-collapsed) #side-scrim { display: block; }
+    form { margin: 4px 12px 8px; }
+    /* 抽屉（W6-8，dsh-09）：≤480px 轨常驻；点标识把完整侧栏（280）以浮层盖出
+       + 遮罩，点遮罩 / 选中会话收回（JS drawerClose）。遮罩同态翻出。 */
+    body.side-drawer #side { position: absolute; top: 0; bottom: 0; left: 0; z-index: 30;
+                             width: 280px; box-shadow: var(--seek-shadow); }
+    body.side-drawer #side-scrim { display: block; }
+    /* 会话头的项目芯片收成图标；转录区收窄边距，给正文多一截横向空间。 */
+    #conv-proj-name { display: none; }
+    #list, #hist { padding: 12px 16px; }
     /* 资产面板（W6-7）：头与 768 列收到 16px 边距，工具可缩；列表 / 详情的
        「详情替换列表」已由 <1200px 一条口径管，这里不再单列。 */
     .pane-bar { padding: 12px 16px 0; }
@@ -3213,45 +3231,84 @@ function readShowArch() {
 let showArchived = readShowArch();
 
 // 收起状态记忆（验收②）：bit 落 localStorage，刷新后保持。首次访问按
-// 视口宽度定缺省（<1024px 窄屏默认收起，与 notes-dsh-ui-spec 的
-// SIDEBAR_AUTO_COLLAPSE 同断点）；存储不可用（隐私模式）时退化为本次
-// 页面生命周期的内存值——不因存储异常让侧栏失去可操作性。
+// 侧栏开合（W6-2 搬家 / W6-8 图标轨）。三个事实源——
+//   sidePref   用户点过折叠钮的偏好（localStorage；没点过是 null）；
+//   视口       <1024px 自动收成轨，变宽回偏好——自动收起不写偏好；
+//   sideDrawer ≤480px 轨常驻，点标识把完整侧栏以抽屉盖出（独立于收起态）。
+// 存储不可用（隐私模式）时偏好只活在本次页面生命周期——不因存储异常让
+// 侧栏失去可操作性。
 const SIDE_KEY = 'seek-side-collapsed';
-function readSideCollapsed() {
+function readSidePref() {
   try {
     const v = localStorage.getItem(SIDE_KEY);
     if (v === '0' || v === '1') return v === '1';
-  } catch (e) { /* 隐私模式：走宽度缺省 */ }
-  return window.innerWidth < 1024;
+  } catch (e) { /* 隐私模式：没有偏好 */ }
+  return null;
 }
-let sideCollapsed = readSideCollapsed();
+let sidePref = readSidePref();
+let sideCollapsed = window.innerWidth < 1024 ? true : sidePref === true;
+let sideSettled = true;    // 轨道过渡是否已收尾（收尾前宽内容只淡出、不换排版）
+let sideDrawer = false;
+let sideNarrow = window.innerWidth < 1024;
+let sideTimer = null;
+const sideMotion = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+// 抽屉断点（c_lqtt2m → W6-8）：≤480px 轨常驻；数值与样式表的 max-width 保持同一个 480。
+const sideMQ = window.matchMedia ? window.matchMedia('(max-width: 480px)') : null;
 function applySide() {
-  document.body.classList.toggle('side-collapsed', sideCollapsed);
-  // 折叠钮图标随态换（c_25d2ey）：panel-left-close/open 取代 ⟩/⟨ 文字
-  // 符号——字形符号跨平台渲染不一（⟩ 在部分字体栈里缺字成「(」，旧
-  // 审查的残形图标），sprite 图标无此问题。aria-label 与 title 同步。
-  const label = sideCollapsed ? '展开会话侧栏' : '收起会话侧栏';
-  swapIcon(sideToggle, sideCollapsed ? 'panel-open' : 'panel-close');
+  const b = document.body.classList;
+  b.toggle('side-collapsed', sideCollapsed);
+  b.toggle('side-rail', sideCollapsed && sideSettled && !sideDrawer);
+  b.toggle('side-drawer', sideDrawer);
+  b.toggle('side-fading', !sideSettled);
+  // 折叠钮图标随态换（c_25d2ey）：轨里悬停换展开图标由样式表管，这里只定
+  // 常态那枚。≤480px 点标识是开抽屉，文案跟着说。
+  const label = sideDrawer ? '收起会话侧栏' : sideCollapsed ? '展开会话侧栏' : '收起会话侧栏';
+  swapIcon(sideToggle, sideCollapsed && !sideDrawer ? 'panel-open' : 'panel-close');
   sideToggle.title = label;
   sideToggle.setAttribute('aria-label', label);
-  sideSearch.tabIndex = sideCollapsed ? -1 : 0;  // 收起态搜索不可见，焦点别落进去
+  sideSearch.tabIndex = sideCollapsed && !sideDrawer ? -1 : 0;  // 轨里搜索框不可见，焦点别落进去
 }
-function setSideCollapsed(v) {
+// setSide 换收起态；store=true 才写偏好（宽屏上用户点的才算）。
+function setSide(v, store) {
+  clearTimeout(sideTimer);
   sideCollapsed = !!v;
-  applySide();
-  try { localStorage.setItem(SIDE_KEY, sideCollapsed ? '1' : '0'); } catch (e) { /* 内存态即可 */ }
+  if (store) {
+    sidePref = sideCollapsed;
+    try { localStorage.setItem(SIDE_KEY, sideCollapsed ? '1' : '0'); } catch (e) { /* 内存态即可 */ }
+  }
+  if (!sideCollapsed) {   // 展开：排版立刻恢复（宽内容仍透明），下一帧起淡入
+    sideSettled = true;
+    document.body.classList.remove('side-rail', 'side-collapsed');
+    document.body.classList.add('side-fading');
+    requestAnimationFrame(applySide);
+    return;
+  }
+  // 收起：轨道先过渡 .3s，宽内容淡出；过渡结束才换轨的竖排（不中途回流）。
+  sideSettled = false; applySide();
+  sideTimer = setTimeout(() => { sideSettled = true; applySide(); },
+    sideMotion && sideMotion.matches ? 0 : 300);
 }
-sideToggle.addEventListener('click', () => setSideCollapsed(!sideCollapsed));
-applySide();
+function setDrawer(v) { sideDrawer = !!v; applySide(); }
+sideToggle.addEventListener('click', () => {
+  if (sideMQ && sideMQ.matches) return setDrawer(!sideDrawer);   // ≤480px：轨常驻，点标识开 / 关抽屉
+  setSide(!sideCollapsed, window.innerWidth >= 1024);            // 窄屏上的手动开合只是本次的，不写偏好
+});
+// 视口跨过 1024：变窄自动收轨（不写偏好），变宽回偏好；只认「跨线」这一下。
+window.addEventListener('resize', () => {
+  const narrow = window.innerWidth < 1024;
+  if (narrow === sideNarrow) return;
+  sideNarrow = narrow;
+  setDrawer(false);
+  setSide(narrow ? true : sidePref === true, false);
+});
 
-// 窄屏抽屉化（c_lqtt2m）：≤480px 展开态是覆盖式抽屉（样式表断点块），
-// 遮罩点击、选中会话都要收抽屉——否则抽屉盖住刚打开的正文。断点数值
-// 与样式表的 max-width 保持同一个 480，别各写各的数。
-const sideMQ = window.matchMedia ? window.matchMedia('(max-width: 480px)') : null;
-document.getElementById('side-scrim').addEventListener('click', () => setSideCollapsed(true));
+// 窄屏抽屉（c_lqtt2m → W6-8）：抽屉是浮层，遮罩点击、选中会话都要收——
+// 否则抽屉盖住刚打开的正文。
+document.getElementById('side-scrim').addEventListener('click', () => setDrawer(false));
 function drawerClose() {
-  if (sideMQ && sideMQ.matches && !sideCollapsed) setSideCollapsed(true);
+  if (sideDrawer) setDrawer(false);
 }
+applySide();
 
 // 归档可见切换（c_rqcuaa）：头部图标钮——侧栏脚留给「加载更多」
 // （c_txz6vz 无头断言探的就是 #side-foot button，别占位）。点按翻转
@@ -3289,7 +3346,7 @@ sideFind.addEventListener('click', () => {
   const open = sideEl.classList.toggle('search-open');
   sideFind.classList.toggle('on', open);
   sideFind.setAttribute('aria-pressed', String(open));
-  if (open && !sideCollapsed) sideSearch.focus();
+  if (open && (!sideCollapsed || sideDrawer)) sideSearch.focus();
 });
 // composer 工作区芯片（W6-4）：绑定=目录名（title=完整路径），未绑定=
 // 「选择工作区」高亮；点击开目录浏览器（换绑/首绑同一条路）。

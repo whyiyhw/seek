@@ -4,9 +4,9 @@
 // web-theme-headless.mjs 的零依赖 CDP 引导）。
 //
 // 断言景（对应卡面验收①「390px 全页面无不可达入口/不可读裁切」）：
-//   单栏   → ≤480px 缺省收起（44px 轨在场）+ 展开态抽屉化：
-//            #side 计算样式 position=absolute、遮罩可见；
-//   轨可达 → 收起轨 44px 装得下 #side-head 的全部图标钮（＋/🗄/⟩）：
+//   单栏   → ≤480px 轨常驻（56px 图标轨，W6-8）+ 抽屉：点标识后 #side 计算样式
+//            position=absolute、宽 280、遮罩可见，中栏宽 = 视口 − 56；
+//   轨可达 → 56px 轨装得下全部图标钮（标识 / ＋ / 新建工作区 / 搜索 / 视图钮）：
 //            每个钮的右缘不越轨、中心点 hit-test 命中它自己（返工轮补——
 //            overflow 溢出轨压到中栏时，会话详情页的 ⟩ 被「💬 聊天」盖住，
 //            rect 断言看不见，只有 elementFromPoint 会红）；
@@ -152,7 +152,7 @@ const OVERFLOW_JS = `(() => {
   }
   return { vw, doc, clipped: clipped.slice(0, 8) };
 })()`;
-// 收起轨可达性（c_lqtt2m 返工轮）：44px 轨必须装得下 #side-head 的全部
+// 收起轨可达性（c_lqtt2m 返工轮；W6-8 换 56px 轨）：轨必须装得下 #side-head 的全部
 // 图标钮，且每个钮中心点的 hit-test 仍是它自己。溢出轨的几何在 rect 层面
 // 看不出来（钮本身宽度没变），只有 elementFromPoint 抓得住「被相邻列的
 // 💬 聊天 按钮压住、点不到」——这正是返工轮判定的不过项。
@@ -160,7 +160,7 @@ const RAIL_JS = `(() => {
   const side = document.getElementById('side');
   const sr = side.getBoundingClientRect();
   const bad = [];
-  for (const b of document.querySelectorAll('#side-head button, #side-new, #side-sec button, #side-nav button')) {
+  for (const b of document.querySelectorAll('#side-head button, #side-new, #side-sec button:not(#side-arch), #side-nav button')) {
     const r = b.getBoundingClientRect();
     if (r.width === 0 || r.height === 0) { bad.push(b.id + '(不可见)'); continue; }
     if (r.right > sr.right + 1 || r.left < sr.left - 1)
@@ -178,9 +178,11 @@ for (const theme of ['dark', 'light']) {
   await cdp('Page.reload', {});
   await delay(1200);
 
-  // 单栏缺省：390 < 1024 → 收起轨
-  ck(`${theme} 缺省收起（44px 轨）`,
-    await evalJS(`document.body.classList.contains('side-collapsed')`));
+  // 单栏缺省：390 < 1024 → 轨常驻（W6-8：56px 图标轨，body.side-rail 落定）
+  const rail0 = await evalJS(`(() => ({ cls: document.body.classList.contains('side-collapsed'),
+    rail: document.body.classList.contains('side-rail'), drawer: document.body.classList.contains('side-drawer'),
+    w: Math.round(document.getElementById('side').getBoundingClientRect().width) }))()`);
+  ck(`${theme} 缺省收起（56px 轨）`, rail0.cls && rail0.rail && !rail0.drawer && rail0.w === 56, JSON.stringify(rail0));
   const rail1 = await evalJS(RAIL_JS);
   ck(`${theme} 收起轨图标钮全在轨内且点得到`, rail1.length === 0, rail1.join('；'));
   const o1 = await evalJS(OVERFLOW_JS);
@@ -198,32 +200,35 @@ for (const theme of ['dark', 'light']) {
   ck(`${theme} 按钮组全显（含 /cancel 全文）`, barFit.length === 0, barFit.join('；'));
   await shot(`${theme === 'dark' ? '1' : '2'}1-chat`);
 
-  // 抽屉化：展开 → absolute + 遮罩
+  // 抽屉（W6-8）：点标识 → 浮层 280 + 遮罩；轨仍在下面
   await evalJS(`document.getElementById('side-toggle').click()`);
   await delay(400);
   const drawer = await evalJS(`(() => {
-    const s = getComputedStyle(document.getElementById('side'));
+    const side = document.getElementById('side');
     const sc = document.getElementById('side-scrim');
-    return { pos: s.position, w: Math.round(parseFloat(s.width)),
+    return { pos: getComputedStyle(side).position, w: Math.round(side.getBoundingClientRect().width),
+             drawer: document.body.classList.contains('side-drawer'),
+             rail: document.body.classList.contains('side-rail'),
              scrim: getComputedStyle(sc).display,
              chatW: Math.round(document.getElementById('center').getBoundingClientRect().width) };
   })()`);
-  ck(`${theme} 侧栏抽屉化（absolute 覆盖）`, drawer.pos === 'absolute',
-    'pos=' + drawer.pos + ' w=' + drawer.w);
+  ck(`${theme} 点标识开抽屉（absolute 浮层、宽 280）`,
+    drawer.drawer && !drawer.rail && drawer.pos === 'absolute' && drawer.w === 280, JSON.stringify(drawer));
   ck(`${theme} 遮罩出场`, drawer.scrim === 'block', 'display=' + drawer.scrim);
-  ck(`${theme} 中栏恒满宽（≈390）`, drawer.chatW >= 385 && drawer.chatW <= 390,
+  ck(`${theme} 中栏 = 视口 − 轨 56（轨常驻）`, drawer.chatW >= 328 && drawer.chatW <= 340,
     'chatW=' + drawer.chatW);
   await shot(`${theme === 'dark' ? '1' : '2'}2-drawer`);
   const o2 = await evalJS(OVERFLOW_JS);
   ck(`${theme} 抽屉面零横向溢出`, o2.doc <= 0, 'doc=' + o2.doc);
 
-  // 遮罩点击关抽屉
+  // 遮罩点击关抽屉（轨不受影响）
   await evalJS(`document.getElementById('side-scrim').click()`);
   await delay(300);
-  ck(`${theme} 遮罩点击收抽屉`,
-    await evalJS(`document.body.classList.contains('side-collapsed')`));
+  const shut = await evalJS(`(() => ({ drawer: document.body.classList.contains('side-drawer'),
+    rail: document.body.classList.contains('side-rail') }))()`);
+  ck(`${theme} 遮罩点击收抽屉（轨仍在）`, !shut.drawer && shut.rail, JSON.stringify(shut));
 
-  // 会话正文（含代码块）：展开抽屉 → 点会话行 → 抽屉自动收
+  // 会话正文（含代码块）：开抽屉 → 点会话行 → 抽屉自动收
   await evalJS(`document.getElementById('side-toggle').click()`);
   await delay(300);
   const closed = await evalJS(`(() => {
@@ -231,7 +236,7 @@ for (const theme of ['dark', 'light']) {
     if (!row) return 'no-row';
     row.click();
     return new Promise(r => setTimeout(() => r(
-      document.body.classList.contains('side-collapsed') &&
+      !document.body.classList.contains('side-drawer') &&
       document.body.classList.contains('viewing') ? 'ok'
       : 'state=' + document.body.className), 600));
   })()`);

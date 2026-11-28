@@ -982,9 +982,9 @@ func TestWeb_RunForbiddenAddr(t *testing.T) {
 }
 
 // TestWeb_PageMobileResponsive pins the c_lqtt2m 390px card: one ≤480px
-// breakpoint owns every narrow-screen degradation — drawer-ised sidebar
-// (expanded state overlays the centre column; collapsed keeps the 44px
-// rail so side-toggle stays reachable), wrapping command bar, ellipsis
+// breakpoint owns every narrow-screen degradation — the sidebar opens as a
+// drawer over the centre column (W6-8: the 56px rail stays underneath so
+// side-toggle stays reachable), wrapping command bar, ellipsis
 // for the status tail and long setting values, stacked label/value rows,
 // and the column-stacked asset panes. The pre selector pairing is the
 // markdown-card gap this card closed (see the pitfalls entry): a fenced
@@ -997,14 +997,14 @@ func TestWeb_RunForbiddenAddr(t *testing.T) {
 func TestWeb_PageMobileResponsive(t *testing.T) {
 	page := string(webPage)
 	for _, need := range []string{
-		"@media (max-width: 480px)",        // the one narrow breakpoint
-		"side-scrim",                       // drawer dismiss layer (element + rules)
-		"matchMedia('(max-width: 480px)')", // JS breakpoint == CSS breakpoint
-		"drawerClose()",                    // row pick closes the drawer
-		"flex-wrap: wrap",                  // command bar wraps, nothing unreachable
-		".msg pre, #ag-last pre",           // code-block h-scroll covers ALL body containers (W6-3: .sbody retired)
-		"--seek-scrim",                     // scrim colour is a themed token
-		"body.side-collapsed #side-head { flex-direction: column", // 44px rail stacks its icons
+		"@media (max-width: 480px)",              // the one narrow breakpoint
+		"side-scrim",                             // drawer dismiss layer (element + rules)
+		"matchMedia('(max-width: 480px)')",       // JS breakpoint == CSS breakpoint
+		"drawerClose()",                          // row pick closes the drawer
+		"flex-wrap: wrap",                        // command bar wraps, nothing unreachable
+		".msg pre, #ag-last pre",                 // code-block h-scroll covers ALL body containers (W6-3: .sbody retired)
+		"--seek-scrim",                           // scrim colour is a themed token
+		".side-rail #side-head { display: grid;", // the icon rail centres its buttons (W6-8)
 	} {
 		if !strings.Contains(page, need) {
 			t.Errorf("embedded page lost the mobile-responsive piece %q (c_lqtt2m)", need)
@@ -1437,6 +1437,54 @@ func TestWeb_PageAssetPanelsW67(t *testing.T) {
 	} {
 		if strings.Contains(page, banned) {
 			t.Errorf("panel empty state still wrapped in full-width parentheses: %q", banned)
+		}
+	}
+}
+
+// TestWeb_PageIconRailW68 pins the W6-8 shape: #shell is a two-column grid
+// whose first track is the sidebar (280 expanded / 56 collapsed); the
+// collapsed state settles into the icon rail (body.side-rail) only after the
+// track transition, with the sidebar's children staying 280 wide meanwhile
+// (no reflow); a viewport under 1024 collapses automatically without
+// touching the stored preference; ≤480px keeps the rail while the full
+// sidebar opens as a drawer (body.side-drawer) over the scrim.
+func TestWeb_PageIconRailW68(t *testing.T) {
+	page := string(webPage)
+	for _, need := range []string{
+		"grid-template-columns: 280px minmax(0, 1fr);",
+		"body.side-collapsed #shell { grid-template-columns: 56px minmax(0, 1fr); }",
+		"transition: grid-template-columns .3s cubic-bezier(.4,0,.2,1);",
+		"#side > * { width: 280px; min-width: 280px; }", // no reflow while the track narrows
+		".side-rail #side > * { width: 56px; min-width: 0; }",
+		".side-rail #side-new { margin: 8px 8px 0; width: 40px; height: 40px;",
+		".side-rail #side-nav button { width: 40px; height: 40px;",
+		".side-rail :is(#side-new, #side-sec, #side-nav) .ic { width: 18px; height: 18px; }",
+		".side-rail #side-head:is(:hover, :focus-within) #side-toggle .ic { display: inline-block; }", // brand doubles as the expand button
+		"let sidePref = readSidePref();",
+		"let sideCollapsed = window.innerWidth < 1024 ? true : sidePref === true;",
+		"b.toggle('side-rail', sideCollapsed && sideSettled && !sideDrawer);",
+		"b.toggle('side-drawer', sideDrawer);",
+		"if (sideMQ && sideMQ.matches) return setDrawer(!sideDrawer);",
+		"setSide(!sideCollapsed, window.innerWidth >= 1024);", // narrow-screen toggles are session-only
+		"body.side-drawer #side { position: absolute; top: 0; bottom: 0; left: 0; z-index: 30;",
+		"body.side-drawer #side-scrim { display: block; }",
+		"#conv-proj-name { display: none; }",
+		"#list, #hist { padding: 12px 16px; }",
+		"#side-nav button { display: flex; align-items: center; gap: 8px; height: 32px;", // nav rows stay plain
+	} {
+		if !strings.Contains(page, need) {
+			t.Errorf("embedded page lost the W6-8 icon-rail piece %q (c_eq3eak)", need)
+		}
+	}
+	for _, gone := range []string{
+		"#side { width: 280px; flex: none;", // the sidebar width no longer rides on its content
+		"body.side-collapsed #side { width: 44px; }",
+		"body:not(.side-collapsed) #side {", // the old "drawer == expanded state" breakpoint rules
+		"width: min(300px, 84vw)",
+		"transition: width .15s; }",
+	} {
+		if strings.Contains(page, gone) {
+			t.Errorf("page still carries the retired sidebar piece %q (W6-8 replaces, not stacks)", gone)
 		}
 	}
 }

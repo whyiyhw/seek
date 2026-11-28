@@ -133,8 +133,8 @@ const inMain = g => g.headX >= g.sideRight - 0.5;
 await call('Runtime.enable');
 await waitReady();
 await call('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
-await evalJS('setSideCollapsed(false)');
-// 侧栏宽度有 .15s 过渡：等它落到 280 再量（动画中途的读数不是任何一态）。
+await evalJS('setSide(false, false)');
+// 侧栏宽度有 .3s 过渡：等它落到 280 再量（动画中途的读数不是任何一态）。
 await until('侧栏落定', () => evalJS(`Math.abs(document.getElementById('side').getBoundingClientRect().width - 280) <= 1`), 5000);
 
 try {
