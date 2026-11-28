@@ -156,7 +156,8 @@ const geo = () => evalJS(`(() => {
     pad = parseFloat(getComputedStyle(b).paddingLeft);
   return { sel: sec.classList.contains('has-sel'), ld: getComputedStyle(l).display,
     dd: getComputedStyle(d).display, lw: Math.round(lr.width), dw: Math.round(dr.width),
-    gap: Math.round(dr.left - lr.right), col: b.clientWidth - 2 * pad,
+    gap: Math.round(dr.left - lr.right),
+    col: Math.round(b.clientWidth - 2 * pad),   // 网格轨道下内边距带小数，取整再比
     back: getComputedStyle(document.querySelector('#ag-detail .pane-back')).display,
     cnt: document.getElementById('ag-cnt').textContent,
     dot: getComputedStyle(document.querySelector('.ag-badge'), '::before').width }; })()`);

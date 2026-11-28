@@ -205,24 +205,27 @@ async function setViewport(view) {
   await call('Emulation.setDeviceMetricsOverride', {
     width: view.width, height: view.height, deviceScaleFactor: 1, mobile: false,
   });
-  // 侧栏开合态：readSideCollapsed() 在页面加载时按 innerWidth<1024 缺省，
-  // 而 setTheme 的 reload 发生在视口覆盖生效之前——不显式钉住，桌面镜头
-  // 会顶着手机宽时算出的「已收起」态（首跑实测踩中）。按目标宽度设回
-  // 自然态：桌面展开、手机收起（真人首访在各自宽度下看到的样子）。
-  await evalJS(`setSideCollapsed(${view.name === 'mobile'})`);
-  // 侧栏宽度有 .15s 过渡：不等它走完就拍，紧接着的空态镜头会把半展开的侧栏
+  // 侧栏开合态：页面加载时按 innerWidth<1024 缺省（W6-8：<1024 自动收轨、
+  // 不写偏好），而 setTheme 的 reload 发生在视口覆盖生效之前——不显式钉住，
+  // 桌面镜头会顶着手机宽时算出的「已收起」态（首跑实测踩中）。按目标宽度
+  // 设回自然态：桌面展开、手机收起（真人首访在各自宽度下看到的样子）。
+  await evalJS(`setSide(${view.name === 'mobile'}, false)`);
+  // 侧栏宽度有 .3s 过渡：不等它走完就拍，紧接着的空态镜头会把半展开的侧栏
   // 定格成 117–167px（2026-11-27 实录，main 与 W6-1 同样中招）。等宽度连续
-  // 两次读数相同再返回——不写死目标宽度（各分支 260/280、轨 44/56 都有），
-  // 先空等一帧再读，免得过渡还没起步就被判成「已稳定」。
+  // 两次读数相同，再等过渡收尾（W6-8：轨的竖排 .side-rail 在过渡结束才换上，
+  // 收起前 wide 内容先淡出）——不写死目标宽度，先空等一帧再读，免得过渡
+  // 还没起步就被判成「已稳定」。
   await delay(60);
-  let prev = -1;
+  let prev = -1, stable = false;
   for (let i = 0; i < 40; i++) {
     const w = await evalJS(`document.getElementById('side').getBoundingClientRect().width`);
-    if (w === prev) return;
+    if (w === prev) { stable = true; break; }
     prev = w;
     await delay(40);
   }
-  throw new Error(`侧栏宽度 2s 内未落定（最后一次读数 ${prev}px）`);
+  // 守卫必须在收尾等待之前：40 次读数都不稳定就抛，别把半收起的侧栏拍进镜头。
+  if (!stable) throw new Error(`侧栏宽度 2s 内未落定（最后一次读数 ${prev}px）`);
+  for (let i = 0; i < 20 && await evalJS(`document.body.classList.contains('side-fading')`); i++) await delay(50);
 }
 async function until(what, expr, ms = 8000) {
   const t0 = Date.now();
