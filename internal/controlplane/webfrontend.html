@@ -1191,6 +1191,11 @@
     #hk-pause span { display: none; }
     #mem-body, #agents-body, #stat-body, #hk-log {
       padding-left: 16px; padding-right: 16px; }
+    /* 审计行（c_lf2qrc）：时间/hook/事件名三段已占满一行，结论（耗时·退出码
+       ·denied）被挤成 0 宽——结论独占第二行，事件名可收缩；桌面基线不动。 */
+    .hk-row { flex-wrap: wrap; }
+    .hk-row .hk-ev { flex: 0 1 auto; min-width: 0; overflow: hidden;
+                     text-overflow: ellipsis; }
     /* 气泡放宽一档：单栏下代码块（pre 本就 overflow-x:auto，markdown
        卡同容器）多一截横向空间 */
     .msg.user .bub { max-width: 94%; }

@@ -161,7 +161,17 @@
 #（+246941B）不是 main，勿混。web-gate 不带 -trimpath，绝对路径进产物，换
 # 目录重编有 ±9KB 量级抖动（实测两处独立 clone 分别 −8960B / +72B）——远在
 # 200KB 预算余量内，不改闸判据；主会话在自己检出重跑复核即同线。
-31823837
+31827957
+# 2026-11-28 c_lf2qrc 390px 审计行结论可见（本卡 delta +4120B，DELTA-added）：
+# 同路径非 -trimpath 实测（linux/amd64 CGO_ENABLED=0，同 worktree stash 往返）：
+# 32024673B → 32028793B；-trimpath 交叉核：31948663B → 31952847B（+4184B）。
+# 页面源净 +364B（webfrontend.html 276978→277342B：≤480px 块内 .hk-row
+# flex-wrap + .hk-ev 可收缩两条规则，桌面基线一字未动），无新 Go。
+# 注意量级：+364B 页面换来 +4120B 构建体——不是记账错误，是 embed 段的 ~4KB
+# 台阶（同路径对照实测：页面 +20B 构建体不变 32024673B，+30B 即跳到
+# 32028745B）；旧 pin 余量只剩 3964B，任何几十字节的页面增量都可能一次吃掉
+# 它。抬 pin 只认本卡 delta（31823837 → 31827957），不吸收既有未棘轮漂移
+# （同 c_ekuuof / c_w74tuo / c_eq3eak 归因口径）。
 # 2026-11-20 c_rqcuaa ratchet: +53096B (session rename/archive —
 # internal/sessmeta state+audit pair, session/rename|archive methods +
 # list override/filter, sidebar inline-rename/archive UI ~6.7KB embed).
