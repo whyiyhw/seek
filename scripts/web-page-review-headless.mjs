@@ -216,16 +216,16 @@ async function setViewport(view) {
   // 收起前 wide 内容先淡出）——不写死目标宽度，先空等一帧再读，免得过渡
   // 还没起步就被判成「已稳定」。
   await delay(60);
-  let prev = -1;
+  let prev = -1, stable = false;
   for (let i = 0; i < 40; i++) {
     const w = await evalJS(`document.getElementById('side').getBoundingClientRect().width`);
-    if (w === prev) break;
+    if (w === prev) { stable = true; break; }
     prev = w;
     await delay(40);
   }
+  // 守卫必须在收尾等待之前：40 次读数都不稳定就抛，别把半收起的侧栏拍进镜头。
+  if (!stable) throw new Error(`侧栏宽度 2s 内未落定（最后一次读数 ${prev}px）`);
   for (let i = 0; i < 20 && await evalJS(`document.body.classList.contains('side-fading')`); i++) await delay(50);
-  return;
-  throw new Error(`侧栏宽度 2s 内未落定（最后一次读数 ${prev}px）`);
 }
 async function until(what, expr, ms = 8000) {
   const t0 = Date.now();
