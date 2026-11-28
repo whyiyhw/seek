@@ -15,7 +15,7 @@
 //   翻页走完 → 逐页点到 1234 条：页界连续、末页「— 已到末尾 —」、每页时延
 //   切换+XSS → 短会话 2 条即末尾；注入载荷字面渲染不执行；切回长会话重开
 //   搜索     → 输入 tiny：列表只剩短会话；清空恢复
-//   收起记忆 → 点 ⟨：侧栏成 44px 图标轨；刷新后仍收起；展开后刷新仍展开
+//   收起记忆 → 点折叠钮：侧栏成 56px 图标轨（W6-8）；刷新后仍收起；展开后刷新仍展开
 //   新建     → 点 ＋新建：发出 /new 同款指令（未绑定时得未绑定提示）
 //   回聊天   → 💬 聊天：聊天面/输入框原样可见（侧栏是加法，零回归）
 //
@@ -152,6 +152,7 @@ const snapshot = () => evalJS(`(() => {
   const vis = el => el ? getComputedStyle(el).display !== 'none' : false;
   return {
     collapsed: document.body.classList.contains('side-collapsed'),
+    rail: document.body.classList.contains('side-rail'),
     sideW: Math.round(side.getBoundingClientRect().width),
     listShown: vis(list),
     rows: [...document.querySelectorAll('#sess-list .sess-row')].map(r => ({
@@ -364,9 +365,10 @@ try {
 trace('景 5：收起展开 + 刷新保持');
 try {
   await clickSel('#side-toggle');
-  const s = await until('收起', s => s.collapsed && s.sideW <= 48, 5000);
-  ck('收起：body.side-collapsed + 44px 图标轨 + 列表让位',
-    s.collapsed && s.sideW <= 48 && !s.listShown, `w=${s.sideW} listShown=${s.listShown}`);
+  // 轨宽是 .3s 过渡（W6-8）：等类翻面、宽度落到 56、轨排版落定（.side-rail）。
+  const s = await until('收起', s => s.collapsed && s.sideW === 56 && s.rail, 5000);
+  ck('收起：body.side-collapsed + 56px 图标轨（.side-rail）+ 列表让位',
+    s.collapsed && s.sideW === 56 && s.rail && !s.listShown, `w=${s.sideW} rail=${s.rail} listShown=${s.listShown}`);
   const stored = await evalJS(`localStorage.getItem('seek-side-collapsed')`);
   ck('收起位已写入 localStorage', stored === '1', `got ${stored}`);
   // 刷新页面：同一 profile、同一 URL —— localStorage 必须把收起态带回来。
@@ -374,10 +376,10 @@ try {
   await delay(400);
   await waitReady('刷新后');
   const r = await until('刷新后仍收起', s => s.collapsed && s.rows.length >= SESS_PAGE, 10000);
-  ck('刷新后收起状态保持（验收②）', r.collapsed && r.sideW <= 48, `collapsed=${r.collapsed} w=${r.sideW}`);
+  ck('刷新后收起状态保持（验收②）', r.collapsed && r.sideW === 56, `collapsed=${r.collapsed} w=${r.sideW}`);
   ck('收起态下侧栏仍按 30 行挂载（展开即用）', r.rows.length === SESS_PAGE, `rows=${r.rows.length}`);
   await clickSel('#side-toggle');
-  // 宽度是 150ms 过渡：等类翻面 + 宽度落到 280 再断言（读同一份快照即可）。
+  // 宽度是 .3s 过渡：等类翻面 + 宽度落到 280 再断言（读同一份快照即可）。
   // 旧写法等到「>200」就算展开——W5 的 260 时代留下的宽口径，W6-2 起 280；
   // 在动画中途量到 262 也算过，文案与判据都对不上。
   const e = await until('展开落定', s => !s.collapsed && Math.abs(s.sideW - 280) <= 1 && s.rows.length >= SESS_PAGE, 5000);
@@ -578,12 +580,32 @@ try {
   await evalJS('location.reload(), "ok"');
   await delay(500);
   await waitReady('窄屏刷新后');
-  const n = await until('窄屏缺省收起', s => s.collapsed && s.sideW <= 48, 10000);
-  ck('窄屏 900px、无记忆位 → 缺省收起（44px 轨）', n.collapsed && n.sideW <= 48, `w=${n.sideW}`);
+  const n = await until('窄屏缺省收起', s => s.collapsed && s.sideW === 56, 10000);
+  ck('窄屏 900px、无记忆位 → 缺省收起（56px 轨）', n.collapsed && n.sideW === 56, `w=${n.sideW}`);
   const stored = await evalJS(`localStorage.getItem('seek-side-collapsed')`);
   ck('缺省收起不写记忆位（用户没做过选择）', stored === null, `got ${stored}`);
   // 收窄视口下聊天面仍在（收起只是让位，不是隐藏界面）。
   ck('窄屏收起时聊天面/输入框可用', n.chatShown && n.formShown, '');
+  // 偏好 = 收起（W6-8）：宽屏照偏好收起；窄屏自动收不改写它；变宽仍照偏好。
+  await evalJS(`localStorage.setItem('seek-side-collapsed', '1'), 'ok'`);
+  await evalJS('location.reload(), "ok"');
+  await delay(400);
+  await waitReady('偏好=收起刷新后');
+  const p1 = await until('宽屏照偏好收起', s => s.collapsed && s.sideW === 56 && s.rail, 10000);
+  ck('偏好=收起：宽屏照偏好收起（56px 轨）', p1.rail && p1.sideW === 56, `w=${p1.sideW}`);
+  await cdp('Emulation.setDeviceMetricsOverride',
+    { width: 900, height: 720, deviceScaleFactor: 1, mobile: false });
+  await evalJS('location.reload(), "ok"');
+  await delay(400);
+  await waitReady('偏好=收起窄屏刷新后');
+  await cdp('Emulation.clearDeviceMetricsOverride');
+  await evalJS('location.reload(), "ok"');
+  await delay(400);
+  await waitReady('偏好=收起回宽屏后');
+  const p2 = await until('窄屏走过一遍回宽屏', s => s.collapsed && s.sideW === 56 && s.rail, 10000);
+  ck('偏好=收起：窄屏自动收不改写偏好，变宽仍收起',
+    p2.rail && await evalJS(`localStorage.getItem('seek-side-collapsed')`) === '1', `w=${p2.sideW}`);
+  await evalJS(`localStorage.removeItem('seek-side-collapsed'), 'ok'`);
   // 宽视口复位：清覆盖后刷新回到展开（记忆位仍为空 → 宽度缺省）。
   await cdp('Emulation.clearDeviceMetricsOverride');
   await evalJS('location.reload(), "ok"');

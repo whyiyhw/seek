@@ -222,7 +222,7 @@ trace('景 B：会话面板 + 夹具');
 try {
   // 📚 弹出面板已随 main 的侧栏常驻化（c_txz6vz）退役——列表常驻 #sess-list，
   // 无头视口窄可能默认收起，显式展开后再断言可见性。
-  await evalJS(`typeof setSideCollapsed === 'function' && setSideCollapsed(false), 'ok'`);
+  await evalJS(`typeof setSide === 'function' && setSide(false, false), 'ok'`);   // W6-8：setSide(v, store)
   const srows = () => evalJS(`(() => ({
     sideOpen: !document.body.classList.contains('side-collapsed'),
     rows: [...document.querySelectorAll('#sess-list .sess-row')].map(r => r.dataset.sid),
