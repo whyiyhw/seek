@@ -213,7 +213,8 @@ type StageOptions struct {
 // The staging directory lives under os.TempDir() with a
 // "seek-skill-staging-" prefix; callers SHOULD treat the path as
 // opaque and only re-feed it through Commit. The directory survives
-// until Commit consumes it (via rename) or the OS cleans /tmp.
+// until Commit consumes it (via rename — both callers then remove the
+// parent); a fetch that is never committed is left for the OS to clean.
 func Stage(opts StageOptions) (*StageResult, error) {
 	if opts.Source == "" {
 		return nil, errors.New("skillmgr: stage: Source is required")

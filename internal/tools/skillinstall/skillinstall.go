@@ -245,6 +245,13 @@ func (t CommitTool) Execute(_ context.Context, raw json.RawMessage) (string, err
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", commitName, err)
 	}
+	// Commit renames pkg/ away but leaves its seek-skill-staging-<n>/
+	// parent in os.TempDir(). The CLI path (skillmgr.Install) always
+	// deferred that cleanup; this tool path did not, so every successful
+	// skill_fetch + skill_commit leaked one empty dir. Failure paths keep
+	// the tree on purpose — a refused or mis-argued commit can be retried
+	// (force, other scope) only because the staged files are still there.
+	_ = os.RemoveAll(filepath.Dir(stage.StagingDir))
 
 	// Mention /new EXPLICITLY in the result text. The LLM will pass
 	// it through to the user; without this hint, install completes
