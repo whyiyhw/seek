@@ -1024,6 +1024,106 @@ func TestWeb_PageMobileResponsive(t *testing.T) {
 	}
 }
 
+// TestWeb_PageHooksAuditRowMobile pins the c_lf2qrc 390px card: a hook-audit
+// row's four segments (timestamp / hook / event / verdict tail) are
+// `flex: none` at base width, so at 390px the fixed three ate the whole row
+// and the tail — duration · exit code · denied — collapsed to a zero-width
+// ellipsis while a long event name overflowed #hk-log by 20px (measured on
+// drive/c_lf2qrc: tail 0–62px wide, .hk-log scrollWidth 354 vs clientWidth
+// 334; 18-hooks-light-mobile / 32-hooks-dark-mobile in the 2026-11-27
+// review shots).
+//
+// The card's approved手段 is narrow-only: inside the one ≤480px breakpoint
+// the row wraps and .hk-ev is allowed to shrink (min-width:0 + ellipsis) so
+// the verdict tail gets its own second line and stays readable. So this test
+// asserts BOTH halves — the addition lives INSIDE the breakpoint block, and
+// the desktop base rules are byte-identical to before (no flex-wrap, .hk-ev
+// still `flex: none`). Editing the base rule instead would change every
+// desktop row and slip past a "the strings exist somewhere" assertion, which
+// is why the block is brace-matched rather than substring-searched.
+func TestWeb_PageHooksAuditRowMobile(t *testing.T) {
+	page := string(webPage)
+	narrow, err := cssBlockAt(page, "@media (max-width: 480px)")
+	if err != nil {
+		t.Fatalf("page shape changed: %v", err)
+	}
+	// ① narrow-only additions: wrap the row, let the event name shrink.
+	for _, need := range []string{
+		".hk-row { flex-wrap: wrap; }",
+		".hk-row .hk-ev { flex: 0 1 auto; min-width: 0;",
+		"overflow: hidden; text-overflow: ellipsis; }",
+	} {
+		if !strings.Contains(narrow, need) {
+			t.Errorf("≤480px block lost %q — the audit row keeps collapsing the verdict tail at 390px (c_lf2qrc)", need)
+		}
+	}
+	// ② the desktop base rules must stay exactly as they were: the card
+	// scopes the fix to the narrow breakpoint ("桌面形态不动").
+	for _, base := range []string{
+		".hk-row { display: flex; gap: 10px; white-space: nowrap; }",
+		".hk-row .hk-ev { color: var(--seek-warn); flex: none; }",
+		".hk-row .hk-rest { color: var(--seek-fg-soft); overflow: hidden; text-overflow: ellipsis; }",
+	} {
+		i := strings.Index(page, base)
+		if i < 0 {
+			t.Fatalf("desktop base rule changed: %q missing", base)
+		}
+		if i >= strings.Index(page, "@media (max-width: 480px)") {
+			t.Errorf("desktop base rule %q must live OUTSIDE the ≤480px block", base)
+		}
+	}
+	// ③ the base .hk-row itself must carry no wrap: that would be the
+	// desktop形态 change this card explicitly excludes (② pins the full
+	// base rule; this is the targeted tripwire for the one property).
+	base := cssRuleAt(page, ".hk-row {")
+	if strings.Contains(base, "flex-wrap") {
+		t.Errorf("base .hk-row gained flex-wrap — desktop audit rows changed (c_lf2qrc): %q", base)
+	}
+}
+
+// cssRuleAt returns the first rule whose selector text matches `sel` up to
+// its closing brace (used to pin one rule's properties without substring
+// guessing across the whole page).
+func cssRuleAt(page, sel string) string {
+	i := strings.Index(page, sel)
+	if i < 0 {
+		return ""
+	}
+	end := strings.Index(page[i:], "}")
+	if end < 0 {
+		return ""
+	}
+	return page[i : i+end]
+}
+
+// cssBlockAt returns the body of the CSS block opening with `open` (the
+// string up to and including its opening "{"), brace-matched so an assertion
+// can say "inside the ≤480px breakpoint" instead of "somewhere in the page".
+// Comments are left alone — the selectors asserted off it are inside rules.
+func cssBlockAt(page, open string) (string, error) {
+	i := strings.Index(page, open)
+	if i < 0 {
+		return "", fmt.Errorf("%q not found", open)
+	}
+	start := strings.Index(page[i:], "{")
+	if start < 0 {
+		return "", fmt.Errorf("%q has no opening brace", open)
+	}
+	depth := 0
+	for j := i + start; j < len(page); j++ {
+		switch page[j] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return page[i:j], nil
+			}
+		}
+	}
+	return "", fmt.Errorf("%q block unterminated", open)
+}
+
 // TestWeb_PageVisualBase pins the W6-1 card (c_pozbmd): the page's whole
 // visual base moves to dsh's measured shell values, with the type stack
 // as the load-bearing piece. Four assertions, each structural:
