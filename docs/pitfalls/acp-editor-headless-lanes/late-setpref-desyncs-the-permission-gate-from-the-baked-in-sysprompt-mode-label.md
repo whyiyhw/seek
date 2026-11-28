@@ -1,6 +1,6 @@
 ### Late SetPref desyncs the permission gate from the baked-in sysprompt Mode label
-- **Saw**: the obvious SEEK_ACP_YOLO wiring — `policy.SetPref(PrefYolo)` at the `seek acp` short-circuit (goal-mode precedent main.go:1732) — would be half-broken: the gate allows bash while the sysprompt header reads `Mode: deny` (bash tool description: "Refused under the current permission mode"), so the model likely never tries bash.
+- **Saw**: the obvious SEEK_ACP_YOLO wiring — `policy.SetPref(PrefYolo)` at the `seek acp` short-circuit (goal-mode precedent main.go:1732) — would be half-broken: the gate allows bash while the sysprompt header reads `Mode: deny` (bash description: "Refused under the current permission mode"), so the model likely never tries bash.
 - **Why**: the gate is live state (SetPref applies on the next Check) but the sysprompt Mode label is baked ONCE at startup (`sysprompt.Compose(..., ModeLabel(initialPref, ...))`); only the TUI syncs via `Agent.SetModeLabel` — headless lanes (acp/goal/rpc) never do.
 - **Fix**: resolve SEEK_ACP_YOLO into `initialPref` BEFORE `sysprompt.Compose` (cmd/seek/main.go, gated on the ACP lane so a stray env can't yolo the TUI); env parsing owned by `internal/acp/headless.go` (c_rewul5).
-- **Lesson**: on headless lanes a permission posture must win before `sysprompt.Compose` or also call `Agent.SetModeLabel`; changing posture outside the TUI — check BOTH gate and prompt label.
-- **Refs**: `cmd/seek/main.go` (initialPref block), `internal/acp/headless.go`, `internal/sysprompt/sysprompt.go:ModeLabel`, `docs/guide-zed.md` §5.1
+- **Lesson**: on headless lanes a permission posture must win before `sysprompt.Compose` or also call `Agent.SetModeLabel`; changing posture outside the TUI means checking BOTH gate and prompt label.
+- **Refs**: `cmd/seek/main.go`, `internal/acp/headless.go`, `internal/sysprompt/sysprompt.go:ModeLabel`, `docs/guide-zed.md` §5.1

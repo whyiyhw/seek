@@ -1,6 +1,6 @@
 ### Hand-rolled readLine dropped bufio.Scanner's dropCR — CRLF lines gained an invisible \r
-- **Saw**: after replacing `bufio.Scanner` with a hand-written `ReadSlice` loop (to elide over-long lines instead of hard-failing), every line of a CRLF working-tree file gained a trailing `\r` in read output — invisible in the TUI, present in the context bytes.
-- **Why**: Scanner's `ScanLines` silently drops the `\r` of a `\r\n` pair (`dropCR`) — undocumented at the call site, inside the stdlib split function — so reimplementing "read a line" regressed invisibly; edit's line-ending fallback tier masked the damage (old_string with or without `\r` normalises to a match).
+- **Saw**: after replacing `bufio.Scanner` with a hand-written `ReadSlice` loop (to elide over-long lines instead of hard-failing), every line of a CRLF working-tree file gained a trailing `\r` — invisible in the TUI, present in the context bytes.
+- **Why**: Scanner's `ScanLines` silently drops the `\r` of a `\r\n` pair (`dropCR`), undocumented at the call site — so reimplementing "read a line" regressed invisibly; edit's line-ending fallback tier masked it (old_string with or without `\r` normalises to a match).
 - **Fix**: `trimNL` strips one `\n` then one `\r` (Scanner.Text semantics, including the final no-newline token); test pins CRLF input → CR-free output.
 - **Lesson**: when replacing a stdlib convenience with a hand-rolled loop, diff the BEHAVIOURS — Scanner's contract includes token-mangling (dropCR); on a core.autocrlf Windows checkout this ships to every session reading a checked-out text file.
-- **Refs**: `internal/tools/read/read.go:trimNL`, `internal/tools/read/read_test.go:TestRead_CRLFStripped`, this file's "core.autocrlf + editing .sh on Windows" entry above
+- **Refs**: `internal/tools/read/read.go:trimNL`, `internal/tools/read/read_test.go:TestRead_CRLFStripped`, 同族 "core.autocrlf + editing .sh on Windows" 条目

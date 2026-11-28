@@ -1,6 +1,6 @@
 ### A clean empty completion aborted the turn — but a retry needs "nothing was rendered" as its gate
-- **Saw**: a turn died with `agent: model returned an empty response (no content and no tool calls)` after a normally-completed stream (200, `finish=stop`, zero deltas) — an upstream flake costing a manual re-send.
+- **Saw**: a turn died with `agent: model returned an empty response (no content and no tool calls)` after a normally-completed stream (200, `finish=stop`, zero deltas) — an upstream flake costing a re-send.
 - **Why**: the guard rightly refuses to commit a content-less, tool-less assistant message (DeepSeek 400s the next request), but treated every empty as fatal — retry is safe only before any event emits; re-issuing after reasoning deltas double-renders.
 - **Fix**: `errEmptyResponse` sentinel + retry-once; `runTurnDeepSeek`/`runTurnLLM` return it only when `started == false` and finish ""/`stop`; reasoning-only empties and finish=length keep the hard error; pinned by `TestAgent_EmptyResponse_RetriedOnceAndRecovers` (2 requests, 1 MessageStart, 1 TurnEnd), `TestAgent_ReasoningOnlyEmpty_NotRetried` (1 request), `TestAgent_EmptyChoicesUsageOnly` (exhaustion later non-fatal: c_jdel6u).
 - **Lesson**: "retryable" is a property of the error AND what the consumer already saw — encode it where visibility is known (the streaming function), not at the retry site.
-- **Refs**: `pkg/agent/agent.go` (`errEmptyResponse`, retry loop in `Prompt`, both `runTurn*` guards), `pkg/agent/agent_test.go`
+- **Refs**: `pkg/agent/agent.go` (`Prompt` retry loop, `runTurn*` guards), `pkg/agent/agent_test.go`

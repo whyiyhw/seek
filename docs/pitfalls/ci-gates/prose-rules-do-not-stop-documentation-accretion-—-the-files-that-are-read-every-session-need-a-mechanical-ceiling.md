@@ -1,6 +1,6 @@
 ### Prose rules do not stop documentation accretion — the files that are read every session need a mechanical ceiling
-- **Saw**: `AGENTS.md` (3178 words) and `CLAUDE.md` (3054) are ~2x dsh's root file (gate-capped at 1600), and both grew in the change that measured them — nothing pushed back, every addition individually justified.
+- **Saw**: `AGENTS.md` (3178 words) and `CLAUDE.md` (3054) are ~2x dsh's root file (gate-capped at 1600), and both grew in the change that measured them — every addition individually justified.
 - **Why**: read every session, every word is paid in prompt tokens forever while the cost is invisible at writing time; dsh's accretion happened with the rule and reviewer attention already in place.
 - **Fix**: `scripts/verify-doc-budgets.sh` + `scripts/doc-budgets.tsv`, wired as a CI job. Both FROZEN at current size with a 1800-word target (additions require displacement). Reference docs, PRDs, `pitfalls.md` unbudgeted. A missing budgeted file also fails (a rename can't orphan its budget). Bash 3.2 compatible (no `mapfile`, no associative arrays).
-- **Lesson**: word count forces the relocation decision when content is added — the only moment the author can place it correctly. Apply to per-session-cost files, never to files whose length is their value.
-- **Refs**: `scripts/verify-doc-budgets.sh`, `scripts/doc-budgets.tsv`, `.github/workflows/ci.yml` (doc-budgets job), dsh `.agents/notes/implemented/process/2026-07-04-doc-tiers-and-budgets.md`
+- **Lesson**: word count forces the relocation decision when content is added — the only moment the author can place it correctly. Apply to per-session-cost files, never files whose length is their value.
+- **Refs**: `scripts/verify-doc-budgets.sh`, `scripts/doc-budgets.tsv`, `.github/workflows/ci.yml`, dsh `.agents/notes/implemented/process/2026-07-04-doc-tiers-and-budgets.md`

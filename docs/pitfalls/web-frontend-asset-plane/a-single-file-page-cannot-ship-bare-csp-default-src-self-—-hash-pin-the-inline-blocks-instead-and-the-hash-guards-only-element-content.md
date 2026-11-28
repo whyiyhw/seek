@@ -1,6 +1,6 @@
 ### A single-file page cannot ship bare CSP `default-src 'self'` — hash-pin the inline blocks instead (and the hash guards only element content)
-- **Saw**: §5.5 prescribes `default-src 'self'` with "no inline script/eval", but single-file `webfrontend.html` (§4.3) carries JS and CSS INLINE — that policy blocks both: page dead on arrival (blank, unstyled, no logic).
+- **Saw**: §5.5 prescribes `default-src 'self'` with "no inline script/eval", but single-file `webfrontend.html` (§4.3) carries JS and CSS INLINE — the policy blocks both: page dead on arrival.
 - **Why**: "no inline" assumes JS lives in same-origin FILES; single-file inline is the shape. CSP3: a `sha256-<b64>` hash source on `script-src`/`style-src` over the EXACT bytes between tags, derived at startup from the same `//go:embed` — page edits never desync the policy.
 - **Fix**: `webCSP()` (webfrontend_static.go) scans `<script>/<style>` blocks from the embed, hashes them, appends tokens to `default-src 'self'`; card `c_ph2zax`.
 - **Lesson**: the hash covers ELEMENT CONTENT only — inline handler attributes (`onclick=`), `eval`, injected `<script>` stay blocked, so DOM-API-only discipline (textContent, addEventListener) stays load-bearing for W2+; a second script tag needs no CSP edit (hashes re-derive), but attribute-borne JS dies silently.
-- **Refs**: `internal/controlplane/webfrontend_static.go` `webCSP`; `docs/prd/feature-web-frontend.md` §5.5 落地口径.
+- **Refs**: `internal/controlplane/webfrontend_static.go` `webCSP`; `docs/prd/feature-web-frontend.md` §5.5

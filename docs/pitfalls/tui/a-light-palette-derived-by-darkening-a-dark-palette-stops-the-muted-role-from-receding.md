@@ -1,6 +1,6 @@
 ### A light palette derived by darkening a dark palette stops the "muted" role from receding
 - **Saw**: on a light-theme terminal every muted element (plan rows, separators, unselected menu items, footer hints) read as loud as body prose — finding the in-progress step meant reading each line.
-- **Why**: `lightPalette` darkened each dark-theme value — right for foreground roles, backwards for Muted, whose job is to RECEDE toward the ground: 237 (#3a3a3a) sat one grey step off Assistant's 235 (#262626), 11.4:1 vs body 15.1:1 on white (1.33x separation where the dark palette has 3.2x); the miss was one of MAGNITUDE, which is why it survived review (235 and 237 look sensible side by side in a diff).
+- **Why**: `lightPalette` darkened each dark-theme value — right for foreground roles, backwards for Muted, whose job is to RECEDE toward the ground: 237 (#3a3a3a) sat one grey step off Assistant's 235 (#262626), 11.4:1 vs body 15.1:1 on white (1.33x separation where the dark palette has 3.2x); the miss was one of MAGNITUDE, so review missed it (235 and 237 look sensible side by side in a diff).
 - **Fix**: Muted 237 → 245 (#8a8a8a) = 3.45:1 on white, matching the dark palette's 3.44:1 on black; `TestPalettes_MutedRecedesBehindBody` asserts the RELATIONSHIP (recede direction, 3.0x body/muted floor, Reasoning above Muted) instead of pinning constants.
-- **Lesson**: a palette encodes a hierarchy of contrast RATIOS, not colours — derive a second theme by preserving each role's ratio against its OWN ground, and assert it in a test because the hierarchy is invisible to source review.
-- **Refs**: `internal/tui/styles.go` (`lightPalette`), `internal/tui/styles_test.go`
+- **Lesson**: a palette encodes a hierarchy of contrast RATIOS, not colours — derive a second theme by preserving each role's ratio against its OWN ground, and assert it in a test: the hierarchy is invisible to source review.
+- **Refs**: `internal/tui/styles.go`, `internal/tui/styles_test.go`

@@ -1,6 +1,6 @@
 ### Windows clock granularity: `time.Since` returns exactly 0 across sub-tick gaps — timing tests need a sleep
-- **Saw**: new TUI timing tests failed deterministically standalone with `llmTime = 0s, want > 0` — the span between `applyAgentEvent(TurnStart)` and `applyAgentEvent(MessageEnd)` is a few hundred nanoseconds, and `time.Since` returned exactly 0. The same tests passed intermittently under different load (tick crossing is a coin flip).
-- **Why**: `time.Now()`/`time.Since` on Windows has tick granularity coarser than a µs-scale gap; two readings inside the same tick are identical, so `Sub` is exactly 0. Nothing is wrong with the code under test.
-- **Fix**: each test that asserts a positive duration sleeps ≥2ms inside the measured span before the closing event (established empirically: 2ms was reliable; sub-ms was not).
-- **Lesson**: on Windows, never assert `duration > 0` on a span you created and measured within the same goroutine microseconds apart — either sleep across a tick or assert structure (zeroed state, accumulation) instead of magnitude.
-- **Refs**: `internal/tui/summary_test.go` (the `time.Sleep(2 * time.Millisecond)` comments), this file's "t.Cleanup(chdir) after t.TempDir() breaks Windows TempDir removal" entry (same platform, same class)
+- **Saw**: new TUI timing tests failed deterministically standalone with `llmTime = 0s, want > 0` — the span between `applyAgentEvent(TurnStart)` and `applyAgentEvent(MessageEnd)` is a few hundred nanoseconds and `time.Since` returned exactly 0. Under load they passed intermittently (tick crossing is a coin flip).
+- **Why**: `time.Now()`/`time.Since` on Windows has tick granularity coarser than a µs-scale gap; two readings in one tick are identical, so `Sub` is exactly 0. The code under test is fine.
+- **Fix**: each test asserting a positive duration sleeps ≥2ms inside the measured span before the closing event (empirical: 2ms reliable, sub-ms not).
+- **Lesson**: on Windows, never assert `duration > 0` on a span created and measured microseconds apart in one goroutine — sleep across a tick or assert structure (zeroed state, accumulation), not magnitude.
+- **Refs**: `internal/tui/summary_test.go` (the `time.Sleep(2 * time.Millisecond)` comments); related entry "t.Cleanup(chdir) after t.TempDir() breaks Windows TempDir removal"

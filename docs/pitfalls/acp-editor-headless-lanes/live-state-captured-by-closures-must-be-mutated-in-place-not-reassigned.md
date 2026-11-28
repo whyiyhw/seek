@@ -1,6 +1,6 @@
 ### Live state captured by closures must be MUTATED in place, not reassigned
-- **Saw**: ACP-lane resume written as `b.sess = loaded` passes every `b.sess` inspection while leaving main's four closures (`subagentMgr`'s `ParentSidFn`, `agent.Config.SessionID`'s x-opencode-session, the checkpoint `Manager`'s session scope, the plan-bridge sid) pointing at the ORIGINAL session — subagent transcripts and session headers get written under the pre-load id, and `-resume` sees two divergent files.
+- **Saw**: ACP-lane resume written as `b.sess = loaded` passes every `b.sess` inspection while main's four closures (`subagentMgr`'s `ParentSidFn`, `agent.Config.SessionID`'s x-opencode-session, the checkpoint `Manager`'s session scope, the plan-bridge sid) still point at the ORIGINAL session — subagent transcripts and session headers get written under the pre-load id, and `-resume` sees two divergent files.
 - **Why**: those closures captured `activeSession` at construction so `/compact` can fork a session and everybody follows; reassigning the field creates a second pointer while the captured one keeps its old target — AGENTS.md's "two sources of truth" smell in pointer form.
 - **Fix**: `*b.sess = *loaded` in `acpBackend.LoadSession`; every captured closure dereferences the same address and keeps working.
 - **Lesson**: here "the session" is a long-lived POINTER shared by closures; any resume/swap path must copy INTO it. Smell: assigning to a field of type `*session.Session` after startup.
-- **Refs**: `cmd/seek/main.go` (`acpBackend.LoadSession`, `acpBackend.sess` field comment), `subagent.ManagerOpts.ParentSidFn`, `agent.Config.SessionID`
+- **Refs**: `cmd/seek/main.go` (`acpBackend.sess` 注释), `subagent.ManagerOpts.ParentSidFn`, `agent.Config.SessionID`

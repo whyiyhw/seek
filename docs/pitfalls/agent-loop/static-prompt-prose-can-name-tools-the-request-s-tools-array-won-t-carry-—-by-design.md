@@ -3,4 +3,4 @@
 - **Why**: startup order is load-bearing — `session.New` freezes the composed prompt BEFORE the whitelist runs (the whitelist must see the full registry to validate `-tools` names, incl. MCP tools); filtering would restructure startup for the bare-core lane (v8·T1) that deviates from default composition.
 - **Fix**: kept it static, documented inline (`cmd/seek/main.go`, mcpSection declaration): the section describes what loaded; the request's tools array is the callable truth.
 - **Lesson**: the system prompt is static prose, NOT a mirror of the per-request tools array — don't couple prompt assembly to registry mutation order; narrower tools with broader prose is accepted (the model learns unavailability from the refusal).
-- **Refs**: `cmd/seek/main.go` (mcpSection comment, applyToolsWhitelist), `internal/sysprompt/sysprompt.go` (rootTpl static tool docs), `docs/prd/feature-mcp-client.md` §3.1
+- **Refs**: `cmd/seek/main.go`, `internal/sysprompt/sysprompt.go`, `docs/prd/feature-mcp-client.md` §3.1

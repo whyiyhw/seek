@@ -1,6 +1,6 @@
 ### The terminal lifecycle observer must be the LAST defer registered — and must not inherit the cancelled ctx
 - **Saw**: (card c_xt6ql7) two near-misses: (1) `defer reg.NotifyStop(...)` registered after `defer close(out)` runs after the close, so `for ev := range ch` returns before the side effect is observable. (2) `NotifySubagentStop` in `runAndFinish` fires after `sp.cancel()`, handing every shell hook `sp.runCtx` = `context.Canceled` — `exec.CommandContext` kills `bash -c` immediately: audit row written, exit -1, command never runs.
-- **Why**: defers run LIFO (register later = run earlier); a terminal event reports a cancelled thing rather than participating in it — inheriting cancellation there is always wrong.
+- **Why**: defers run LIFO (register later = run earlier); a terminal event reports a cancelled thing rather than participating in it — inheriting cancellation is always wrong.
 - **Fix**: in `PromptFiles` the defer order is now currentEvents cleared → Stop → `close(out)`; `NotifyStop` and `NotifySubagentStart`/`NotifySubagentStop` dispatch with `context.WithoutCancel(ctx)` (nil-guard first: `WithoutCancel(nil)` panics). Locked by `TestAgent_Stop_*` and `TestSubagentStartStop_*`.
 - **Lesson**: every terminal observer must (a) be the last defer registered in its goroutine and (b) get `context.WithoutCancel`.
 - **Refs**: `pkg/agent/agent.go:PromptFiles`, `internal/subagent/manager.go:runAndFinish`, `docs/prd/feature-orchestration.md` D15

@@ -1,6 +1,6 @@
 ### An in-band marker is machine-readable as an ANSWER — the JSON stream needs its own signal
-- **Saw**: `seek -p --json` on an empty upstream (reasoning ate `--max-tokens`) exited 0, sole content `text_delta` carrying `[empty: 上游空补全，已重试1次]` — delta-concatenating consumers (the documented way; `eval/run.sh`, `internal/controlplane`) reported it as the answer.
-- **Why**: the self-heal (c_jdel6u) books the marker as assistant content (history must stay legal; it must stream as a `text_delta`); the JSON contract carried no other trace: `finish_reason=stop`, like a real answer.
+- **Saw**: `seek -p --json` on an empty upstream (reasoning ate `--max-tokens`) exited 0, sole content `text_delta` `[empty: 上游空补全，已重试1次]` — delta-concatenating consumers (documented; `eval/run.sh`, `internal/controlplane`) read it as the answer.
+- **Why**: the self-heal (c_jdel6u) books the marker as assistant content (history must stay legal; it must stream as a `text_delta`); the JSON contract had no other trace: `finish_reason=stop`, like a real answer.
 - **Fix**: `TurnEnd.Finish` + `jsonLine.finish_reason` (additive, `omitempty`) report `agent.FinishEmptyResponse` (`"empty_response"`) on placeholder turns; `AgentEnd.Finish` keeps the upstream vocabulary (ACP stopReason, hooks `PostTurn` unchanged); documented in `docs/guide-commands.md` § "`--json` event-stream contract".
 - **Lesson**: a self-heal that turns "nothing" into bytes owes the structured channel a typed field — else every consumer re-implements a Chinese string prefix.
-- **Refs**: `pkg/agent/events.go` (`FinishEmptyResponse`), `pkg/agent/agent.go` (`placeholderTurn` → `TurnEnd.Finish`), `cmd/seek/main.go` (`jsonLine.FinishReason`), `cmd/seek/json_empty_test.go`, cards c_jdel6u, c_jxwsfz
+- **Refs**: `pkg/agent/events.go` (`FinishEmptyResponse`), `pkg/agent/agent.go` (`placeholderTurn`), `cmd/seek/main.go` (`jsonLine.FinishReason`), `cmd/seek/json_empty_test.go`, cards c_jdel6u, c_jxwsfz

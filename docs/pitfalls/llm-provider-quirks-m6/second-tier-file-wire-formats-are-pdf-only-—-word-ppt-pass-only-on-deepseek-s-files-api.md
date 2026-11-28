@@ -1,6 +1,6 @@
 ### Second-tier file wire formats are PDF-only — Word/PPT pass ONLY on DeepSeek's Files API
-- **Saw**: the file sibling of the vision passthrough looked like "PDF/Word/PPT" everywhere (DeepSeek's Files API parses them), but the three second-tier lanes' docs accept no Office format natively.
-- **Why**: each lane's document wire has a narrow media set of its own — OpenAI `file` content part (`file_data`): PDF only; Anthropic `document` base64 block: `media_type: application/pdf` only (else 400); Gemini: inline `application/pdf`.
+- **Saw**: the file sibling of the vision passthrough looked like "PDF/Word/PPT" everywhere (DeepSeek's Files API parses them), but no second-tier lane accepts an Office format natively.
+- **Why**: each lane's document wire has its own narrow media set — OpenAI `file` content part (`file_data`): PDF only; Anthropic `document` base64 block: `media_type: application/pdf` only (else 400); Gemini: inline `application/pdf`.
 - **Fix**: `pkg/llm` carries the transport truth — `fileMediaTypes` = {application/pdf} + `File.Sendable()`; `internal/fileroute` gates on it at submit (no "attached" marker a later send walks back); `pkg/agent/translate.go` degrades unsendable formats in-band. `modelcap.Files` answers the per-MODEL question, deliberately not the per-FORMAT one.
-- **Lesson**: capability has two axes — "does this model take documents" (modelcap) vs "does this lane's wire take THIS format" (transport); adding `application/msword` later means re-checking each provider's docs per lane, not flipping one shared constant.
-- **Refs**: `pkg/llm/llm.go:fileMediaTypes` (doc URLs in comment), `pkg/llm/provider/{openai,anthropic,gemini}/client.go`, `internal/fileroute/fileroute.go:formatNote`
+- **Lesson**: capability has two axes — "does this model take documents" (modelcap) vs "does this lane's wire take THIS format" (transport); adding `application/msword` means re-checking each provider's docs per lane, not flipping one shared constant.
+- **Refs**: `pkg/llm/llm.go:fileMediaTypes`, `pkg/llm/provider/{openai,anthropic,gemini}/client.go`, `internal/fileroute/fileroute.go:formatNote`

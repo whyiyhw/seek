@@ -1,6 +1,6 @@
 ### macOS bash 3.2: fullwidth punctuation after `$var` joins the variable NAME, and a successful EXIT-trap command masks the real exit code
 - **Saw**: `install-serve.sh --dry-run` printed `rendered\ufffd: unbound variable` at `echo "…（$rendered）…"` yet exited 0 despite `set -euo pipefail`: (1) the fullwidth `）` after `$rendered` joined the variable NAME (bash 3.2 treats high bytes as name characters outside POSIX mode); (2) the EXIT trap's successful `rm` overwrote the expansion-error exit code; (3) the trap then died on `"$rendered"` — `local` vars are gone at top level.
-- **Why**: bash ≤3.2 (macOS `/bin/bash`) predates the modern variable-name and trap-exit-code rules; `bash -n` catches none of this; the text runs clean on bash 5.
+- **Why**: bash ≤3.2 (macOS `/bin/bash`) predates the modern variable-name and trap-exit-code rules; `bash -n` catches none of this; runs clean on bash 5.
 - **Fix**: brace `${var}` whenever non-ASCII can follow it; make EXIT traps exit-code-honest (`trap 'rc=$?; rm -f "${rendered:-}"; exit $rc' EXIT`, `:-` covers the local-out-of-scope case); verified with dry-run + `shellcheck`.
 - **Lesson**: repo shell scripts run under macOS system bash 3.2 — write for 3.2, not the brew bash you test with; a cannot-fail trap must not set the exit status.
 - **Refs**: `scripts/install-serve.sh` (uncommitted at time of writing), `bash -c 'set -eu; echo "（$rendered）"'` → exit 1, with trap → exit 0

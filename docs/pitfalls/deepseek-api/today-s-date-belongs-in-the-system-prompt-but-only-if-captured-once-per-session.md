@@ -1,6 +1,6 @@
 ### Today's date belongs in the system prompt, but only if captured ONCE per session
-- **Saw**: the LLM guessed wrong dates (none in the prompt); the obvious fix, `time.Now()` in the system prompt, mutates the prefix per request (or at midnight), dropping the prefix-cache hit ratio from ~96% to near zero.
-- **Why**: `sysprompt.Compose` is a pure function of its `Header` (package doc + `TestCompose_IsDeterministic` guard); the date must be present for correctness but byte-stable for cache.
+- **Saw**: the LLM guessed wrong dates (none in the prompt); `time.Now()` in the system prompt — the obvious fix — mutates the prefix per request (or at midnight), dropping the prefix-cache hit ratio from ~96% to near zero.
+- **Why**: `sysprompt.Compose` is pure in its `Header` (package doc + `TestCompose_IsDeterministic` guard); the date must be correct yet byte-stable for cache.
 - **Fix**: `Header.Date string`; `cmd/seek/main.go` computes `sessionDate := time.Now().Format("Monday, 2006-01-02")` once at startup, threaded through every Compose (root prompt, `/new` closure, subagent Manager via static `ManagerOpts.SessionDate`). `-resume` is a new process → new date → one accepted prefix bust.
-- **Lesson**: anything that must be in the prompt for correctness but varies is a field captured once, never computed inside the assembler — per-turn freshness and prefix cache are mutually exclusive; refresh only at session boundaries.
+- **Lesson**: anything that must be in the prompt for correctness but varies is a field captured once, never computed in the assembler — per-turn freshness and prefix cache are mutually exclusive; refresh only at session boundaries.
 - **Refs**: `internal/sysprompt/sysprompt.go` (`Header.Date`, `rootTpl`), `cmd/seek/main.go` (`sessionDate`), `internal/subagent/manager.go` (`ManagerOpts.SessionDate`), `internal/sysprompt/sysprompt_test.go:TestCompose_RendersDate`

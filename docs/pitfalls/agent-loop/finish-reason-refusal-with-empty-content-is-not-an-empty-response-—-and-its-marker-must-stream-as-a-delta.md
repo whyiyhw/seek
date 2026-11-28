@@ -1,5 +1,5 @@
 ### `finish_reason:"refusal"` with empty content is not an "empty response" — and its marker must stream as a delta
-- **Saw**: a refusal response (HTTP 200, zero deltas, `finish_reason:"refusal"`) in the `safety_check` opt-in (SC1) hit the empty-response guard as `agent: model returned an empty response`; the marker fix then showed a blank block.
+- **Saw**: a refusal response (HTTP 200, zero deltas, `finish_reason:"refusal"`) in the `safety_check` opt-in (SC1) hit the empty guard as `agent: model returned an empty response`; the marker fix then showed a blank block.
 - **Why**: the empty guard classifies by content shape, not finish_reason — a refusal is the one empty that IS the final answer; the TUI commits accumulated deltas (`m.curContent`), not `MessageEnd`'s `Message`, so end-of-turn-only content never shows.
 - **Fix**: `isSafetyRefusal(finish)` (`refusal` | `content_filter`) runs BEFORE the empty guard → `safetyRefusalMarker` becomes the assistant content with explicit MessageStart/MessageDelta; no ErrorEvent/retry/AutoContinue. Tests: one request; marker in history + delta stream (`pkg/agent/agent_test.go:TestAgent_SafetyRefusal_*`).
 - **Lesson**: classify terminal outcomes by finish_reason before shape-based guards, and route synthetic assistant content through the delta path — MessageEnd alone is invisible to the UI.

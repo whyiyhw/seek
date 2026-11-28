@@ -3,4 +3,4 @@
 - **Why**: `as $var` extends its scope over the following pipeline, and that whole construct binds as the RIGHT OPERAND of `//`: `a // b as $x | c` parses as `a // (b as $x | c)`, not `(a // b) as $x | c`. The alternative evaluates truthy, so `a // <truthy>` short-circuits to `a`.
 - **Fix**: parenthesise the alternative before `as`: `(.final_text // "") as $txt | (...)`. Grep the repo for `// .* as \$` to audit other occurrences.
 - **Lesson**: when binding `as` after an expression containing `//` (or any operator looser than `|`), the parens are load-bearing — test the exact expression on the deployment's jq version, not a mental model of precedence.
-- **Refs**: `eval/tools/compare-read-ab.sh:func_count`, `eval/run.sh` (safe shapes), jq manual "Alternative operator" + "as"
+- **Refs**: `eval/tools/compare-read-ab.sh:func_count`, `eval/run.sh`, jq manual "Alternative operator" + "as"

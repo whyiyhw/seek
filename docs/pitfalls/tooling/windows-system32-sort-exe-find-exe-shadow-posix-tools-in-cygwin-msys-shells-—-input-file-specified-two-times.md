@@ -1,6 +1,6 @@
 ### Windows System32 `sort.exe`/`find.exe` shadow POSIX tools in cygwin/msys shells — "Input file specified two times."
-- **Saw**: `scripts/pkg-inventory.sh` (new) exited 1 with `Input file specified two times.` and no table output after a full 2m44s run; minimal repro `sort -t'|' -k1,1n file` failed identically, and `sort --version` printed `--versionThe system cannot find the file specified.`
+- **Saw**: `scripts/pkg-inventory.sh` (new) exited 1 with `Input file specified two times.` and no table after 2m44s; minimal repro `sort -t'|' -k1,1n file` failed identically, and `sort --version` printed `--versionThe system cannot find the file specified.`
 - **Why**: non-login cygwin/msys shells spawned from cmd inherit Windows PATH verbatim, where `C:\Windows\System32` precedes the POSIX bin dir: System32 `sort.exe` has no `-t`/`-k` flags, treating them as input files; System32 `find.exe` is a text filter, not a file lister. (WSL bash with interop disabled can't execute `.exe` — "Exec format error".)
 - **Fix**: `scripts/pkg-inventory.sh` resolves `SORT` to `/usr/bin/sort` (fallback `/bin/sort`, then bare `sort`) and replaced `find … | wc -l` with a bash `nullglob` glob (`set -- "$rel"/*_test.go; tests=$#`) — both PATH-order-immune.
 - **Lesson**: in scripts that may run under a cmd-spawned cygwin/msys shell, never call `sort`/`find`/`ls`/`rm` by bare name — use the absolute coreutils path or bash globs; bare `grep`/`sed`/`awk`/`wc`/`tr` are safe (Windows ships no such binaries).
-- **Refs**: `scripts/pkg-inventory.sh` (uncommitted at time of writing)
+- **Refs**: `scripts/pkg-inventory.sh`

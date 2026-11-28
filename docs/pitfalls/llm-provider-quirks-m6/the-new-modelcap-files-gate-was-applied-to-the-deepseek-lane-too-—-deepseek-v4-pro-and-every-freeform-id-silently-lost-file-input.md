@@ -1,6 +1,6 @@
 ### The new `modelcap.Files` gate was applied to the DeepSeek lane too — `deepseek-v4-pro` (and every freeform id) silently lost file input
-- **Saw**: `@report.pdf` on the DeepSeek lane with an off-table id produced `[file: report.pdf — 当前模型不支持文件输入，用 /model 选一个支持文件的模型]`; base commit uploaded fine (old gate: Files-API client, not model).
+- **Saw**: `@report.pdf` on the DeepSeek lane with an off-table id produced `[file: report.pdf — 当前模型不支持文件输入，用 /model 选一个支持文件的模型]`; the base commit uploaded fine (old gate: Files-API client, not model).
 - **Why**: the passthrough change replaced the lane gate with `modelcap.Files(model)` unconditionally: modelcap answers "does this MODEL's wire carry a document part" (second-tier ids only); the DeepSeek-lane question is account-level — the Files API parses server-side, chat part is a `file_id`.
 - **Fix**: `Router.routeOne` gates only if `r.client == nil`; `TestRoute_DeepSeekLaneIgnoresModelTable` pins `deepseek-v4-pro`, a freeform id, `""`.
-- **Lesson**: when a capability table becomes the authority, audit every call site replaced — each may answer a different question ("which lane?" vs "which model?"); a gate right for one lane can silently regress another (prior entry).
+- **Lesson**: when a capability table becomes the authority, audit every replaced call site — each answers a different question ("which lane?" vs "which model?"); a gate right for one lane can regress another (prior entry).
 - **Refs**: `internal/fileroute/fileroute.go:routeOne`, `internal/fileroute/fileroute_test.go:TestRoute_DeepSeekLaneIgnoresModelTable`, `internal/modelcap/modelcap.go`, prior entry "Vision capability was a one-id allow-list inside pkg/deepseek"

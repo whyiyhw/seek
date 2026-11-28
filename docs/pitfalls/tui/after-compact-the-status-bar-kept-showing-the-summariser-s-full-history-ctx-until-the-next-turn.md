@@ -1,6 +1,6 @@
 ### After /compact the status bar kept showing the summariser's full-history ctx% until the next turn
 - **Saw**: after compacting a ~510K-token session (1M window), the status bar still read `ctx 51%` — the summariser re-read the entire old history, sticking as "the most recent turn" until the next turn.
-- **Why**: `handleCompactDone` records the summariser's usage via `Tracker.Record` (a real billed request) and the bar's ctx% reads `Last()`, so the pre-compact context stayed pinned though the history was already the summary pair.
+- **Why**: `handleCompactDone` records the summariser's usage via `Tracker.Record` (a real billed request); the bar's ctx% reads `Last()`, so pre-compact context stayed pinned though history was already the summary pair.
 - **Fix**: new `Tracker.Seal()` folds recorded turns into the cumulative base while `Last()`/`LastCost()` go empty; `handleCompactDone` calls it after Record, so ctx% shows 0% until the first post-compact turn; `hasBase` stays unset (the AdoptChild guard is resume-time only). Tests: `TestTracker_Seal_FoldsTurnsIntoBase`, `TestTracker_Seal_IsIdempotentAndEmptySafe`, `TestTracker_Seal_DoesNotArmDoubleCountGuard`.
 - **Lesson**: "most recent turn" is the wrong baseline when the window itself was replaced — any operation rebasing the live context needs a "start a new window" primitive, else every `Last()` consumer reads the old world.
 - **Refs**: `internal/cache/cache.go:Seal`, `internal/tui/update_agent.go:handleCompactDone`, `internal/cache/cache_test.go`
